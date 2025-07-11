@@ -29,7 +29,7 @@ The project is currently at TRL 0. The consensus mechanism is in the early phase
 │   └── references.ipynb              # List of project references
 │
 ├── .gitignore               # Files/folders to ignore in Git
-├── LICENSE                  # License file
+├── LICENSE.MD               # License file
 ├── README.md                # Project overview
 ├── od_data.json            # Example orbit determination data for use in consensus
 ├── requirements.txt        # List of python package dependencies
