@@ -31,10 +31,11 @@ The project is currently at TRL 0. The consensus mechanism is in the early phase
 ├── .gitignore               # Files/folders to ignore in Git
 ├── LICENSE                  # License file
 ├── README.md                # Project overview
-├── od_data.json         # Example orbit determination data for use in consensus
+├── od_data.json            # Example orbit determination data for use in consensus
+├── requirements.txt        # List of python package dependencies
 └── accord.ipynb         # Main source code
 </pre>
 
  TODO
- Make requirements.txt and installation steps with a venv
+ Make installation steps with a venv - python 3.13 required
 
