@@ -36,6 +36,34 @@ The project is currently at TRL 0. The consensus mechanism is in the early phase
 └── accord.ipynb         # Main source code
 </pre>
 
- TODO
- Make installation steps with a venv - python 3.13 required
+# Installation
 
+Make sure Python 3.13 is installed on your system before proceeding with the installation.
+Follow these steps to set up the project in a Python virtual environment:
+
+1. **Clone the repository**  
+   ```bash
+   git clone https://github.com/bprobert97/accord.git
+   ```
+
+2. **Create a virtual environment**
+   ```bash
+   python -m venv venv
+   ```
+
+3. **Activate the virtual environment**
+
+   On Windows:
+
+   ```bash
+   venv\Scripts\activate
+   ```
+   On macOS/Linux:
+
+   ```bash
+   source venv/bin/activate
+   ```
+4. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
