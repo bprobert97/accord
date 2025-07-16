@@ -1,42 +1,19 @@
-{
-  "tle_data": [
-    {
-      "satellite_name": "CENTAURI-1",
-      "satellite_number": "43809",
-      "classification": "U",
-      "international_designator": "18099BD",
-      "epoch": 25174.57173816,
-      "first_derivative_mean_motion": 0.00004030,
-      "second_derivative_mean_motion": 0.0,
-      "bstar_drag_term": 0.0024151,
-      "ephemeris_type": 0,
-      "element_set_number": 999,
-      "inclination_degrees": 97.4750,
-      "right_ascension_raan_degrees": 229.0808,
-      "eccentricity": 0.0017168,
-      "argument_of_perigee_degrees": 126.4504,
-      "mean_anomaly_degrees": 233.8311,
-      "mean_motion_revs_per_day": 15.11421153,
-      "revolution_number_at_epoch": 35824
-    },
-    {
-      "satellite_name": "LANDSAT 9",
-      "satellite_number": "49260",
-      "classification": "U",
-      "international_designator": "21088A",
-      "epoch": 25175.15382019,
-      "first_derivative_mean_motion": 0.00000259,
-      "second_derivative_mean_motion": 0.0,
-      "bstar_drag_term": 0.000067617,
-      "ephemeris_type": 0,
-      "element_set_number": 999,
-      "inclination_degrees": 98.2273,
-      "right_ascension_raan_degrees": 245.5428,
-      "eccentricity": 0.0001497,
-      "argument_of_perigee_degrees": 96.6792,
-      "mean_anomaly_degrees": 263.4577,
-      "mean_motion_revs_per_day": 14.57103276,
-      "revolution_number_at_epoch": 19885
-    }
-  ]
-}
+[{
+    "OBJECT_NAME": "ISS (ZARYA)",
+    "OBJECT_ID": "1998-067A",
+    "EPOCH": "2024-05-06T19:53:04.999776",
+    "MEAN_MOTION": 15.50957674,
+    "ECCENTRICITY": 0.000358,
+    "INCLINATION": 51.6393,
+    "RA_OF_ASC_NODE": 160.4574,
+    "ARG_OF_PERICENTER": 140.6673,
+    "MEAN_ANOMALY": 205.725,
+    "EPHEMERIS_TYPE": 0,
+    "CLASSIFICATION_TYPE": "U",
+    "NORAD_CAT_ID": 25544,
+    "ELEMENT_SET_NO": 999,
+    "REV_AT_EPOCH": 45212,
+    "BSTAR": 0.0002731,
+    "MEAN_MOTION_DOT": 0.00015698,
+    "MEAN_MOTION_DDOT": 0
+}]
