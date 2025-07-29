@@ -46,8 +46,7 @@ class DAG():
         Have to set consensus_reached and is_confirmed = True here otherwise strong
         parents become impossible.
         """
-        genesis_metadata = TransactionMetadata(timestamp=datetime.now(),
-                                               consensus_reached=True,
+        genesis_metadata = TransactionMetadata(consensus_reached=True,
                                                is_confirmed=True)
 
         return {"Genesis Transaction 1": [Transaction(0, 0, "1234",
@@ -76,6 +75,8 @@ class DAG():
         """
         Randomly select 2 parents for the transaction
         # THRESHOLDS affect tip selection for parents - TODO
+         TODO - need to make sure we have an ordered dict of transactions and that we pick from latest layer..(line 98
+         order by timestamp)
         """
         return tuple(random.sample(list(self.ledger.keys()), 2))
 
@@ -83,9 +84,6 @@ class DAG():
         """
         Add a transaction to the DAG
         """
-        # TODO - either this or the epoch of the TLE
-        transaction.metadata.timestamp = datetime.now()
-
         # TODO - tx or blocks?? start with tx for now
         # TODO - fixed number of parents: 2
         parent1, parent2 = self.get_parents()
@@ -94,7 +92,8 @@ class DAG():
         transaction.metadata.parent_hashes.extend([parent1, parent2])
 
         # Add transaction to ledger
-        self.ledger[transaction.calculate_hash()] = [transaction]
+        # TODO - something about these isnt working
+        self.ledger[transaction.hash] = [transaction]
         # TODO - need to add consensus mechanism in here, may need to be a function within
         # this class rather than a separate class to avoid circles
         self.check_thresholds(transaction)
