@@ -17,6 +17,9 @@ The project is currently at TRL 0. The consensus mechanism is in the early phase
 <pre>
 📁 accord/
 │
+├── 📁 .github/workflows/              # GitHub Workflow files
+│   └── main.yml                       # CI configuration for github: Pylint and demo notebook execution
+│
 ├── 📁 design/                      # Design documents
 │   └── consensus_design.ipynb     # Initial consensys mechanism design
 │   └── dlt_design_mpl.ipynb       # Initial DAG design using matplotlib
