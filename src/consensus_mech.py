@@ -40,7 +40,7 @@ class ConsensusMechanism():
     # TODO TODAY - SLAM DRONE PAPER, and consensus on position, doppler shift?? what data so I
     # have to choose from?
     # DAGmap - map consensus could be something to build upon? does it have a ground truth?
-    # PowerGraph - consensus for trust level, calculates validity of transacion from probability
+    # PowerGraph - consensus for trust level, calculates validity of transaction from probability
     # level. I guess I need to calculate validity from some maths? possible - if yes, then how
     # accurate/likely probability distruibution for observations? Algorithm one in PowerGraph paper
 
@@ -60,7 +60,7 @@ class ConsensusMechanism():
         TODO - Josh idea, think about seeding the initial conditions with ground station data until
         I have built up enough of a map. Could also be GNSS/GPS data if that works. Dont really mind
         """
-        # Use sgp4 propogation to get altitude and velocity
+        # Use sgp4 propagation to get altitude and velocity
         # More suitable than keplerian motion
         # The Two-Body-Keplerian orbit propagator is the less precise because
         # it simplifies the gravitational field of the Earth as spherical and
