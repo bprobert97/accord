@@ -6,3 +6,4 @@
 /share
 pyvenv.cfg
 /.vscode
+/src/__pycache__
