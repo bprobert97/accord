@@ -78,6 +78,15 @@ Follow these steps to set up the project in a Python virtual environment:
    source venv/bin/activate
    ```
 4. **Install dependencies**
+
+   On Windows:
+
    ```bash
    pip install -r requirements.txt
+   ```
+
+   On macOS/Linux:
+
+   ```bash
+   pip install -r requirements_linux.txt
    ```
