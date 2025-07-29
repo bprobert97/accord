@@ -91,7 +91,7 @@ class DAG():
         transaction.metadata.parent_hashes.extend([parent1, parent2])
 
         # Add transaction to ledger
-        # TODO - something about these isnt working
+        # TODO - something about these isn't working
         self.ledger[transaction.hash] = [transaction]
         # TODO - need to add consensus mechanism in here, may need to be a function within
         # this class rather than a separate class to avoid circles
