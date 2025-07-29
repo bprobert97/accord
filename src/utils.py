@@ -29,7 +29,7 @@ CONFIRMATION_THRESHOLD = 1
 REJECTION_THRESHOLD = -1
 CONFIRMATION_STEP = 0.1
 
-def load_json_data(file_name: str) -> list:
+def load_json_data(file_name: str) -> list[EarthSatellite]:
     """
     Turns json data in a file into a Python dict.
     JSON data must be in the Celestrak format
