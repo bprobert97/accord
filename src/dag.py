@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import random
+from collections import OrderedDict
 from .transaction import Transaction, TransactionMetadata
 from .utils import REJECTION_THRESHOLD, CONFIRMATION_STEP, CONFIRMATION_THRESHOLD
 
@@ -75,7 +76,7 @@ class DAG():
         Randomly select 2 parents for the transaction
         # THRESHOLDS affect tip selection for parents - TODO
         TODO - need to make sure we have an ordered dict of transactions and
-        that we pick from latest layer..(line 98 order by timestamp)
+        that we pick from latest layer..(line 94 order by timestamp)
         """
         return tuple(random.sample(list(self.ledger.keys()), 2))
 
@@ -90,9 +91,11 @@ class DAG():
         # There is guaranteed to be two parent - the genesis transactions in the DAG.
         transaction.metadata.parent_hashes.extend([parent1, parent2])
 
-        # Add transaction to ledger
-        # TODO - something about these isn't working
+        # Add transaction to ledger in timestamp order
         self.ledger[transaction.hash] = [transaction]
+        self.ledger = OrderedDict(
+        sorted(self.ledger.items(), key=lambda item: item[1][0].metadata.timestamp))
+
         # TODO - need to add consensus mechanism in here, may need to be a function within
         # this class rather than a separate class to avoid circles
         self.check_thresholds(transaction)
