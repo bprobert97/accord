@@ -73,12 +73,34 @@ class DAG():
 
     def get_parents(self) -> tuple[str, str]:
         """
-        Randomly select 2 parents for the transaction
+        Randomly select 2 parents for the transaction.
+        Weighted towards choosing newer parents in the DAG
+        for now, not accounting for node reputation.
         # THRESHOLDS affect tip selection for parents - TODO
-        TODO - need to make sure we have an ordered dict of transactions and
-        that we pick from latest layer..(line 94 order by timestamp)
         """
-        return tuple(random.sample(list(self.ledger.keys()), 2))
+        keys = list(self.ledger.keys())
+
+        # This error should not happen because of genesis transactions,
+        # but just in case
+        if len(keys) < 2:
+            raise ValueError("Not enough transactions to select parents.")
+
+        # Linear bias in weights, favouring newer transactions
+        # which will be later on (higher index) in the DAG as they
+        # are ordered by timestamp
+        # TODO - check how I want this to be weighted
+        # Could be exponential:
+        # weights = [math.exp(i) for i in range(len(keys))].
+        weights = [i + 1 for i in range(len(keys))]
+
+        # Select 2 parents at random, with weighting
+        selected_parents = random.choices(keys, weights=weights, k=2)
+
+        # Ensure uniqueness, as choices does not ensure this
+        while selected_parents[0] == selected_parents[1]:
+            selected_parents[1] = random.choices(keys, weights=weights, k=1)[0]
+
+        return tuple(selected_parents)
 
     def add_tx(self, transaction: Transaction) -> None:
         """
@@ -88,7 +110,7 @@ class DAG():
         # TODO - fixed number of parents: 2
         parent1, parent2 = self.get_parents()
 
-        # There is guaranteed to be two parent - the genesis transactions in the DAG.
+        # There is guaranteed to be two parents - the genesis transactions in the DAG.
         transaction.metadata.parent_hashes.extend([parent1, parent2])
 
         # Add transaction to ledger in timestamp order
