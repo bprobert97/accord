@@ -33,7 +33,7 @@ class TransactionMetadata:
     Transaction metadata information to be submitted in the Distributed Ledger.
     """
     # TODO - either this or the epoch of the TLE
-    timestamp: datetime = datetime.now()
+    timestamp: datetime = field(default_factory=datetime.now)
     consensus_reached: bool = False
     is_confirmed: bool = False
     parent_hashes: list[str] = field(default_factory=list)
