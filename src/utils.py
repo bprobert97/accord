@@ -22,18 +22,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 from skyfield.api import EarthSatellite, load
-import astropy.constants as ac
 
 # Global Variables for consensus
 # TODO - May tune these to optimise performance
 CONFIRMATION_THRESHOLD = 1
 REJECTION_THRESHOLD = -1
 CONFIRMATION_STEP = 0.1
-
-# Global astrophysical values
-G = ac.G # Gravitational Constant in m3 / (kg s2)
-M = ac.M_earth # Mass of the Earth in kg
-R = float(ac.R_earth.to("km").value) # Radius of the Earth in km
 
 def load_json_data(file_name: str) -> list:
     """
