@@ -25,7 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # Start small ffs dont get overwhelmed by the whole ledger
 import hashlib
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class TransactionMetadata:
@@ -35,7 +35,7 @@ class TransactionMetadata:
     timestamp: datetime
     consensus_reached: bool = False
     is_confirmed: bool = False
-    parent_hashes: list[str] = None
+    parent_hashes: list[str] = field(default_factory=list)
     confirmation_score: float = 0.0
     is_rejected: bool = False
 

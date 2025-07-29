@@ -113,7 +113,7 @@ class ConsensusMechanism():
                 try:
                     past_data = json.loads(tx.tx_data)
                     if isinstance(past_data, dict) and \
-                        past_data.get("OBJECT_ID") == sat.model.satnumid:
+                        past_data.get("OBJECT_ID") == sat.model.satnum:
                         matches.append(past_data)
                 except (json.JSONDecodeError, TypeError):
                     continue
@@ -177,7 +177,7 @@ class ConsensusMechanism():
             sat_node.reputation -= self.reputation_step
             return False
 
-        sat = od_data[0]
+        sat: EarthSatellite = od_data[0]
 
         if not self.data_is_valid(sat):
             # Reduce node reputation for providing invalid data
@@ -211,7 +211,7 @@ class ConsensusMechanism():
         # Assign correctness score -> affects transaction
         #  This is going to be very tricky. How do I get this data?? Where do I
         # store it? Do I want this to tie in to how parents are selected?
-        correctness_score = self.get_correctness_score(tx_data_dict, dag)
+        correctness_score = self.get_correctness_score(sat, dag)
 
         # 5) TODO is sensor data accurate (done regardless of previous witnessing).
         # Assign accuracy score -> affects transaction and node reputation
