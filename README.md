@@ -1,16 +1,19 @@
 # Introduction to ACCORD
+Autonomous Cooperative Consensus Orbit Determination (ACCORD) is a decentralised framework for satellite operations in Low Earth Orbit (LEO). It addresses the limitations of centralised coordination, such as single points of failure and trust bottlenecks, by leveraging a Directed Acyclic Graph (DAG)-based Distributed Ledger Technology (DLT).
 
-This research introduces the Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework, a decentralised approach to satellite operations in Low Earth Orbit (LEO). To overcome the limitations of centralised coordination, including vulnerability to single points of failure and trust barriers, ACCORD employs a Directed Acyclic Graph (DAG)-based Distributed Ledger Technology (DLT). Satellites collaboratively determine each other’s orbits through mutual observation using on-board sensors, and submit this data to the ledger. 
+In ACCORD, satellites use on-board sensors to observe one another and collaboratively determine their orbital positions. These observations are submitted to the distributed ledger, where consensus is achieved through Proof of Inter-Satellite Evaluation (PoISE) - a novel, reputation-based, Byzantine Fault Tolerant (BFT) consensus mechanism. Unlike traditional blockchain systems, PoISE does not rely on financial incentives or intermediaries. Instead, it validates orbit data by evaluating mutual observations and assessing the trustworthiness of both the data and the observing satellites.
 
-Proof of Inter Satellite Evaluation (PoISE) is a reputation-based, Byzantine Fault Tolerant consensus mechanism, that validates these observations without relying on financial incentives or intermediaries. It assesses witnessed orbit determination data submitted by satellites in a network, adding valid data to the DAG and reaching consensus on which satellites and which observations can be trusted.
-
-By incorporating Smart Contracts, the system enables autonomous decision-making, allowing satellites to self-govern, coordinate tasks, and reroute services in real time. This decentralised model not only enhances data integrity and trust but also improves scalability and performance as more satellites join the network. ACCORD thus fosters multi-system collaboration and resilience across heterogeneous constellations, making secure, autonomous satellite operations practical in zero-trust environments.
+This decentralised approach enhances data integrity, trust, and resilience across heterogeneous constellations. As more satellites join the network, ACCORD scales naturally, enabling secure and autonomous satellite operations—even in zero-trust environmen
 
 This code is licensed under a GNU General Public License v3.0.
 
 # Current Status
 
-The project is currently at TRL 0. The consensus mechanism is in the early phases of development by Beth Probert, a PhD student at the University of Strathclyde's Applied Space Technology Laboratory.
+The project is currently at TRL 0. The PoISE consensus mechanism is in the early phases of development by [Beth Probert](https://pureportal.strath.ac.uk/en/persons/beth-probert), a PhD student at the University of Strathclyde's Applied Space Technology Laboratory. Once development of PoISE is completed, the rest of the ACCORD framework shall be developed around this consensus mechanism. By incorporating smart contracts in future development, the system will enable autonomous decision-making, allowing satellites to self-govern, coordinate tasks, and reroute services in real time.
+
+## Related Publications
+
+* [B. Probert, R. A. Clark, E. Blasch, and M. Macdonald, “A Review of Distributed Ledger Technologies for Satellite Operations,” IEEE Access, vol. 13, pp. 123230–123258, 2025, doi: 10.1109/ACCESS.2025.3588688](https://ieeexplore.ieee.org/document/11079570)
 
 # Repository Layout
 
