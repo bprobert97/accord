@@ -1,5 +1,5 @@
 # pylint: disable=too-many-arguments, too-many-positional-arguments
-# TODO - think abou metadata, what should go in there?
+# TODO - think about metadata, what should go in there?
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -32,7 +32,8 @@ class TransactionMetadata:
     """
     Transaction metadata information to be submitted in the Distributed Ledger.
     """
-    timestamp: datetime
+    # TODO - either this or the epoch of the TLE
+    timestamp: datetime = datetime.now()
     consensus_reached: bool = False
     is_confirmed: bool = False
     parent_hashes: list[str] = field(default_factory=list)
@@ -57,7 +58,6 @@ class Transaction:
         # and trajectory info for a witnessed satellite as well.
         self.tx_data = tx_data
         self.metadata = metadata
-        self.hash = self.calculate_hash()
 
     def __repr__(self) -> str:
         return (f"Transaction(\n"
@@ -71,6 +71,13 @@ class Transaction:
                 f"  confirmation_score={self.metadata.confirmation_score},\n"
                 f"  parent_hashes={self.metadata.parent_hashes},\n"
                 f"  hash={self.hash[:10]}...)\n")
+
+    @property
+    def hash(self):
+        """
+        Define hash as a computed property, so it's always based on the current state.
+        """
+        return self.calculate_hash()
 
     def calculate_hash(self) -> str:
         """

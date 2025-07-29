@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 import numpy as np
+from datetime import datetime
 from skyfield.api import EarthSatellite, wgs84
 from .dag import DAG
 from .satellite_node import SatelliteNode
