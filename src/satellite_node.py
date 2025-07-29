@@ -1,3 +1,4 @@
+# pylint: disable=too-few-public-methods
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -25,7 +26,10 @@ class SatelliteNode():
     A class representing a node in the network, in this case a LEO satellite. 
     This does NOT represent a node in the ledger - these are transactions
     """
-    def __init__(self, id: str) -> None:
-        self.id: str = id
+    def __init__(self, node_id: str) -> None:
+        self.id: str = node_id
         # Reputation starts at 0, affected by validity and accuracy
-        self.reputation: float = 0 #TODO - need to consider how this affects consensus. If reputation low, does it get allowed? or does it affect consensus score?
+        # TODO - need to consider how this affects consensus.
+        # If reputation low, does it get allowed? or does it affect
+        # consensus score?
+        self.reputation: float = 0
