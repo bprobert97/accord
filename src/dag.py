@@ -21,7 +21,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import random
-from datetime import datetime
 from .transaction import Transaction, TransactionMetadata
 from .utils import REJECTION_THRESHOLD, CONFIRMATION_STEP, CONFIRMATION_THRESHOLD
 
@@ -75,8 +74,8 @@ class DAG():
         """
         Randomly select 2 parents for the transaction
         # THRESHOLDS affect tip selection for parents - TODO
-         TODO - need to make sure we have an ordered dict of transactions and that we pick from latest layer..(line 98
-         order by timestamp)
+        TODO - need to make sure we have an ordered dict of transactions and
+        that we pick from latest layer..(line 98 order by timestamp)
         """
         return tuple(random.sample(list(self.ledger.keys()), 2))
 
