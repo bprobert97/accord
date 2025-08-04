@@ -1,4 +1,3 @@
-# pylint: disable=too-few-public-methods
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -33,3 +32,17 @@ class SatelliteNode():
         # If reputation low, does it get allowed? or does it affect
         # consensus score?
         self.reputation: float = 0
+
+    def submit_transaction(self) -> None:
+        """
+        TODO
+        """
+
+    def synchronise(self) -> None:
+        """
+        TODO
+        """
+
+# TODO - need to allow node to submit a transaction to the ledger.
+# eventually will simulate this properly
+# Would likely need something to listen for the signal from the node??
