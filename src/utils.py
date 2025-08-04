@@ -92,7 +92,7 @@ def build_tx_data_str(satellite_data: EarthSatellite) -> str:
 
 def build_earth_satellite_list_from_str(ts: Timescale, data: str) -> list[Optional[EarthSatellite]]:
     """
-    Construct an EarthSatellite object from a string of daa to be
+    Construct an EarthSatellite object from a string of data to be
     used for data validation.
 
     Arguments:
