@@ -22,11 +22,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 import numpy as np
-from skyfield.api import EarthSatellite, wgs84
+from skyfield.api import EarthSatellite, wgs84, load
 from .dag import DAG
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
-from .utils import load_json_data
+from .utils import build_earth_satellite_list_from_str
 
 class ConsensusMechanism():
     """
@@ -166,37 +166,24 @@ class ConsensusMechanism():
         Returns a bool of it consensus has been reached  
         NOTE: Assume one witnessed satellite per transaction   
         """
-        # 1)  Get the data
-        od_data = load_json_data("od_data.json")
+        # 1)  Turn transaction data into an EarthSatellite object
+        # for validation using wsg4 and skyfield
+        sat = build_earth_satellite_list_from_str(load.timescale(), transaction.tx_data)[0]
 
         # 2) TODO Check if data is valid, if not - ignore.
-        # Consensus cannot be reached on invalid data. If yes, add to DAG
         # If the list is empty, there is no data that can be valid
-        if len(od_data) == 0:
+        if not transaction.tx_data:
             # Reduce node reputation for providing no data that can be checked
             sat_node.reputation -= self.reputation_step
             return False
 
-        sat: EarthSatellite = od_data[0]
-
+        # Consensus cannot be reached on invalid data. If yes, add to DAG
         if not self.data_is_valid(sat):
             # Reduce node reputation for providing invalid data
             sat_node.reputation -= self.reputation_step
             return False
 
         # 3a) If we have enough, valid data, submit a transaction with the string of data
-        # TODO - might be able to optimise this to reduce string length
-        # Serialize data for transaction
-        tx_data_dict = {
-        "OBJECT_NAME": sat.name,
-        "OBJECT_ID": sat.model.satnum,
-        "EPOCH": str(sat.epoch.utc_iso()),
-        "MEAN_MOTION": (sat.model.no_kozai / (2 * np.pi)) * 1440, # Convert rads/min into revs/day
-        "ECCENTRICITY": sat.model.ecco,
-        "INCLINATION": sat.model.inclo * 180 / np.pi
-        }
-
-        transaction.tx_data = json.dumps(tx_data_dict)
         dag.add_tx(transaction)
 
         # 3) TODO Check we have enough data to be bft (3f + 1)
