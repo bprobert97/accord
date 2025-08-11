@@ -190,7 +190,7 @@ class ConsensusMechanism():
         # if not, consensus cannot be reached.
         # Length of DAG is 2 by default with genesis transactions. These are dummy data,
         # so we must have at least 4 real transactions on top to be BFT (2 + 4 =  total)
-        if len(dag.ledger) < 6:
+        if not dag.has_bft_quorum():
             return False
 
         # 4) TODO Check if satellite has been witnessed before
@@ -198,6 +198,7 @@ class ConsensusMechanism():
         # Assign correctness score -> affects transaction
         #  This is going to be very tricky. How do I get this data?? Where do I
         # store it? Do I want this to tie in to how parents are selected?
+        # TODO - 0.5 setting is from a recent reference - find and add here
         correctness_score = self.get_correctness_score(sat, dag)
 
         # 5) TODO is sensor data accurate (done regardless of previous witnessing).

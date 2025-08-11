@@ -19,13 +19,17 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-
+# To stop type_checking freaking out at runtime
+from __future__ import annotations
 import copy
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from skyfield.api import EarthSatellite
 from .dag import DAG
 from .transaction import Transaction, TransactionMetadata
 from .utils import build_tx_data_str
+
+if TYPE_CHECKING:
+    from .consensus_mech import ConsensusMechanism
 
 
 class SatelliteNode():
@@ -45,7 +49,8 @@ class SatelliteNode():
     def submit_transaction(self,
                            dag: DAG,
                            satellite: EarthSatellite,
-                           recipient_address: int) -> None:
+                           recipient_address: int,
+                           consensus_mech: ConsensusMechanism) -> None:
         """
         Builds a transaction from observed satellite data and submits it to the DAG.
 
@@ -71,6 +76,13 @@ class SatelliteNode():
 
         # Add transaction to the DAG
         dag.add_tx(transaction)
+
+         # Run consensus externally
+        consensus_mech.proof_of_inter_satellite_evaluation(
+            dag=dag,
+            sat_node=self,
+            transaction=transaction
+        )
 
     def synchronise(self, network_dag: DAG) -> None:
         """
