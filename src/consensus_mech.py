@@ -44,7 +44,7 @@ class ConsensusMechanism():
     # level. I guess I need to calculate validity from some maths? possible - if yes, then how
     # accurate/likely probability distruibution for observations? Algorithm one in PowerGraph paper
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.consensus_threshold : float = 0.6 # TODO - tune
         self.reputation_step: float = 0.1 # TODO - tune
 
@@ -220,7 +220,7 @@ class ConsensusMechanism():
             sat_node.reputation += self.reputation_step
             return True
 
-        transaction.consensus_reached = False
+        transaction.metadata.consensus_reached = False
         sat_node.reputation -= self.reputation_step
         return False
 

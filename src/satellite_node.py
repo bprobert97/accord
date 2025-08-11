@@ -67,7 +67,7 @@ class SatelliteNode():
 
         # Create metadata and transaction
         metadata = TransactionMetadata()
-        transaction = Transaction(sender_address=self.id,
+        transaction = Transaction(sender_address=hash(self.id),
                                   recipient_address=recipient_address,
                                   # TODO Replace with actual key handling
                                   sender_private_key="PLACEHOLDER_KEY",
