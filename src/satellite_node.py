@@ -50,7 +50,7 @@ class SatelliteNode():
                            dag: DAG,
                            satellite: EarthSatellite,
                            recipient_address: int,
-                           consensus_mech: ConsensusMechanism) -> None:
+                           consensus_mech: ConsensusMechanism) -> bool:
         """
         Builds a transaction from observed satellite data and submits it to the DAG.
 
@@ -78,7 +78,7 @@ class SatelliteNode():
         dag.add_tx(transaction)
 
          # Run consensus externally
-        consensus_mech.proof_of_inter_satellite_evaluation(
+        return consensus_mech.proof_of_inter_satellite_evaluation(
             dag=dag,
             sat_node=self,
             transaction=transaction
