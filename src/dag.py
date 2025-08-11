@@ -121,3 +121,12 @@ class DAG():
         # TODO - need to add consensus mechanism in here, may need to be a function within
         # this class rather than a separate class to avoid circles
         self.check_thresholds(transaction)
+
+    def has_bft_quorum(self) -> bool:
+        """
+        Check if we have at least 3f + 1 real transactions (f = max faulty nodes tolerated).
+        Genesis txs are ignored in this count.
+        """
+        real_tx_count = max(0, len(self.ledger) - 2)  # exclude genesis
+        # If f=1, we need 4 real tx (3*1+1)
+        return real_tx_count >= 4
