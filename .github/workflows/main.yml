@@ -21,6 +21,9 @@ jobs:
     - name: Analyse the code with pylint
       run: |
         pylint src
+    - name: Run mypy static type checker
+      run: |
+        mypy .
     - name: Run Jupyter Notebook
       run: |
         jupyter nbconvert --to notebook --execute accord_demo.ipynb --output executed_notebook.ipynb
