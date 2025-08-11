@@ -20,6 +20,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
+import copy
+from typing import Optional
+from skyfield.api import EarthSatellite
+from .dag import DAG
+from .transaction import Transaction, TransactionMetadata
+from .utils import build_tx_data_str
+
+
 class SatelliteNode():
     """
     A class representing a node in the network, in this case a LEO satellite. 
@@ -31,18 +39,47 @@ class SatelliteNode():
         # TODO - need to consider how this affects consensus.
         # If reputation low, does it get allowed? or does it affect
         # consensus score?
-        self.reputation: float = 0
+        self.reputation: float = 0.0
+        self.local_dag: Optional[DAG] = None
 
-    def submit_transaction(self) -> None:
+    def submit_transaction(self,
+                           dag: DAG,
+                           satellite: EarthSatellite,
+                           recipient_address: int) -> None:
         """
-        TODO
-        """
+        Builds a transaction from observed satellite data and submits it to the DAG.
 
-    def synchronise(self) -> None:
+        Args:
+        - dag: The DAG distributed ledger that the transaction will be added to
+        - satellite: The EarthSatellite object containing data relevant for building the transaction
+        - recipient_address: TODO may not be needed in transaction
+
+        Returns:
+        A transaction that is submitted to the ledger
         """
-        TODO
+        # Build TLE/OD data string from the EarthSatellite object
+        tx_data_str = build_tx_data_str(satellite)
+
+        # Create metadata and transaction
+        metadata = TransactionMetadata()
+        transaction = Transaction(sender_address=self.id,
+                                  recipient_address=recipient_address,
+                                  # TODO Replace with actual key handling
+                                  sender_private_key="PLACEHOLDER_KEY",
+                                  tx_data=tx_data_str,
+                                  metadata=metadata)
+
+        # Add transaction to the DAG
+        dag.add_tx(transaction)
+
+    def synchronise(self, network_dag: DAG) -> None:
         """
+        Synchronise local DAG state with a given network DAG.
+        For now, replaces the local DAG with a deep copy.
+        """
+        self.local_dag = copy.deepcopy(network_dag)
 
 # TODO - need to allow node to submit a transaction to the ledger.
 # eventually will simulate this properly
 # Would likely need something to listen for the signal from the node??
+# Then when triggered, run consensus mechanism
