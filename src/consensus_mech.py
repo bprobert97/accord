@@ -207,6 +207,7 @@ class ConsensusMechanism():
         accuracy_score = self.estimate_accuracy(sat)
 
         # 6) TODO calculate consensus score - node reputation, accuracy and correctness all factor
+        # Need to add in a time decay factor
         # Need to develop an equation - this will take some reading and tuning
 
         consensus_score = self.calculate_consensus_score(correctness_score,
