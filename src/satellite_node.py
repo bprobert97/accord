@@ -19,17 +19,14 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-# To stop type_checking freaking out at runtime
-from __future__ import annotations
+
+import asyncio
 import copy
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 from skyfield.api import EarthSatellite
 from .dag import DAG
 from .transaction import Transaction, TransactionMetadata
 from .utils import build_tx_data_str
-
-if TYPE_CHECKING:
-    from .consensus_mech import ConsensusMechanism
 
 
 class SatelliteNode():
@@ -37,8 +34,10 @@ class SatelliteNode():
     A class representing a node in the network, in this case a LEO satellite. 
     This does NOT represent a node in the ledger - these are transactions
     """
-    def __init__(self, node_id: str) -> None:
+    def __init__(self, node_id: str, queue: asyncio.Queue) -> None:
         self.id: str = node_id
+        self.queue = queue
+
         # Reputation starts at 0, affected by validity and accuracy
         # TODO - need to consider how this affects consensus.
         # If reputation low, does it get allowed? or does it affect
@@ -46,16 +45,13 @@ class SatelliteNode():
         self.reputation: float = 0.0
         self.local_dag: Optional[DAG] = None
 
-    def submit_transaction(self,
-                           dag: DAG,
-                           satellite: EarthSatellite,
-                           recipient_address: int,
-                           consensus_mech: ConsensusMechanism) -> bool:
+    async def submit_transaction(self,
+                                 satellite: EarthSatellite,
+                                 recipient_address: int) -> bool:
         """
         Builds a transaction from observed satellite data and submits it to the DAG.
 
         Args:
-        - dag: The DAG distributed ledger that the transaction will be added to
         - satellite: The EarthSatellite object containing data relevant for building the transaction
         - recipient_address: TODO may not be needed in transaction
 
@@ -74,15 +70,11 @@ class SatelliteNode():
                                   tx_data=tx_data_str,
                                   metadata=metadata)
 
-        # Add transaction to the DAG
-        dag.add_tx(transaction)
-
-         # Run consensus externally
-        return consensus_mech.proof_of_inter_satellite_evaluation(
-            dag=dag,
-            sat_node=self,
-            transaction=transaction
-        )
+        future = asyncio.get_running_loop().create_future()
+        print(f"Satellite {self.id}: submitting transaction {transaction.hash}")
+        await self.queue.put((transaction, self, future))
+        # Waits until DAG sets the result
+        return await future
 
     def synchronise(self, network_dag: DAG) -> None:
         """

@@ -20,10 +20,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
+# To stop type_checking freaking out at runtime
+from __future__ import annotations
+
+import asyncio
 import random
 from collections import OrderedDict
+from typing import TYPE_CHECKING
 from .transaction import Transaction, TransactionMetadata
 from .utils import REJECTION_THRESHOLD, CONFIRMATION_STEP, CONFIRMATION_THRESHOLD
+
+if TYPE_CHECKING:
+    from .consensus_mech import ConsensusMechanism
 
 class DAG():
     """
@@ -32,12 +40,31 @@ class DAG():
     for each transaction is decided using a tip selection algorithm.
     """
 
-    def __init__(self) -> None:
+    def __init__(self,
+                 consensus_mech: ConsensusMechanism,
+                 queue: asyncio.Queue) -> None:
         # TODO - need a way to check that the DAG has not been tampered with
 
         # Ledger structure is:
         # key: string hash of transaction, value: Transaction class
         self.ledger: dict = self.create_genesis_tx()
+        self.consensus_mech = consensus_mech
+        self.queue = queue
+
+    async def listen(self) -> None:
+        """
+        An asynchronous function that continuously listens for transactions
+        submitted to the DAG from a satellite node.
+        """
+        while True:
+            transaction, satellite, future = await self.queue.get()
+            print(f"DAG received transaction {transaction.hash}")
+            consensus_result = self.consensus_mech.proof_of_inter_satellite_evaluation(
+                dag=self,
+                sat_node=satellite,
+                transaction=transaction
+            )
+            future.set_result(consensus_result)
 
     def create_genesis_tx(self) -> dict[str, list[Transaction]]:
         """

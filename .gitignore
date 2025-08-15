@@ -8,3 +8,4 @@ pyvenv.cfg
 /.vscode
 /src/__pycache__
 /.mypy_cache
+/__pycache__

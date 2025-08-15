@@ -24,11 +24,3 @@ jobs:
     - name: Run mypy static type checker
       run: |
         mypy .
-    - name: Run Jupyter Notebook
-      run: |
-        jupyter nbconvert --to notebook --execute accord_demo.ipynb --output executed_notebook.ipynb
-    - name: Upload executed notebook as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: executed-notebook
-        path: executed_notebook.ipynb

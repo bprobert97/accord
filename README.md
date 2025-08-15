@@ -47,7 +47,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ├── README.md                # Project overview
 ├── od_data.json            # Example orbit determination data for use in consensus
 ├── requirements.txt        # List of python package dependencies
-└── accord_demo.ipynb       # Jupyter notebook demonstration of ACCORD
+└── accord_demo.py       # Demonstration of ACCORD
 </pre>
 
 # Installation
@@ -90,3 +90,9 @@ Follow these steps to set up the project in a Python virtual environment:
    ```bash
    pip install -r requirements_linux.txt
    ```
+
+# Usage
+
+To run the ACCORD demo, either:
+* In VSCode, right click `accord_demo.py` and select `Run Python File in Terminal`
+* In a terminal, execute `py accord_demo.py`
