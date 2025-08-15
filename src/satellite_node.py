@@ -26,7 +26,7 @@ from typing import Optional
 from skyfield.api import EarthSatellite
 from .dag import DAG
 from .transaction import Transaction, TransactionMetadata
-from .utils import build_tx_data_str
+from .utils import build_tx_data_str, load_json_data
 
 
 class SatelliteNode():
@@ -44,6 +44,10 @@ class SatelliteNode():
         # consensus score?
         self.reputation: float = 0.0
         self.local_dag: Optional[DAG] = None
+
+        # This is for testing purposes. In reality, data will
+        # be loaded from a sensor
+        self.tle_data: list[Optional[EarthSatellite]] = load_json_data("od_data.json")
 
     async def submit_transaction(self,
                                  satellite: EarthSatellite,

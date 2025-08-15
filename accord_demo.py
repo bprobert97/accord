@@ -31,7 +31,7 @@ from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.satellite_node import SatelliteNode
 from src.transaction import Transaction, TransactionMetadata
-from src.utils import load_json_data, build_tx_data_str
+from src.utils import build_tx_data_str
 
 
 async def run_consensus_demo(n_tx: int = 3) -> Optional[DAG]:
@@ -57,21 +57,20 @@ async def run_consensus_demo(n_tx: int = 3) -> Optional[DAG]:
     then be parsed into other funcions to generate diagrams or analyse data.
     """
 
-    # Load observation data from the orbit determination data JSON file
-    # TODO - think this through, is this just for testing? Should this be moved?
-    satellites = load_json_data("od_data.json")
-    if satellites[0] is None:
-        print("No satellite data found.")
-        return None
-
     # Initialise PoISE mechanism
     poise = ConsensusMechanism()
 
+    # ----------------------------------------------------------------------------------------
     # Setup the data structures needed for the demo
     queue: asyncio.Queue = asyncio.Queue()
     test_satellite = SatelliteNode(node_id="SAT-001", queue=queue)
     test_dag = DAG(queue=queue, consensus_mech=poise)
-    base_sat = satellites[0]
+
+    if test_satellite.tle_data[0] is None:
+        print("No satellite data found.")
+        return None
+
+    base_sat = test_satellite.tle_data[0]
 
     # Add other transactions into the ledger with some simulated random noise
     # This is bypassing the consensus process to give us foundational data 
@@ -108,7 +107,8 @@ async def run_consensus_demo(n_tx: int = 3) -> Optional[DAG]:
             })
         )
         test_dag.add_tx(dummy_tx)
-    
+    # ----------------------------------------------------------------------------------------
+
     # Start DAG listener
     asyncio.create_task(test_dag.listen())
 
@@ -130,6 +130,7 @@ async def run_consensus_demo(n_tx: int = 3) -> Optional[DAG]:
     print(f"Transaction:\n{test_transaction}")
     print(test_dag.ledger)
     return test_dag
+
 
 # -----------------------------------------------------------------------------------
 def plot_transaction_dag(dag: DAG) -> None:
@@ -207,7 +208,7 @@ def plot_transaction_dag(dag: DAG) -> None:
     plt.axis("off")
     plt.show()
 
-
+# -----------------------------------------------------------------------------------
 # Run demonstration and plot the DAG
 test_dag = asyncio.run(run_consensus_demo())
 if test_dag:
