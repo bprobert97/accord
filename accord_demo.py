@@ -26,15 +26,48 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 from datetime import timedelta
+from skyfield.api import EarthSatellite
 from typing import Optional
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.satellite_node import SatelliteNode
 from src.transaction import Transaction, TransactionMetadata
-from src.utils import build_tx_data_str
 
 
-async def run_consensus_demo(n_tx: int = 3) -> Optional[DAG]:
+def create_noisy_transaction(base_sat: EarthSatellite) -> Transaction:
+    """
+    Create a single noisy transaction for the given base satellite.
+    Optionally override the default random noise.
+    """
+    noise = {
+        "mean_motion": np.random.normal(0, 0.01),       # rev/day
+        "eccentricity": np.random.normal(0, 0.00002),   # unitless
+        "inclination": np.random.normal(0, 0.05),       # degrees
+        "epoch_jitter": np.random.normal(0, 2)          # seconds
+    }
+
+    observed_eccentricity = base_sat.model.ecco + noise["eccentricity"]
+    observed_epoch = base_sat.epoch.utc_datetime() + timedelta(seconds=noise["epoch_jitter"])
+    observed_inclination = (base_sat.model.inclo * 180 / np.pi) + noise["inclination"]
+    observed_mean_motion = ((base_sat.model.no_kozai / (2 * np.pi)) * 1440) + noise["mean_motion"]
+
+    return Transaction(
+        sender_address=789,
+        recipient_address=123,
+        sender_private_key="dummy_key",
+        metadata=TransactionMetadata(),
+        tx_data=json.dumps({
+            "OBJECT_NAME": base_sat.name,
+            "OBJECT_ID": 25544,
+            "EPOCH": observed_epoch.isoformat() + "Z",
+            "MEAN_MOTION": observed_mean_motion,
+            "ECCENTRICITY": observed_eccentricity,
+            "INCLINATION": observed_inclination
+        })
+    )
+
+async def run_consensus_demo(initial_n_tx: int = 3,
+                             n_test_tx: int = 1) -> Optional[DAG]:
     """ 
     This function runs a demonstration of the ACCORD Distributed Ledger.
     The following steps are demonstrated:
@@ -65,6 +98,7 @@ async def run_consensus_demo(n_tx: int = 3) -> Optional[DAG]:
     queue: asyncio.Queue = asyncio.Queue()
     test_satellite = SatelliteNode(node_id="SAT-001", queue=queue)
     test_dag = DAG(queue=queue, consensus_mech=poise)
+    sat_rep_list: list = []
 
     if test_satellite.tle_data[0] is None:
         print("No satellite data found.")
@@ -77,58 +111,25 @@ async def run_consensus_demo(n_tx: int = 3) -> Optional[DAG]:
     # which can then be built upon, purely for testing purposes. 
     # TODO - test with bigger variants and non-random noise
     # TODO - can this be simplified??
-    for _ in range(n_tx):
-        noise = {
-            "mean_motion": np.random.normal(0, 0.01),       # rev/day
-            "eccentricity": np.random.normal(0, 0.00002),    # unitless
-            "inclination": np.random.normal(0, 0.05),        # degrees
-            "epoch_jitter": np.random.normal(0, 2)           # seconds
-        }
-
-        # Add noise to the data 
-        observed_eccentricity = base_sat.model.ecco + noise["eccentricity"]
-        observed_epoch = base_sat.epoch.utc_datetime() + timedelta(seconds=noise["epoch_jitter"])
-        observed_inclination = (base_sat.model.inclo * 180 / np.pi) + noise["inclination"]
-        observed_mean_motion = ((base_sat.model.no_kozai / (2 * np.pi)) * 1440) + noise["mean_motion"]
-
-        # Add the noisy transaction data to the ledger
-        dummy_tx = Transaction(
-            sender_address=789,
-            recipient_address=123,
-            sender_private_key="dummy_key",
-            metadata=TransactionMetadata(),
-            tx_data=json.dumps({
-                "OBJECT_NAME": base_sat.name,
-                "OBJECT_ID": 25544,
-                "EPOCH": observed_epoch.isoformat() + "Z",
-                "MEAN_MOTION": observed_mean_motion,
-                "ECCENTRICITY": observed_eccentricity,
-                "INCLINATION": observed_inclination
-            })
-        )
-        test_dag.add_tx(dummy_tx)
+    for _ in range(initial_n_tx):
+        test_dag.add_tx(create_noisy_transaction(base_sat))
     # ----------------------------------------------------------------------------------------
 
     # Start DAG listener
     asyncio.create_task(test_dag.listen())
 
-    # Create a new transactional piece of data
-    test_transaction = Transaction(sender_address=789,
-                                   recipient_address=123,
-                                   sender_private_key="dummy_key",
-                                   metadata=TransactionMetadata(),
-                                   tx_data=build_tx_data_str(base_sat))
-
-
-    # Run consensus on a single satellite observation - the test transaction
-    consensus_result = await test_satellite.submit_transaction(satellite=base_sat, 
-                                                               recipient_address=123)
+    # TODO - get more data to simulate better, rather than adding the same data
+    for _ in range(n_test_tx):
+        # Run consensus on a single satellite observation - the test transaction
+        await test_satellite.submit_transaction(
+             satellite=base_sat,
+             recipient_address=123
+             )
+        sat_rep_list.append(test_satellite.reputation)
 
     # Output results
-    print(f"\nConsensus reached: {consensus_result}")
-    print(f"Updated Node Reputation: {test_satellite.reputation:.2f}")
-    print(f"Transaction:\n{test_transaction}")
     print(test_dag.ledger)
+    print(sat_rep_list)
     return test_dag
 
 
@@ -210,6 +211,6 @@ def plot_transaction_dag(dag: DAG) -> None:
 
 # -----------------------------------------------------------------------------------
 # Run demonstration and plot the DAG
-test_dag = asyncio.run(run_consensus_demo())
+test_dag = asyncio.run(run_consensus_demo(n_test_tx=5))
 if test_dag:
     plot_transaction_dag(test_dag)

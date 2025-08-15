@@ -37,7 +37,6 @@ class TransactionMetadata:
     consensus_reached: bool = False
     is_confirmed: bool = False
     parent_hashes: list[str] = field(default_factory=list)
-    confirmation_score: float = 0.0
     is_rejected: bool = False
 
 class Transaction:
@@ -68,7 +67,6 @@ class Transaction:
                 f"  consensus_reached={self.metadata.consensus_reached},\n"
                 f"  is_confirmed={self.metadata.is_confirmed},\n"
                 f"  is_rejected={self.metadata.is_rejected},\n"
-                f"  confirmation_score={self.metadata.confirmation_score},\n"
                 f"  parent_hashes={self.metadata.parent_hashes},\n"
                 f"  hash={self.hash[:10]}...)\n")
 

@@ -25,6 +25,7 @@ import copy
 from typing import Optional
 from skyfield.api import EarthSatellite
 from .dag import DAG
+from .reputation import ReputationManager, MAX_REPUTATION
 from .transaction import Transaction, TransactionMetadata
 from .utils import build_tx_data_str, load_json_data
 
@@ -37,12 +38,13 @@ class SatelliteNode():
     def __init__(self, node_id: str, queue: asyncio.Queue) -> None:
         self.id: str = node_id
         self.queue = queue
-
+        self.exp_pos: int = 0
         # Reputation starts at 0, affected by validity and accuracy
         # TODO - need to consider how this affects consensus.
         # If reputation low, does it get allowed? or does it affect
         # consensus score?
-        self.reputation: float = 0.0
+        self.reputation: float = MAX_REPUTATION / 2
+        self.rep_manager = ReputationManager()
         self.local_dag: Optional[DAG] = None
 
         # This is for testing purposes. In reality, data will
