@@ -26,11 +26,6 @@ from typing import Optional
 from skyfield.api import EarthSatellite, load, Timescale
 import numpy as np
 
-# Global Variables for consensus
-# TODO - May tune these to optimise performance
-CONFIRMATION_THRESHOLD = 1
-REJECTION_THRESHOLD = -1
-CONFIRMATION_STEP = 0.1
 
 def build_tx_data_str(satellite_data: EarthSatellite) -> str:
     """

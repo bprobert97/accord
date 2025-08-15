@@ -28,7 +28,6 @@ import random
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 from .transaction import Transaction, TransactionMetadata
-from .utils import REJECTION_THRESHOLD, CONFIRMATION_STEP, CONFIRMATION_THRESHOLD
 
 if TYPE_CHECKING:
     from .consensus_mech import ConsensusMechanism
@@ -83,21 +82,6 @@ class DAG():
                                                       "Genesis Transaction 2",
                                                       metadata=genesis_metadata)]}
 
-    def check_thresholds(self, transaction: Transaction) -> None:
-        """
-        Check if the transaction confirmation or rejection thresholds have been crossed. 
-        This will affect weighting. is_confirmed = strong weighting, else weak weighting
-        """
-        if REJECTION_THRESHOLD <= transaction.metadata.confirmation_score <= CONFIRMATION_THRESHOLD:
-            transaction.metadata.confirmation_score +=  CONFIRMATION_STEP
-        else:
-            transaction.metadata.confirmation_score -= CONFIRMATION_STEP
-
-        if transaction.metadata.confirmation_score >= CONFIRMATION_THRESHOLD:
-            transaction.metadata.is_confirmed = True
-        elif transaction.metadata.confirmation_score <= REJECTION_THRESHOLD:
-            transaction.metadata.is_rejected = True
-
     def get_parents(self) -> tuple[str, str]:
         """
         Randomly select 2 parents for the transaction.
@@ -144,10 +128,6 @@ class DAG():
         self.ledger[transaction.hash] = [transaction]
         self.ledger = OrderedDict(
         sorted(self.ledger.items(), key=lambda item: item[1][0].metadata.timestamp))
-
-        # TODO - need to add consensus mechanism in here, may need to be a function within
-        # this class rather than a separate class to avoid circles
-        self.check_thresholds(transaction)
 
     def has_bft_quorum(self) -> bool:
         """

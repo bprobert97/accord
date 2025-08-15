@@ -46,7 +46,6 @@ class ConsensusMechanism():
 
     def __init__(self) -> None:
         self.consensus_threshold : float = 0.6 # TODO - tune
-        self.reputation_step: float = 0.1 # TODO - tune
 
     def data_is_valid(self, sat: EarthSatellite) -> bool:
         """
@@ -156,8 +155,10 @@ class ConsensusMechanism():
                                   accuracy: float, reputation: float) -> float:
         """
         Weighted score. Tuneable weights.
+        TODO - tune
         """
         return 0.4 * correctness + 0.4 * accuracy + 0.2 * reputation
+
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
@@ -172,18 +173,15 @@ class ConsensusMechanism():
 
         # 2) TODO Check if data is valid, if not - ignore.
         # If the list is empty, there is no data that can be valid
-        if not transaction.tx_data:
-            # Reduce node reputation for providing no data that can be checked
-            sat_node.reputation -= self.reputation_step
-            return False
-
         # Consensus cannot be reached on invalid data. If yes, add to DAG
-        if not self.data_is_valid(sat):
-            # Reduce node reputation for providing invalid data
-            sat_node.reputation -= self.reputation_step
+        if not transaction.tx_data or not self.data_is_valid(sat):
+            # Reduce node reputation for providing no or invalid data
+            sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
+                sat_node.reputation, sat_node.exp_pos
+                )
             return False
 
-        # 3a) If we have enough, valid data, submit a transaction with the string of data
+        # 2a) If we have valid data, submit a transaction
         dag.add_tx(transaction)
 
         # 3) TODO Check we have enough data to be bft (3f + 1)
@@ -214,18 +212,25 @@ class ConsensusMechanism():
                                                          accuracy_score,
                                                          sat_node.reputation)
 
-        # if consensus reached - strong node (maybe affects node reputation?),
+        sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
+
+        # 7) if consensus reached - strong node (maybe affects node reputation?),
         # else weak node (like IOTA)
         if consensus_score >= self.consensus_threshold:
             transaction.metadata.consensus_reached = True
-            sat_node.reputation += self.reputation_step
+            sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
+                sat_node.reputation, sat_node.exp_pos
+            )
+            transaction.metadata.is_confirmed = True
             return True
 
         transaction.metadata.consensus_reached = False
-        sat_node.reputation -= self.reputation_step
+        sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
+            sat_node.reputation, sat_node.exp_pos
+        )
+        transaction.metadata.is_rejected = True
         return False
 
-        # 7) TODO if consensus score above threshold, consensus reached. Else not.
 
         # if all history is strong - strong edge connection, else weak edge connection.
         # I guess I can't update edge connections or tx strength retroactively so..
@@ -234,3 +239,6 @@ class ConsensusMechanism():
 
         # TODO - steps 4-6 are the key bits, work here. Get equations and find some
         # tuning evidence. Need to transform into a DAG from a blockchain after that
+
+        # Reputation is tracked and updated throughout
+        # Transaction score is fixed once submitted
