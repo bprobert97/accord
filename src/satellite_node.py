@@ -1,3 +1,4 @@
+# pylint: disable=too-many-instance-attributes
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -25,18 +26,22 @@ import copy
 from typing import Optional
 from skyfield.api import EarthSatellite
 from .dag import DAG
+from .logger import get_logger
 from .reputation import ReputationManager, MAX_REPUTATION
 from .transaction import Transaction, TransactionMetadata
 from .utils import build_tx_data_str, load_json_data
 
+logger = get_logger(__name__)
+
 
 class SatelliteNode():
     """
-    A class representing a node in the network, in this case a LEO satellite. 
+    A class representing a node in the network, in this case a LEO satellite.
     This does NOT represent a node in the ledger - these are transactions
     """
-    def __init__(self, node_id: str, queue: asyncio.Queue) -> None:
+    def __init__(self, node_id: str, queue: asyncio.Queue, is_malicious: bool = False) -> None:
         self.id: str = node_id
+        self.is_malicious: bool = is_malicious
         self.queue = queue
         self.exp_pos: int = 0
         # Reputation starts at 0, affected by validity and accuracy
@@ -47,9 +52,11 @@ class SatelliteNode():
         self.rep_manager = ReputationManager()
         self.local_dag: Optional[DAG] = None
 
-        # This is for testing purposes. In reality, data will
+        # TODO This is for testing purposes. In reality, data will
         # be loaded from a sensor
-        self.tle_data: list[Optional[EarthSatellite]] = load_json_data("od_data.json")
+        self.tle_data: list[Optional[EarthSatellite]] = load_json_data(
+            "od_data.json",
+            faulty_data = self.is_malicious)
 
     async def submit_transaction(self,
                                  satellite: EarthSatellite,
@@ -77,7 +84,7 @@ class SatelliteNode():
                                   metadata=metadata)
 
         future = asyncio.get_running_loop().create_future()
-        print(f"Satellite {self.id}: submitting transaction {transaction.hash}")
+        logger.info("Satellite %s: submitting transaction %s", self.id, transaction.hash)
         await self.queue.put((transaction, self, future))
         # Waits until DAG sets the result
         return await future
