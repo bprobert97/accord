@@ -1,3 +1,4 @@
+# pylint: disable=protected-access, too-many-locals
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -21,15 +22,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import asyncio
+from datetime import timedelta
 import json
+from typing import Optional
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-from datetime import timedelta
 from skyfield.api import EarthSatellite
-from typing import Optional
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
+from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
 from src.transaction import Transaction, TransactionMetadata
 
@@ -67,7 +69,7 @@ def create_noisy_transaction(base_sat: EarthSatellite) -> Transaction:
     )
 
 async def run_consensus_demo(initial_n_tx: int = 3,
-                             n_test_tx: int = 1) -> Optional[DAG]:
+                             n_test_tx: int = 1) -> tuple[Optional[DAG], Optional[list[float]]]:
     """ 
     This function runs a demonstration of the ACCORD Distributed Ledger.
     The following steps are demonstrated:
@@ -87,7 +89,7 @@ async def run_consensus_demo(initial_n_tx: int = 3,
 
     Returns:
     - The updated Directed Acyclic Graph (DAG) ledger structure, which can 
-    then be parsed into other funcions to generate diagrams or analyse data.
+    then be parsed into other functions to generate diagrams or analyse data.
     """
 
     # Initialise PoISE mechanism
@@ -102,13 +104,13 @@ async def run_consensus_demo(initial_n_tx: int = 3,
 
     if test_satellite.tle_data[0] is None:
         print("No satellite data found.")
-        return None
+        return None, None
 
     base_sat = test_satellite.tle_data[0]
 
     # Add other transactions into the ledger with some simulated random noise
-    # This is bypassing the consensus process to give us foundational data 
-    # which can then be built upon, purely for testing purposes. 
+    # This is bypassing the consensus process to give us foundational data
+    # which can then be built upon, purely for testing purposes.
     # TODO - test with bigger variants and non-random noise
     # TODO - can this be simplified??
     for _ in range(initial_n_tx):
@@ -130,7 +132,7 @@ async def run_consensus_demo(initial_n_tx: int = 3,
     # Output results
     print(test_dag.ledger)
     print(sat_rep_list)
-    return test_dag
+    return test_dag, sat_rep_list
 
 
 # -----------------------------------------------------------------------------------
@@ -139,27 +141,27 @@ def plot_transaction_dag(dag: DAG) -> None:
     Plot a graph representing the Directed Acyclic Graph
 
     Args:
-    dag: The Directed Acyclic Grap Distributed Ledger datastructure
+    dag: The Directed Acyclic Graph Distributed Ledger datastructure
     to be plotted
 
     Returns:
     None. Shows a plot using MatPlotLib/
     """
-    G: nx.DiGraph = nx.DiGraph()
+    graph: nx.DiGraph = nx.DiGraph()
     tx_timestamps = {}
     tx_status = {}  # store is_confirmed/is_rejected per tx
 
     # Add nodes & edges
     for key, tx_list in dag.ledger.items():
         for tx in tx_list:
-            G.add_node(key)
+            graph.add_node(key)
             tx_timestamps[key] = tx.metadata.timestamp
             tx_status[key] = {
                 "is_confirmed": tx.metadata.is_confirmed,
                 "is_rejected": tx.metadata.is_rejected
             }
             for parent_hash in tx.metadata.parent_hashes:
-                G.add_edge(key, parent_hash)
+                graph.add_edge(key, parent_hash)
 
     # Sort nodes by timestamp for X-axis positioning
     sorted_keys = sorted(tx_timestamps, key=lambda k: tx_timestamps[k])
@@ -172,14 +174,14 @@ def plot_transaction_dag(dag: DAG) -> None:
     plt.figure(figsize=(16, 6))
 
     # Draw nodes with outline color
-    for node in G.nodes():
+    for node in graph.nodes():
         outline_color = "black"
         if tx_status[node]["is_confirmed"]:
             outline_color = "green"
         elif tx_status[node]["is_rejected"]:
             outline_color = "red"
         nx.draw_networkx_nodes(
-            G, pos,
+            graph, pos,
             nodelist=[node],
             node_color="lightblue",
             node_size=1800,
@@ -189,7 +191,7 @@ def plot_transaction_dag(dag: DAG) -> None:
 
     # Draw edges with color matching the target node's status
     edge_colors = []
-    for _, parent_node in G.edges():
+    for _, parent_node in graph.edges():
         if tx_status[parent_node]["is_confirmed"]:
             edge_colors.append("green")
         elif tx_status[parent_node]["is_rejected"]:
@@ -198,11 +200,13 @@ def plot_transaction_dag(dag: DAG) -> None:
             edge_colors.append("gray")
 
     # Ignoring a warning raised by mypy as the sub file for networkx is incorrect
-    nx.draw_networkx_edges(G, pos, edge_color=edge_colors, arrowsize=15) # type: ignore[arg-type]
+    nx.draw_networkx_edges(graph, pos,
+                           edge_color=edge_colors, # type: ignore[arg-type]
+                           arrowsize=15)
 
     # Draw labels
     nx.draw_networkx_labels(
-        G, pos, font_size=8, font_weight="bold"
+        graph, pos, font_size=8, font_weight="bold"
     )
 
     plt.title("Transaction DAG", fontsize=14)
@@ -210,7 +214,42 @@ def plot_transaction_dag(dag: DAG) -> None:
     plt.show()
 
 # -----------------------------------------------------------------------------------
-# Run demonstration and plot the DAG
-test_dag = asyncio.run(run_consensus_demo(n_test_tx=5))
-if test_dag:
-    plot_transaction_dag(test_dag)
+
+REP_MGR = ReputationManager()
+
+def plot_reputation(history: list[float]) -> None:
+    """
+    Plot reputation trajectory over time.
+
+    history: list of reputation values from run_consensus_demo()
+    neutral_level: baseline reputation
+    max_rep: maximum reputation
+    """
+    steps = list(range(len(history)))
+    neutral_level: float = MAX_REPUTATION / 2
+
+    # Compute Gompertz targets assuming exp_pos increments each step
+    # This allows us to plot the Gompertz envelope for reputation
+    # tolist() converts a np array of signedInts to list[int]
+    exp_pos = (np.arange(len(history))).tolist()
+    target_curve = [REP_MGR._gompertz_target(e) for e in exp_pos]
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(steps, history, marker='o', label="Actual Reputation")
+    plt.plot(steps, target_curve, linestyle="--", color="orange", label="Gompertz Target")
+    plt.axhline(neutral_level, color="gray", linestyle=":", label=f"Neutral ({neutral_level})")
+    plt.ylim(0, MAX_REPUTATION)
+    plt.xlabel("Time step")
+    plt.ylabel("Reputation")
+    plt.title("Satellite Node Reputation over Time")
+    plt.legend()
+    plt.grid(True, linestyle=":")
+    plt.show()
+
+# -----------------------------------------------------------------------------------
+# Run demonstration and plot the DAG and reputation of a satellite
+final_dag, sat_reps = asyncio.run(run_consensus_demo(n_test_tx=5))
+if final_dag:
+    plot_transaction_dag(final_dag)
+if sat_reps:
+    plot_reputation(sat_reps)
