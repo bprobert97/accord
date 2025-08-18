@@ -38,6 +38,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── __init__.py                # Empty file, for module creation
 │   └── consensus_mech.py          # Code for the PoISE consensus mechanism
 │   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure
+│   └── logger.py                  # Code for the app logger
 │   └── satellite_node.py          # Code representing a satellite in the network
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │   └── utils.py                   # Utility functions and global variables

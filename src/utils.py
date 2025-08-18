@@ -25,6 +25,46 @@ from json import JSONDecodeError
 from typing import Optional
 from skyfield.api import EarthSatellite, load, Timescale
 import numpy as np
+from sgp4.api import Satrec, WGS72 # type: ignore[import-untyped]
+
+def corrupt_satellite(sat: EarthSatellite, mean_motion_factor: float = 0.8) -> EarthSatellite:
+    """
+    mean motion factor of >1.05 or <0.73 makes the data invalid
+    1.0 is the same.
+    1.01 - 1.04 affects correctness
+    0.74-0.93 affects accuracy and correctness
+    0.94-0.99 affects correctness
+    """
+    # Copy fields from the original model
+    m = sat.model
+
+    # Build a new Satrec with modified mean motion
+    corrupted_model = Satrec()
+    corrupted_model.sgp4init(
+        WGS72,
+        'i',
+        int(m.satnum),
+        float(m.jdsatepoch - 2433281.5),  # epoch in days since 1949-12-31
+        float(m.bstar),
+        float(m.ndot),
+        float(m.nddot),
+        float(m.ecco),
+        float(m.argpo),
+        float(m.inclo),
+        float(m.mo),
+        float(m.no_kozai) * mean_motion_factor,  # corrupted mean motion
+        float(m.nodeo)
+    )
+
+    # Create an EarthSatellite instance without calling __init__
+    corrupted_sat = EarthSatellite.__new__(EarthSatellite)
+    corrupted_model.intldesg = sat.model.intldesg
+    corrupted_sat.model = corrupted_model
+    corrupted_sat.name = sat.name
+    corrupted_sat.epoch = sat.epoch
+    corrupted_sat.target = sat.target
+
+    return corrupted_sat
 
 
 def build_tx_data_str(satellite_data: EarthSatellite) -> str:
@@ -85,15 +125,18 @@ def build_tx_data_str(satellite_data: EarthSatellite) -> str:
                 "MEAN_MOTION_DDOT": motion_ddot
             })
 
-def build_earth_satellite_list_from_str(ts: Timescale, data: str) -> list[Optional[EarthSatellite]]:
+def build_earth_satellite_list_from_str(ts: Timescale, data: str,
+                                        make_faulty: bool) -> list[Optional[EarthSatellite]]:
     """
     Construct an EarthSatellite object from a string of data to be
     used for data validation.
 
     Arguments:
     - ts: The timescale, used to build the satellite's epoch time
-    - data: a string of data (ideally in a dict format) to be used to populate
+    - data: A string of data (ideally in a dict format) to be used to populate
     the attributes of the EarthSatellite object.
+    - make_faulty: A boolean flag about whether the data generated should be faulty, to
+    represent a malicious node
 
     Returns:
     - A list of EarthSatellite objects
@@ -112,13 +155,21 @@ def build_earth_satellite_list_from_str(ts: Timescale, data: str) -> list[Option
     if not isinstance(data, list) or not all(isinstance(d, dict) for d in data):
         raise TypeError("Expected a list of dicts after parsing satellite data")
 
-    return [EarthSatellite.from_omm(ts, fields) for fields in data]
+    sat_list = [EarthSatellite.from_omm(ts, fields) for fields in data]
 
-def load_json_data(file_name: str) -> list[Optional[EarthSatellite]]:
+    if make_faulty:
+        for i, sat in enumerate(sat_list):
+            sat_list[i] = corrupt_satellite(sat)
+
+    return sat_list
+
+def load_json_data(file_name: str, faulty_data: bool) -> list[Optional[EarthSatellite]]:
     """
     Turns json data in a file into a Python dict.
     JSON data must be in the Celestrak format
     https://rhodesmill.org/skyfield/earth-satellites.html
+
+    If faulty_data is True, this function will generate faulty data for testing
     """
     try:
         with load.open(file_name) as f:
@@ -128,5 +179,5 @@ def load_json_data(file_name: str) -> list[Optional[EarthSatellite]]:
         return []
 
     ts = load.timescale()
-    satellite_list = build_earth_satellite_list_from_str(ts, data)
+    satellite_list = build_earth_satellite_list_from_str(ts, data, faulty_data)
     return satellite_list

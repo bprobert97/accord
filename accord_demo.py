@@ -31,10 +31,12 @@ import numpy as np
 from skyfield.api import EarthSatellite
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
+from src.logger import get_logger
 from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
 from src.transaction import Transaction, TransactionMetadata
 
+logger = get_logger(__name__)
 
 def create_noisy_transaction(base_sat: EarthSatellite) -> Transaction:
     """
@@ -70,7 +72,7 @@ def create_noisy_transaction(base_sat: EarthSatellite) -> Transaction:
 
 async def run_consensus_demo(initial_n_tx: int = 3,
                              n_test_tx: int = 1) -> tuple[Optional[DAG], Optional[list[float]]]:
-    """ 
+    """
     This function runs a demonstration of the ACCORD Distributed Ledger.
     The following steps are demonstrated:
     - Loading in TLE data from a JSON file
@@ -103,7 +105,7 @@ async def run_consensus_demo(initial_n_tx: int = 3,
     sat_rep_list: list = []
 
     if test_satellite.tle_data[0] is None:
-        print("No satellite data found.")
+        logger.info("No satellite data found.")
         return None, None
 
     base_sat = test_satellite.tle_data[0]
@@ -121,6 +123,25 @@ async def run_consensus_demo(initial_n_tx: int = 3,
     asyncio.create_task(test_dag.listen())
 
     # TODO - get more data to simulate better, rather than adding the same data
+    logger.info("Submitting Valid Transactions")
+    for _ in range(n_test_tx):
+        # Run consensus on a single satellite observation - the test transaction
+        await test_satellite.submit_transaction(
+             satellite=base_sat,
+             recipient_address=123
+             )
+        sat_rep_list.append(test_satellite.reputation)
+
+    logger.info("Submitting Malicious Transaction")
+    test_satellite.is_malicious = True
+    await test_satellite.submit_transaction(
+             satellite=test_satellite.tle_data[0],
+             recipient_address=123
+             )
+    sat_rep_list.append(test_satellite.reputation)
+
+    logger.info("Submitting Valid Transactions")
+    test_satellite.is_malicious = False
     for _ in range(n_test_tx):
         # Run consensus on a single satellite observation - the test transaction
         await test_satellite.submit_transaction(
@@ -130,8 +151,10 @@ async def run_consensus_demo(initial_n_tx: int = 3,
         sat_rep_list.append(test_satellite.reputation)
 
     # Output results
-    print(test_dag.ledger)
-    print(sat_rep_list)
+    # logger.info("Test DAG:")
+    # logger.info(test_dag.ledger)
+    # logger.info("Satellite Reputations")
+    # logger.info(sat_rep_list)
     return test_dag, sat_rep_list
 
 

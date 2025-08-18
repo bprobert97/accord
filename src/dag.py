@@ -27,10 +27,13 @@ import asyncio
 import random
 from collections import OrderedDict
 from typing import TYPE_CHECKING
+from .logger import get_logger
 from .transaction import Transaction, TransactionMetadata
 
 if TYPE_CHECKING:
     from .consensus_mech import ConsensusMechanism
+
+logger = get_logger(__name__)
 
 class DAG():
     """
@@ -57,7 +60,7 @@ class DAG():
         """
         while True:
             transaction, satellite, future = await self.queue.get()
-            print(f"DAG received transaction {transaction.hash}")
+            logger.info("DAG received transaction %s", transaction.hash)
             consensus_result = self.consensus_mech.proof_of_inter_satellite_evaluation(
                 dag=self,
                 sat_node=satellite,

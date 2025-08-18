@@ -122,7 +122,7 @@ class ConsensusMechanism():
 
         # Very basic check — mean motion deviation, inclination deviation
         past = matches[-1]
-        motion_dev = abs(sat.model.no_kozai - float(past["MEAN_MOTION"]))
+        motion_dev = abs(((sat.model.no_kozai / (2 * np.pi)) * 1440)- float(past["MEAN_MOTION"]))
         incl_dev = abs((sat.model.inclo * 180 / np.pi) - float(past["INCLINATION"]))
 
         correctness_score = 1.0
@@ -143,6 +143,7 @@ class ConsensusMechanism():
         speed = np.linalg.norm(velocity)
 
         deviation = abs(speed - ideal_speed)
+
         if deviation < 0.3:
             return 1.0
         if deviation < 0.6:
@@ -157,19 +158,21 @@ class ConsensusMechanism():
         Weighted score. Tuneable weights.
         TODO - tune
         """
-        return 0.4 * correctness + 0.4 * accuracy + 0.2 * reputation
+        return 0.7 * correctness + 0.3 * accuracy + 0.2 * reputation
 
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
                                             transaction: Transaction) -> bool:
         """
-        Returns a bool of it consensus has been reached  
-        NOTE: Assume one witnessed satellite per transaction   
+        Returns a bool of it consensus has been reached
+        NOTE: Assume one witnessed satellite per transaction
         """
         # 1)  Turn transaction data into an EarthSatellite object
         # for validation using wsg4 and skyfield
-        sat = build_earth_satellite_list_from_str(load.timescale(), transaction.tx_data)[0]
+        sat = build_earth_satellite_list_from_str(load.timescale(),
+                                                  transaction.tx_data,
+                                                  sat_node.is_malicious)[0]
 
         # 2) TODO Check if data is valid, if not - ignore.
         # If the list is empty, there is no data that can be valid
@@ -211,6 +214,8 @@ class ConsensusMechanism():
         consensus_score = self.calculate_consensus_score(correctness_score,
                                                          accuracy_score,
                                                          sat_node.reputation)
+
+        print(consensus_score >= self.consensus_threshold)
 
         sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
 
