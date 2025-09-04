@@ -211,7 +211,7 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
             graph, pos,
             nodelist=[node],
             node_color="lightblue",
-            node_size=1800,
+            node_size=1000,
             edgecolors=outline_color,  # outline color
             linewidths=2
         )
@@ -240,8 +240,8 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
     node_patch = mpatches.Patch(color="lightblue", label="Transaction Node")
     confirmed_patch = mpatches.Patch(edgecolor="green", facecolor="lightblue", label="Confirmed Node", linewidth=2)
     rejected_patch = mpatches.Patch(edgecolor="red", facecolor="lightblue", label="Rejected Node", linewidth=2)
-    edge_confirmed = mpatches.Patch(color="green", label="Confirmed Edge")
-    edge_rejected = mpatches.Patch(color="red", label="Rejected Edge")
+    edge_confirmed = mpatches.Patch(color="green", label="Strong Edge")
+    edge_rejected = mpatches.Patch(color="red", label="Weak Edge")
     edge_default = mpatches.Patch(color="gray", label="Default Edge")
 
     # Place legend outside the plot area (top right)
@@ -298,13 +298,13 @@ def plot_reputation(history: list[float]) -> None:
     plt.xlabel("Time step")
     plt.ylabel("Reputation")
     plt.title("Satellite Node Reputation over Time")
-    plt.legend()
+    plt.legend(loc="upper left")
     plt.grid(True, linestyle=":")
     plt.show()
 
 # -----------------------------------------------------------------------------------
 # Run demonstration and plot the DAG and reputation of a satellite
-final_dag, sat_reps = asyncio.run(run_consensus_demo(n_test_tx=5))
+final_dag, sat_reps = asyncio.run(run_consensus_demo(n_test_tx=3))
 if final_dag:
     plot_transaction_dag(final_dag)
 if sat_reps:

@@ -27,7 +27,7 @@ from skyfield.api import EarthSatellite, load, Timescale
 import numpy as np
 from sgp4.api import Satrec, WGS72 # type: ignore[import-untyped]
 
-def corrupt_satellite(sat: EarthSatellite, mean_motion_factor: float = 0.8) -> EarthSatellite:
+def corrupt_satellite(sat: EarthSatellite, mean_motion_factor: float = 1.2) -> EarthSatellite:
     """
     mean motion factor of >1.05 or <0.73 makes the data invalid
     1.0 is the same.
