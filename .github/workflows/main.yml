@@ -1,4 +1,4 @@
-name: Run Pylint and Jupyter Notebook
+name: Run Pylint and Mypy
 
 on: [push]
 
