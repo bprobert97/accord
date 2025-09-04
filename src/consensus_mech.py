@@ -174,17 +174,15 @@ class ConsensusMechanism():
                                                   transaction.tx_data,
                                                   sat_node.is_malicious)[0]
 
-        # 2) TODO Check if data is valid, if not - ignore.
-        # If the list is empty, there is no data that can be valid
-        # Consensus cannot be reached on invalid data. If yes, add to DAG
-        if not transaction.tx_data or not self.data_is_valid(sat):
+        # 2) If the list is empty, there is no data that can be valid
+        if not transaction.tx_data:
             # Reduce node reputation for providing no or invalid data
             sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
                 sat_node.reputation, sat_node.exp_pos
                 )
             return False
 
-        # 2a) If we have valid data, submit a transaction
+        # 2a) If we have data, submit a transaction
         dag.add_tx(transaction)
 
         # 3) TODO Check we have enough data to be bft (3f + 1)
@@ -194,47 +192,50 @@ class ConsensusMechanism():
         if not dag.has_bft_quorum():
             return False
 
-        # 4) TODO Check if satellite has been witnessed before
-        #4a if yes, does this data agree with other data/ is it correct?
-        # Assign correctness score -> affects transaction
-        #  This is going to be very tricky. How do I get this data?? Where do I
-        # store it? Do I want this to tie in to how parents are selected?
-        # TODO - 0.5 setting is from a recent reference - find and add here
-        correctness_score = self.get_correctness_score(sat, dag)
+        # If we have valid data, try to reach consensus on it
+        if self.data_is_valid(sat):
+            # 4) TODO Check if satellite has been witnessed before
+            #4a if yes, does this data agree with other data/ is it correct?
+            # Assign correctness score -> affects transaction
+            #  This is going to be very tricky. How do I get this data?? Where do I
+            # store it? Do I want this to tie in to how parents are selected?
+            # TODO - 0.5 setting is from a recent reference - find and add here
+            correctness_score = self.get_correctness_score(sat, dag)
 
-        # 5) TODO is sensor data accurate (done regardless of previous witnessing).
-        # Assign accuracy score -> affects transaction and node reputation
-        # Again, might be tricky. Probability distribution here? Like in the PowerGraph paper?
-        accuracy_score = self.estimate_accuracy(sat)
+            # 5) TODO is sensor data accurate (done regardless of previous witnessing).
+            # Assign accuracy score -> affects transaction and node reputation
+            # Again, might be tricky. Probability distribution here? Like in the PowerGraph paper?
+            accuracy_score = self.estimate_accuracy(sat)
 
-        # 6) TODO calculate consensus score - node reputation, accuracy and correctness all factor
-        # Need to add in a time decay factor
-        # Need to develop an equation - this will take some reading and tuning
+            # 6) TODO calculate consensus score - node reputation, accuracy and correctness all factor
+            # Need to add in a time decay factor
+            # Need to develop an equation - this will take some reading and tuning
 
-        consensus_score = self.calculate_consensus_score(correctness_score,
-                                                         accuracy_score,
-                                                         sat_node.reputation)
+            consensus_score = self.calculate_consensus_score(correctness_score,
+                                                            accuracy_score,
+                                                            sat_node.reputation)
 
-        print(consensus_score >= self.consensus_threshold)
+            sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
 
-        sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
+            # 7) if consensus reached - strong node (maybe affects node reputation?),
+            # else weak node (like IOTA)
+            if consensus_score >= self.consensus_threshold:
+                transaction.metadata.consensus_reached = True
+                sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
+                    sat_node.reputation, sat_node.exp_pos
+                )
+                transaction.metadata.is_confirmed = True
+                return True
 
-        # 7) if consensus reached - strong node (maybe affects node reputation?),
-        # else weak node (like IOTA)
-        if consensus_score >= self.consensus_threshold:
-            transaction.metadata.consensus_reached = True
-            sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
+        # If data is invalid, or consensus score is below threshold
+        # the transaction is rejected and the node's reputation is penalised.
+        else:
+            transaction.metadata.consensus_reached = False
+            sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
                 sat_node.reputation, sat_node.exp_pos
             )
-            transaction.metadata.is_confirmed = True
-            return True
-
-        transaction.metadata.consensus_reached = False
-        sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
-            sat_node.reputation, sat_node.exp_pos
-        )
-        transaction.metadata.is_rejected = True
-        return False
+            transaction.metadata.is_rejected = True
+            return False
 
 
         # if all history is strong - strong edge connection, else weak edge connection.
