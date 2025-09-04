@@ -159,17 +159,21 @@ async def run_consensus_demo(initial_n_tx: int = 3,
 
 
 # -----------------------------------------------------------------------------------
-def plot_transaction_dag(dag: DAG) -> None:
+def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
     """
     Plot a graph representing the Directed Acyclic Graph
 
     Args:
     dag: The Directed Acyclic Graph Distributed Ledger datastructure
     to be plotted
+    draw_labels: Whether or not the nodes in the graph will have labels.
+    If True, the hashes of each transaction are added as labels to each node.
 
     Returns:
     None. Shows a plot using MatPlotLib/
     """
+    import matplotlib.patches as mpatches
+
     graph: nx.DiGraph = nx.DiGraph()
     tx_timestamps = {}
     tx_status = {}  # store is_confirmed/is_rejected per tx
@@ -222,18 +226,47 @@ def plot_transaction_dag(dag: DAG) -> None:
         else:
             edge_colors.append("gray")
 
-    # Ignoring a warning raised by mypy as the sub file for networkx is incorrect
     nx.draw_networkx_edges(graph, pos,
                            edge_color=edge_colors, # type: ignore[arg-type]
                            arrowsize=15)
 
-    # Draw labels
-    nx.draw_networkx_labels(
-        graph, pos, font_size=8, font_weight="bold"
+    # Draw labels (optional)
+    if draw_labels:
+        nx.draw_networkx_labels(
+            graph, pos, font_size=8, font_weight="bold"
+        )
+
+    # Add legend
+    node_patch = mpatches.Patch(color="lightblue", label="Transaction Node")
+    confirmed_patch = mpatches.Patch(edgecolor="green", facecolor="lightblue", label="Confirmed Node", linewidth=2)
+    rejected_patch = mpatches.Patch(edgecolor="red", facecolor="lightblue", label="Rejected Node", linewidth=2)
+    edge_confirmed = mpatches.Patch(color="green", label="Confirmed Edge")
+    edge_rejected = mpatches.Patch(color="red", label="Rejected Edge")
+    edge_default = mpatches.Patch(color="gray", label="Default Edge")
+
+    # Place legend outside the plot area (top right)
+    plt.legend(
+        handles=[node_patch, confirmed_patch, rejected_patch, edge_confirmed, edge_rejected, edge_default],
+        loc="upper left",
+        bbox_to_anchor=(1, 1)
     )
 
     plt.title("Transaction DAG", fontsize=14)
-    plt.axis("off")
+    # Add x-axis for time steps
+    plt.xlabel("Time Step")
+    # Set x-ticks to match time steps
+    plt.xticks(range(len(sorted_keys)), [str(i) for i in range(len(sorted_keys))])
+
+    # Only want an x axis in the graph. There is no scale on the Y axis
+    ax = plt.gca()
+    ax.get_yaxis().set_visible(False)
+    ax.spines['bottom'].set_visible(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.xaxis.set_ticks_position('bottom')
+    ax.xaxis.set_label_position('bottom')
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
     plt.show()
 
 # -----------------------------------------------------------------------------------
