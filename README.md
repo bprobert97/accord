@@ -21,7 +21,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 📁 accord/
 │
 ├── 📁 .github/workflows/              # GitHub Workflow files
-│   └── main.yml                       # CI configuration for github: Pylint and demo notebook execution
+│   └── main.yml                       # CI configuration for github: Pylint and Mypy
 │
 ├── 📁 design/                      # Design documents
 │   └── consensus_design.ipynb     # Initial consensys mechanism design
@@ -56,7 +56,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 Make sure Python 3.13 is installed on your system before proceeding with the installation.
 Follow these steps to set up the project in a Python virtual environment:
 
-1. **Clone the repository**  
+1. **Clone the repository**
    ```bash
    git clone https://github.com/bprobert97/accord.git
    ```
