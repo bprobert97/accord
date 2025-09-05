@@ -263,7 +263,10 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         return x_pred, p_pred
 
     def _build_measurement_model(self, measurement_dict: Dict,
-                                 x: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                                 x: np.ndarray) -> Tuple[np.ndarray,
+                                                         np.ndarray,
+                                                         np.ndarray,
+                                                         np.ndarray]:
         """
         Build a measurement model for a given observation.
 
@@ -280,4 +283,3 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         """
 
         # TODO - finish
-
