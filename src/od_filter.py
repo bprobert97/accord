@@ -34,7 +34,7 @@ class State:
     - state_estimate: 6x1 ,matrix [r (position); v (velocity)]. The current estimate of the
     satellite’s state vector in the Earth-Centered Inertial (ECI) frame.
     - covariance: 6x6 covariance matrix, representing uncertainty in the state estimate.
-    - last_update_seconds: The time of he last update in seconds (monotonic or UNIX)
+    - last_update_seconds: The time of the last update in seconds (monotonic or UNIX)
     """
     state_estimate: np.ndarray
     covariance: np.ndarray
@@ -59,7 +59,8 @@ class ODProcessingResult:
     dof: int
     post_cov: np.ndarray
 
-class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
+class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
+    # TODO - put this in part of the actual consensus mechanism using the innovation score
     """
     Simple square-root EKF-like estimator (improves numerical stability)
     - State: [r, v] (6x1) in ECI
@@ -89,7 +90,12 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         self.meas_floor = meas_floor
 
     def _weak_prior_result(self, target_id: str, timestamp: float) -> ODProcessingResult:
-        """Return a weak prior state and neutral NIS for uninitialised targets."""
+        """
+        Return a weak prior state and neutral NIS for uninitialised targets.
+
+        Side effect:
+        - Mutates self.targets by adding a new entry for the target with a weak prior state.
+        """
         x0 = np.zeros((6, 1))
         p0 = np.diag([1e10, 1e10, 1e10, 1e6, 1e6, 1e6])
         self.targets[target_id] = State(state_estimate=x0,
@@ -127,6 +133,9 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         # Posterior update
         x_upd = x_pred + k @ y
         p_post = (np.eye(6) - k @ h) @ p_pred @ (np.eye(6) - k @ h).T + k @ r @ k.T
+        # Symmetrising the covariance matrix helps maintain numerical stability
+        # and ensures the matrix remains positive semi-definite, which can be
+        # affected by floating-point errors.
         p_post = 0.5 * (p_post + p_post.T)
 
         nis = float(y.T @ s_inv @ y)
@@ -212,7 +221,8 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         has_any_angle: bool = "az_el_rad" in measurement_dict or \
             "ra_dec_rad" in measurement_dict or "los_eci" in measurement_dict
 
-        return bool(has_obs and (has_range and has_any_angle))
+        can_initialise = has_obs and has_range and has_any_angle
+        return bool(can_initialise)
 
     @staticmethod
     def _norm(v: np.ndarray) -> float:
@@ -266,7 +276,10 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         x0 = np.zeros((6, 1))
         x0[0:3, :] = r_tgt
         # Start with unknown velocity
-        # High uncertainty for initial position (1e6 m²) and moderate for velocity (1e4 (m/s)²).
+        # TODO - find paper The initial covariance values (1e6 m² for position,
+        # 1e4 (m/s)² for velocity) are chosen to reflect high initial uncertainty,
+        # similar to values used in practical orbit determination literature
+        # (see e.g. Vallado, "Fundamentals of Astrodynamics and Applications", 4th Ed.).
         p0 = np.diag([1e6, 1e6, 1e6, 1e4, 1e4, 1e4]).astype(float)
         return State(state_estimate=x0, covariance=p0, last_update_seconds=timestamp)
 
@@ -285,7 +298,13 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         updated_x_noise = x_noise * dt * np.eye(3)
         updated_v_noise = v_noise * dt * np.eye(3)
 
-        return np.block([[updated_x_noise, np.zeros((3, 3))], [np.zeros((3, 3)), updated_v_noise]])
+        # Process noise covariance block structure:
+        # | position_noise   0           |
+        # | 0                velocity_noise |
+        return np.block([
+            [updated_x_noise, np.zeros((3, 3))],
+            [np.zeros((3, 3)), updated_v_noise]
+        ])
 
     def _predict(self, x: np.ndarray, p: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -294,9 +313,10 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
 
         Arguments:
         - x: Current state vector.
-        - p: Current covariance.
-        - dt: Time step (s).
-
+        State transition matrix (stm) for a 6D state [r, v]:
+        Assumes nearly-constant velocity (NCV) model.
+        stm = | I3   dt*I3 |
+              | 0     I3   |
         Returns:
         - Tuple of predicted state and covariance.
         """
@@ -324,10 +344,12 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         z_hat = np.array([[rho_hat]], dtype=float)
 
         # Jacobian wrt position
+
         if rho_hat < 1e-6:
             u = np.zeros((3, 1))
         else:
             u = delta_r / rho_hat
+
         h = np.hstack([u.T, np.zeros((1, 3))])
 
         if r is None:
@@ -383,6 +405,8 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         z_hat = np.array([[ra_hat], [dec_hat]], dtype=float)
 
         # Jacobian
+        # eps is a small value added for numerical stability to prevent
+        # division by zero in Jacobian calculations.
         eps = 1e-9
         d_ra_dx = -y_ / (x_**2 + y_**2 + eps)
         d_ra_dy = x_ / (x_**2 + y_**2 + eps)
@@ -417,7 +441,7 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I wantt
         - x: predicted state vector.
 
         Returns:
-        A tuple of: # TODo - rename here and above where called
+        A tuple of:
         - h: Measurement Jacobian # TODO - what? make functions and understand
         - z: Actual measurement vector.
         - z_hat: Predicted measurement vector.
