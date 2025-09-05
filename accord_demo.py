@@ -202,6 +202,12 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
 
     plt.figure(figsize=(16, 6), facecolor='none')
 
+    # Draw vertical lines behind the main graph
+    plt.axvline(x=2, color="blue", linestyle="--", linewidth=3,
+                label="Real Data Added", zorder=1)
+    plt.axvline(x=5, color="orange", linestyle="--", linewidth=3,
+                label="BFT Quorum Reached", zorder=1)
+
     # Draw nodes with outline color
     for node in graph.nodes():
         outline_color = "black"
@@ -218,7 +224,7 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
             graph, pos,
             nodelist=[node],
             node_color=node_color,
-            node_size=1200,
+            node_size=600,
             edgecolors=outline_color,  # outline color
             linewidths=3
         )
@@ -236,7 +242,7 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
     nx.draw_networkx_edges(graph, pos,
                            edge_color=edge_colors, # type: ignore[arg-type]
                            arrowsize=15,
-                           width=3)
+                           width=2)
 
     # Draw labels (optional)
     if draw_labels:
@@ -276,6 +282,22 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
 
     # Only want an x axis in the graph. There is no scale on the Y axis
     ax = plt.gca()
+
+    ymin, _ = ax.get_ylim()
+
+    # Add rotated text along the vertical lines
+    ax.text(2 - 0.1, ymin + 0.05, "Real Data Added", color="blue",
+        rotation=90, rotation_mode="anchor",
+        va="bottom", ha="left", fontsize=10,
+        zorder=10,
+        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.7, "pad": 2})
+
+    ax.text(5 - 0.1, ymin + 0.05, "BFT Quorum Reached", color="orange",
+            rotation=90, rotation_mode="anchor",
+            va="bottom", ha="left", fontsize=10,
+            zorder=10,
+            bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.7, "pad": 2})
+
     ax.get_yaxis().set_visible(False)
     ax.spines['bottom'].set_visible(True)
     ax.spines['top'].set_visible(False)
@@ -318,9 +340,9 @@ def plot_reputation(history: list[float]) -> None:
                 linewidth=3, label="BFT Quorum Achieved", zorder=1)
     plt.axvline(x=6, color="red", linestyle="--",
                 linewidth=3, label="Faulty Data Submitted", zorder=1)
-    plt.plot(steps, history, marker='o', markersize=16,
+    plt.plot(steps, history, marker='o', markersize=8,
              label="Satellite Reputation", color="blue", linewidth=3, zorder=2)
-    plt.plot(steps, target_curve, linestyle="--", color="orange",
+    plt.plot(steps, target_curve, linestyle=":", color="orange",
              label="Max. Possible Reputation", linewidth=3, zorder=2)
     plt.axhline(neutral_level, color="black", linestyle=":",
                 label=f"Neutral Reputation ({neutral_level})", linewidth=3, zorder=1)
