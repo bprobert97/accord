@@ -207,7 +207,8 @@ class ConsensusMechanism():
             # Again, might be tricky. Probability distribution here? Like in the PowerGraph paper?
             accuracy_score = self.estimate_accuracy(sat)
 
-            # 6) TODO calculate consensus score - node reputation, accuracy and correctness all factor
+            # 6) TODO calculate consensus score - node reputation,
+            # accuracy and correctness all factor
             # Need to add in a time decay factor
             # Need to develop an equation - this will take some reading and tuning
 
@@ -229,13 +230,12 @@ class ConsensusMechanism():
 
         # If data is invalid, or consensus score is below threshold
         # the transaction is rejected and the node's reputation is penalised.
-        else:
-            transaction.metadata.consensus_reached = False
-            sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
-                sat_node.reputation, sat_node.exp_pos
-            )
-            transaction.metadata.is_rejected = True
-            return False
+        transaction.metadata.consensus_reached = False
+        sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
+            sat_node.reputation, sat_node.exp_pos
+        )
+        transaction.metadata.is_rejected = True
+        return False
 
 
         # if all history is strong - strong edge connection, else weak edge connection.

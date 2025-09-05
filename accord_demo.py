@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals
+# pylint: disable=protected-access, too-many-locals, too-many-branches, too-many-statements
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -25,7 +25,9 @@ import asyncio
 from datetime import timedelta
 import json
 from typing import Optional
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import networkx as nx
 import numpy as np
 from skyfield.api import EarthSatellite
@@ -117,6 +119,7 @@ async def run_consensus_demo(initial_n_tx: int = 3,
     # TODO - can this be simplified??
     for _ in range(initial_n_tx):
         test_dag.add_tx(create_noisy_transaction(base_sat))
+        sat_rep_list.append(test_satellite.reputation)
     # ----------------------------------------------------------------------------------------
 
     # Start DAG listener
@@ -170,9 +173,8 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
     If True, the hashes of each transaction are added as labels to each node.
 
     Returns:
-    None. Shows a plot using MatPlotLib/
+    None. Shows a plot using MatPlotLib.
     """
-    import matplotlib.patches as mpatches
 
     graph: nx.DiGraph = nx.DiGraph()
     tx_timestamps = {}
@@ -198,22 +200,27 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
         y = (hash(key) % 100) / 100.0 - 0.5
         pos[key] = (x, y)
 
-    plt.figure(figsize=(16, 6))
+    plt.figure(figsize=(16, 6), facecolor='none')
 
     # Draw nodes with outline color
     for node in graph.nodes():
         outline_color = "black"
         if tx_status[node]["is_confirmed"]:
             outline_color = "green"
+            node_color = "green"
         elif tx_status[node]["is_rejected"]:
             outline_color = "red"
+            node_color = "red"
+        else:
+            outline_color = "gray"
+            node_color = "gray"
         nx.draw_networkx_nodes(
             graph, pos,
             nodelist=[node],
-            node_color="lightblue",
-            node_size=1000,
+            node_color=node_color,
+            node_size=1200,
             edgecolors=outline_color,  # outline color
-            linewidths=2
+            linewidths=3
         )
 
     # Draw edges with color matching the target node's status
@@ -228,34 +235,44 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
 
     nx.draw_networkx_edges(graph, pos,
                            edge_color=edge_colors, # type: ignore[arg-type]
-                           arrowsize=15)
+                           arrowsize=15,
+                           width=3)
 
     # Draw labels (optional)
     if draw_labels:
         nx.draw_networkx_labels(
-            graph, pos, font_size=8, font_weight="bold"
+            graph, pos, font_size=24, font_weight="bold", font_color="black"
         )
 
     # Add legend
-    node_patch = mpatches.Patch(color="lightblue", label="Transaction Node")
-    confirmed_patch = mpatches.Patch(edgecolor="green", facecolor="lightblue", label="Confirmed Node", linewidth=2)
-    rejected_patch = mpatches.Patch(edgecolor="red", facecolor="lightblue", label="Rejected Node", linewidth=2)
-    edge_confirmed = mpatches.Patch(color="green", label="Strong Edge")
-    edge_rejected = mpatches.Patch(color="red", label="Weak Edge")
-    edge_default = mpatches.Patch(color="gray", label="Default Edge")
+    node_patch = mpatches.Patch(edgecolor="gray", facecolor="gray",
+                                label="Initial Transaction", linewidth=3)
+    confirmed_patch = mpatches.Patch(edgecolor="green", facecolor="green",
+                                     label="Confirmed Transaction", linewidth=3)
+    rejected_patch = mpatches.Patch(edgecolor="red", facecolor="red",
+                                    label="Rejected Transaction", linewidth=3)
+    # Use Line2D for edge legend entries to look like lines
+    edge_confirmed = Line2D([0], [0], color="green", linewidth=3, label="Strong Edge")
+    edge_rejected = Line2D([0], [0], color="red", linewidth=3, label="Weak Edge")
+    edge_default = Line2D([0], [0], color="gray", linewidth=3, label="Default Edge")
 
     # Place legend outside the plot area (top right)
     plt.legend(
-        handles=[node_patch, confirmed_patch, rejected_patch, edge_confirmed, edge_rejected, edge_default],
+        handles=[node_patch, confirmed_patch, rejected_patch,
+                 edge_confirmed, edge_rejected, edge_default],
         loc="upper left",
-        bbox_to_anchor=(1, 1)
+        bbox_to_anchor=(1, 1),
+        facecolor='none',
+        edgecolor='black',
+        labelcolor='black',
+        fontsize=18
     )
 
-    plt.title("Transaction DAG", fontsize=14)
-    # Add x-axis for time steps
-    plt.xlabel("Time Step")
-    # Set x-ticks to match time steps
-    plt.xticks(range(len(sorted_keys)), [str(i) for i in range(len(sorted_keys))])
+    plt.title("Transaction DAG", fontsize=24, color='black')
+    plt.xlabel("Time Step", color='black', fontsize=24)
+    plt.xticks(range(len(sorted_keys)),
+               [str(i) for i in range(len(sorted_keys))],
+               color='black', fontsize=24)
 
     # Only want an x axis in the graph. There is no scale on the Y axis
     ax = plt.gca()
@@ -266,7 +283,17 @@ def plot_transaction_dag(dag: DAG, draw_labels: bool = False) -> None:
     ax.spines['left'].set_visible(False)
     ax.xaxis.set_ticks_position('bottom')
     ax.xaxis.set_label_position('bottom')
-    plt.tight_layout(rect=[0, 0, 0.85, 1])
+
+    # Set axis and tick colors
+    ax.spines['bottom'].set_color('black')
+    ax.tick_params(axis='x', colors='black', labelsize=24)
+    ax.xaxis.label.set_color('black')
+
+    # Set transparent background
+    ax.set_facecolor('none')
+    plt.gcf().patch.set_alpha(0.0)
+
+    plt.tight_layout(rect=(0, 0, 0.85, 1))
     plt.show()
 
 # -----------------------------------------------------------------------------------
@@ -278,28 +305,52 @@ def plot_reputation(history: list[float]) -> None:
     Plot reputation trajectory over time.
 
     history: list of reputation values from run_consensus_demo()
-    neutral_level: baseline reputation
-    max_rep: maximum reputation
     """
-    steps = list(range(len(history)))
+    steps = np.linspace(0, len(history) - 1, len(history))
     neutral_level: float = MAX_REPUTATION / 2
 
-    # Compute Gompertz targets assuming exp_pos increments each step
-    # This allows us to plot the Gompertz envelope for reputation
-    # tolist() converts a np array of signedInts to list[int]
-    exp_pos = (np.arange(len(history))).tolist()
+    exp_pos = np.linspace(0, len(history) - 1, len(history))
     target_curve = [REP_MGR._gompertz_target(e) for e in exp_pos]
 
-    plt.figure(figsize=(8, 5))
-    plt.plot(steps, history, marker='o', label="Actual Reputation")
-    plt.plot(steps, target_curve, linestyle="--", color="orange", label="Gompertz Target")
-    plt.axhline(neutral_level, color="gray", linestyle=":", label=f"Neutral ({neutral_level})")
+    plt.figure(figsize=(12, 5), facecolor='none')
+    # Draw vertical line first so it appears behind other plots
+    plt.axvline(x=3, color="green", linestyle="--",
+                linewidth=3, label="BFT Quorum Achieved", zorder=1)
+    plt.axvline(x=6, color="red", linestyle="--",
+                linewidth=3, label="Faulty Data Submitted", zorder=1)
+    plt.plot(steps, history, marker='o', markersize=16,
+             label="Satellite Reputation", color="blue", linewidth=3, zorder=2)
+    plt.plot(steps, target_curve, linestyle="--", color="orange",
+             label="Max. Possible Reputation", linewidth=3, zorder=2)
+    plt.axhline(neutral_level, color="black", linestyle=":",
+                label=f"Neutral Reputation ({neutral_level})", linewidth=3, zorder=1)
     plt.ylim(0, MAX_REPUTATION)
-    plt.xlabel("Time step")
-    plt.ylabel("Reputation")
-    plt.title("Satellite Node Reputation over Time")
-    plt.legend(loc="upper left")
-    plt.grid(True, linestyle=":")
+    plt.xlim(steps[0] - 0.5, steps[-1] + 0.5)
+    plt.xlabel("Time step", color='black', fontsize=24)
+    plt.ylabel("Reputation", color='black', fontsize=24)
+    # plt.title("Satellite Node Reputation over Time", color='black', fontsize=24)
+    plt.legend(
+        loc="upper left",
+        bbox_to_anchor=(1, 1),
+        fontsize=18,
+        facecolor='none',
+        edgecolor='black',
+        labelcolor='black'
+    )
+    plt.grid(True, linestyle=":", color='black')
+
+    ax = plt.gca()
+    ax.set_facecolor('none')
+    plt.gcf().patch.set_alpha(0.0)
+    ax.spines['bottom'].set_color('black')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.tick_params(axis='x', colors='black', labelsize=24)
+    ax.tick_params(axis='y', colors='black', labelsize=24)
+    ax.xaxis.label.set_color('black')
+    ax.yaxis.label.set_color('black')
+    plt.tight_layout(rect=(0, 0, 0.85, 1))
     plt.show()
 
 # -----------------------------------------------------------------------------------
