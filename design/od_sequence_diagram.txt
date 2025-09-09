@@ -1,0 +1,41 @@
+@startuml
+actor Caller
+
+Caller -> SDEKF: process_measurement(measurement_dict)
+
+activate SDEKF
+SDEKF -> SDEKF: _timestamp_to_seconds()
+SDEKF -> SDEKF: _can_initialise()
+
+alt Needs initialisation
+    SDEKF -> SDEKF: _initialise_state()
+else Not initialised
+    SDEKF -> SDEKF: _weak_prior_result()
+    return ODProcessingResult
+end
+
+opt Target already initialised
+    SDEKF -> SDEKF: _predict_to_time()
+    activate SDEKF
+    SDEKF -> SDEKF: _predict()
+    SDEKF -> SDEKF: _update_noise_covariance()
+    deactivate SDEKF
+
+    SDEKF -> SDEKF: _update_with_measurement()
+    activate SDEKF
+    SDEKF -> SDEKF: _build_measurement_model()
+
+    alt Range-only
+        SDEKF -> SDEKF: _build_range_model()
+    else Az/El
+        SDEKF -> SDEKF: _build_azel_model()
+    else RA/Dec
+        SDEKF -> SDEKF: _build_radec_model()
+    end
+    SDEKF -> SDEKF: _ensure_covariance()
+    deactivate SDEKF
+end
+
+SDEKF --> Caller: ODProcessingResult
+deactivate SDEKF
+@enduml
