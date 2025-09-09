@@ -34,7 +34,7 @@ class State:
     - state_estimate: 6x1 ,matrix [r (position); v (velocity)]. The current estimate of the
     satellite’s state vector in the Earth-Centered Inertial (ECI) frame.
     - covariance: 6x6 covariance matrix, representing uncertainty in the state estimate.
-    - last_update_seconds: The time of the last update in seconds (monotonic or UNIX)
+    - last_update_seconds: The time of the last update in seconds (monotonic or UNIX).
     """
     state_estimate: np.ndarray
     covariance: np.ndarray
@@ -43,7 +43,8 @@ class State:
 @dataclass
 class ODProcessingResult:
     """
-    Output after processing one measurement of a target.
+    Output after processing one measurement of a target satellite.
+
     Attributes:
     - target_id: The identifier of the satellite being tracked.
     - nis: Normalised Innovation Squared. Measures how well the measurement
@@ -62,11 +63,12 @@ class ODProcessingResult:
 class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
     # TODO - put this in part of the actual consensus mechanism using the innovation score
     """
-    Simple square-root EKF-like estimator (improves numerical stability)
-    - State: [r, v] (6x1) in ECI
+    Simple square-root EKF-like estimator (improves numerical stability).
+    Designed for processing one measurement at a time from multiple observers.
+    - State: [r, v] (6x1) in ECI.
     - Dynamics: nearly-constant velocity (NCV) for robustness (note: this is not
     high-fidelity orbital dynamics, but sufficient for innovation-based
-    consensus scoring)
+    consensus scoring).
     - Measurements: range (1d), azimuth/elevation (2D), right ascension/declination (2D)
     """
 
@@ -89,61 +91,9 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         self.vel_noise = vel_noise
         self.meas_floor = meas_floor
 
-    def _weak_prior_result(self, target_id: str, timestamp: float) -> ODProcessingResult:
-        """
-        Return a weak prior state and neutral NIS for uninitialised targets.
-
-        Side effect:
-        - Mutates self.targets by adding a new entry for the target with a weak prior state.
-        """
-        x0 = np.zeros((6, 1))
-        p0 = np.diag([1e10, 1e10, 1e10, 1e6, 1e6, 1e6])
-        self.targets[target_id] = State(state_estimate=x0,
-                                        covariance=p0,
-                                        last_update_seconds=timestamp)
-        return ODProcessingResult(target_id=target_id, nis=1.0, dof=1, post_cov=p0)
-
-
-    def _predict_to_time(self, state: State, timestamp: float) -> Tuple[np.ndarray, np.ndarray]:
-        """Propagate state forward to the given timestamp."""
-        delta_t = max(0.0, timestamp - state.last_update_seconds)
-        x_pred, p_pred = self._predict(state.state_estimate, state.covariance, delta_t)
-        state.last_update_seconds = timestamp
-        return x_pred, p_pred
-
-
-    def _update_with_measurement( # pylint: disable=too-many-locals
-        self, x_pred: np.ndarray, p_pred: np.ndarray, measurements: Dict
-    ) -> Tuple[np.ndarray, np.ndarray, float, int]:
-        """Apply Kalman update with one measurement dictionary."""
-        h, z, z_hat, r = self._build_measurement_model(measurements, x_pred)
-
-        # Innovation
-        y = z - z_hat
-        s = h @ p_pred @ h.T + r
-        s = 0.5 * (s + s.T)
-
-        try:
-            s_inv = np.linalg.inv(s)
-        except np.linalg.LinAlgError:
-            s_inv = np.linalg.pinv(s)
-
-        k = p_pred @ h.T @ s_inv
-
-        # Posterior update
-        x_upd = x_pred + k @ y
-        p_post = (np.eye(6) - k @ h) @ p_pred @ (np.eye(6) - k @ h).T + k @ r @ k.T
-        # Symmetrising the covariance matrix helps maintain numerical stability
-        # and ensures the matrix remains positive semi-definite, which can be
-        # affected by floating-point errors.
-        p_post = 0.5 * (p_post + p_post.T)
-
-        nis = float(y.T @ s_inv @ y)
-        dof = int(z.shape[0])
-
-        return x_upd, p_post, nis, dof
-
     def process_measurement(self, measurements: Dict) -> ODProcessingResult:
+
+        # TODO - need to find uncertainty refs for noise measurements - if narrow gaussian, its okay
         """
         Process one cooperative measurement and update the per-target filter.
 
@@ -182,6 +132,102 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
 
     # --------------------------------------------------------------------------------------
     # Internal methods
+
+    def _weak_prior_result(self, target_id: str, timestamp: float) -> ODProcessingResult:
+        """
+        Return a weak prior state and neutral NIS for uninitialised targets.
+
+        Args:
+        - target_id: The identifier of the target satellite.
+        - timestamp: The current timestamp in seconds.
+
+        Returns:
+        - An ODProcessingResult with a weak prior state and neutral NIS.
+
+        Side effect:
+        - Mutates self.targets by adding a new entry for the target with a weak prior state.
+        """
+        # x0 is a zero state, p0 is large uncertainty
+        # TODO - tune these values
+        x0 = np.zeros((6, 1))
+        p0 = np.diag([1e10, 1e10, 1e10, 1e6, 1e6, 1e6])
+
+        self.targets[target_id] = State(state_estimate=x0,
+                                        covariance=p0,
+                                        last_update_seconds=timestamp)
+
+        # Expected (neutral) value of NIS is equal to the degrees of freedom
+        # Simplest case: range only, dof = 1
+        return ODProcessingResult(target_id=target_id, nis=1.0, dof=1, post_cov=p0)
+
+
+    def _predict_to_time(self, state: State, timestamp: float) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Propagate state forward to the given timestamp.
+
+        Args:
+        - state: The current state of the target satellite.
+        - timestamp: The target timestamp in seconds.
+
+        Returns:
+        - A tuple of the predicted state and covariance at the target timestamp.
+        """
+        # Ensure non-negative time difference
+        delta_t = max(0.0, timestamp - state.last_update_seconds)
+
+        # Perform the prediction step
+        x_pred, p_pred = self._predict(state.state_estimate, state.covariance, delta_t)
+        state.last_update_seconds = timestamp
+        return x_pred, p_pred
+
+
+    def _update_with_measurement( # pylint: disable=too-many-locals
+        self, x_pred: np.ndarray, p_pred: np.ndarray, measurements: Dict
+    ) -> Tuple[np.ndarray, np.ndarray, float, int]:
+        """
+        Perform the update step for the kalman filter.
+
+        Args:
+        - x_pred: The predicted state vector.
+        - p_pred: The predicted covariance matrix.
+        - measurements: The measurement dictionary containing the observation data.
+
+        Returns:
+        - A tuple of the updated state vector, updated covariance matrix,
+        """
+        # Build measurement model
+        h, z, z_hat, r = self._build_measurement_model(measurements, x_pred)
+
+        # Kalman gain and update
+        # y = innovation
+        # s = innovation covariance
+        y = z - z_hat
+        s = h @ p_pred @ h.T + r
+        s = 0.5 * (s + s.T)
+
+        # Use pseudo-inverse in case s is singular
+        try:
+            s_inv = np.linalg.inv(s)
+        except np.linalg.LinAlgError:
+            s_inv = np.linalg.pinv(s)
+
+        # Kalman gain
+        k = p_pred @ h.T @ s_inv
+
+        # Posterior update
+        x_upd = x_pred + k @ y
+        p_post = (np.eye(6) - k @ h) @ p_pred @ (np.eye(6) - k @ h).T + k @ r @ k.T
+
+        # Symmetrising the covariance matrix helps maintain numerical stability
+        # and ensures the matrix remains positive semi-definite, which can be
+        # affected by floating-point errors.
+        p_post = 0.5 * (p_post + p_post.T)
+
+        nis = float(y.T @ s_inv @ y)
+        dof = int(z.shape[0])
+
+        return x_upd, p_post, nis, dof
+
     @staticmethod
     def _timestamp_to_seconds(ts: Union[int, float, str]) -> float:
         """
@@ -226,7 +272,17 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
 
     @staticmethod
     def _norm(v: np.ndarray) -> float:
-        """Return Euclidean norm of vector v."""
+        """
+        Return Euclidean norm of vector v.
+        The Euclidean norm of a vector is a measure of
+        its length or magnitude
+
+        Args:
+        - v: Input vector.
+
+        Returns:
+        - Euclidean norm of v.
+        """
         return float(np.linalg.norm(v))
 
     def _initialise_state(self, measurement_dict: Dict, timestamp: float) -> State:
@@ -239,7 +295,8 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
 
         Returns: A state dataclass.
         """
-        # Extract observer position and convert to a 3x1 column vector
+        # Extract observer position and convert to a 3x1 column vector so
+        # that NIS is a scalar at the end of the matrix calculations.
         obs = measurement_dict["observer_state_eci"]
         r_obs: np.ndarray = np.array(obs["r_m"], dtype=float).reshape(3, 1)
 
@@ -248,18 +305,22 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         if "los_eci" in measurement_dict:
             u = np.array(measurement_dict["los_eci"], dtype=float).reshape(3, 1)
             u = u / max(1e-12, self._norm(u))
+
         # If only azimuth/elevation is provided, compute an approx LOS vector
         elif "az_el_rad" in measurement_dict:
             az, el = [float(x) for x in measurement_dict["az_el_rad"]]
             # Local-ENU LOS in observer frame would require a frame map; use a simple placeholder:
             # assume azimuth measured from x-y plane and
             # elevation from horizon; form ECI-like LOS (approx).
+            # Convert spherical to Cartesian
+            # (This is a simplification; proper conversion would need observer's lat/lon)
             u = np.array([
                 np.cos(el) * np.cos(az),
                 np.cos(el) * np.sin(az),
                 np.sin(el),
             ], dtype=float).reshape(3, 1)
-        # If only RA/Dec (astronomical coordinates) are given, convert to a unit vector
+
+        # If only RA/Dec (astronomical coordinates) are given, convert to a Cartesian unit vector
         else:
             ra, dec = [float(x) for x in measurement_dict["ra_dec_rad"]]
             u = np.array([
@@ -268,13 +329,16 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
                 np.sin(dec),
             ], dtype=float).reshape(3, 1)
 
-        # Compute target position. rho = range from observer to target
+        # Compute target position. rho = measured range from observer to target
         rho = float(measurement_dict.get("range_m", 0.0))
         r_tgt = r_obs + rho * u
 
         # Build initial state vector
         x0 = np.zeros((6, 1))
+
+        # Set the first three rows to the estimated target position
         x0[0:3, :] = r_tgt
+
         # Start with unknown velocity
         # TODO - find paper The initial covariance values (1e6 m² for position,
         # 1e4 (m/s)² for velocity) are chosen to reflect high initial uncertainty,
@@ -309,7 +373,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
     def _predict(self, x: np.ndarray, p: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
         """
         Propagate state and covariance forward by dt using NCV model.
-        # TODO - NCV vs sgp4??
 
         Arguments:
         - x: Current state vector.
@@ -317,10 +380,13 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         Assumes nearly-constant velocity (NCV) model.
         stm = | I3   dt*I3 |
               | 0     I3   |
+        - p: Current covariance matrix.
+        - dt: Time step (s).
+
         Returns:
         - Tuple of predicted state and covariance.
         """
-
+        # No prediction needed for zero time step
         if dt <= 0.0:
             return x, p
 
@@ -336,98 +402,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         p_pred = 0.5 * (p_pred + p_pred.T)
         return x_pred, p_pred
 
-    def _build_range_model(self, delta_r: np.ndarray,
-                           measurement_dict: Dict, r: Optional[np.ndarray]):
-        """Handle pure range measurement."""
-        rho_hat = np.linalg.norm(delta_r)
-        z = np.array([[float(measurement_dict["range_m"])]], dtype=float)
-        z_hat = np.array([[rho_hat]], dtype=float)
-
-        # Jacobian wrt position
-
-        if rho_hat < 1e-6:
-            u = np.zeros((3, 1))
-        else:
-            u = delta_r / rho_hat
-
-        h = np.hstack([u.T, np.zeros((1, 3))])
-
-        if r is None:
-            r = np.array([[max(self.meas_floor, 25.0)]], dtype=float)  # (5 m)^2 as floor
-
-        return h, z, z_hat, r
-
-
-    def _build_azel_model(self, delta_r: np.ndarray, # pylint: disable=too-many-locals
-                          measurement_dict: Dict, r: Optional[np.ndarray]):
-        """Handle azimuth/elevation measurement."""
-        az, el = [float(x) for x in measurement_dict["az_el_rad"]]
-        z = np.array([[az], [el]], dtype=float)
-
-        x_, y_, z_ = delta_r.flatten()
-        r_xy = np.hypot(x_, y_)
-        r_tot = np.linalg.norm(delta_r)
-
-        az_hat = np.arctan2(y_, x_)
-        el_hat = np.arctan2(z_, r_xy)
-        z_hat = np.array([[az_hat], [el_hat]], dtype=float)
-
-        if r is None:
-            r = np.diag([max(self.meas_floor, (1.7e-3)**2),
-                        max(self.meas_floor, (1.7e-3)**2)]).astype(float)
-
-        # Jacobian
-        eps = 1e-9
-        d_az_dx = -y_ / (r_xy**2 + eps)
-        d_az_dy = x_ / (r_xy**2 + eps)
-        d_az_dz = 0.0
-        d_el_dx = -(x_ * z_) / ((r_tot**2) * (r_xy + eps)) if r_tot > eps else 0.0
-        d_el_dy = -(y_ * z_) / ((r_tot**2) * (r_xy + eps)) if r_tot > eps else 0.0
-        d_el_dz = r_xy / (r_tot**2 + eps)
-
-        h_pos = np.array([[d_az_dx, d_az_dy, d_az_dz],
-                        [d_el_dx, d_el_dy, d_el_dz]], dtype=float)
-        h = np.hstack([h_pos, np.zeros((2, 3))])
-
-        return h, z, z_hat, r
-
-
-    def _build_radec_model(self, delta_r: np.ndarray, # pylint: disable=too-many-locals
-                           measurement_dict: Dict, r: Optional[np.ndarray]):
-        """Handle right ascension/declination measurement."""
-        ra, dec = [float(x) for x in measurement_dict.get("ra_dec_rad", [0.0, 0.0])]
-        z = np.array([[ra], [dec]], dtype=float)
-
-        x_, y_, z_ = delta_r.flatten()
-        rho = float(np.linalg.norm(delta_r))
-        ra_hat = np.arctan2(y_, x_)
-        dec_hat = np.arcsin(z_ / max(rho, 1e-9))
-        z_hat = np.array([[ra_hat], [dec_hat]], dtype=float)
-
-        # Jacobian
-        # eps is a small value added for numerical stability to prevent
-        # division by zero in Jacobian calculations.
-        eps = 1e-9
-        d_ra_dx = -y_ / (x_**2 + y_**2 + eps)
-        d_ra_dy = x_ / (x_**2 + y_**2 + eps)
-        d_ra_dz = 0.0
-        d_dec_dx = -x_ * z_ / ((rho**2) * np.sqrt(1.0 - (z_ / max(eps, rho))**2) + eps) \
-            if rho > eps else 0.0
-        d_dec_dy = -y_ * z_ / ((rho**2) * np.sqrt(1.0 - (z_ / max(eps, rho))**2) + eps) \
-            if rho > eps else 0.0
-        d_dec_dz = np.sqrt(1.0 - (z_ / max(eps, rho))**2) / (rho + eps)
-
-        h_pos = np.array([[d_ra_dx, d_ra_dy, d_ra_dz],
-                        [d_dec_dx, d_dec_dy, d_dec_dz]], dtype=float)
-        h = np.hstack([h_pos, np.zeros((2, 3))])
-
-        if r is None:
-            r = np.diag([max(self.meas_floor, (1.7e-3)**2),
-                        max(self.meas_floor, (1.7e-3)**2)]).astype(float)
-
-        return h, z, z_hat, r
-
-
     def _build_measurement_model(self, measurement_dict: Dict,
                                  x: np.ndarray) -> Tuple[np.ndarray,
                                                          np.ndarray,
@@ -442,7 +416,7 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
 
         Returns:
         A tuple of:
-        - h: Measurement Jacobian # TODO - what? make functions and understand
+        - h: Measurement Jacobian
         - z: Actual measurement vector.
         - z_hat: Predicted measurement vector.
         - r: Measurement covariance.
@@ -469,12 +443,164 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
             return self._build_azel_model(delta_r, measurement_dict, r)
         return self._build_radec_model(delta_r, measurement_dict, r)
 
+
+    def _build_range_model(self, delta_r: np.ndarray,
+                           measurement_dict: Dict, r: Optional[np.ndarray]
+                           ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Handle pure range measurement.
+
+        Args:
+        - delta_r: Relative position vector (target - observer).
+        - measurement_dict: Measurement dictionary.
+        - r: Optional measurement covariance matrix.
+
+        Returns a tuple of:
+        - h: Measurement Jacobian.
+        - z: Actual measurement vector.
+        - z_hat: Predicted measurement vector.
+        - r: Measurement covariance.
+        """
+        # rho_hat is the predicted range
+        rho_hat = np.linalg.norm(delta_r)
+        z = np.array([[float(measurement_dict["range_m"])]], dtype=float)
+        z_hat = np.array([[rho_hat]], dtype=float)
+
+        # u is the line-of-sight unit vector from observer to target
+        if rho_hat < 1e-6:
+            u = np.zeros((3, 1))
+        else:
+            u = delta_r / rho_hat
+
+        # Jacobian wrt position
+        h = np.hstack([u.T, np.zeros((1, 3))])
+
+        if r is None:
+            r = np.array([[max(self.meas_floor, 25.0)]], dtype=float)  # (5 m)^2 as floor
+
+        return h, z, z_hat, r
+
+
+    def _build_azel_model(self, delta_r: np.ndarray, # pylint: disable=too-many-locals
+                          measurement_dict: Dict, r: Optional[np.ndarray]
+                          ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Handle azimuth/elevation measurement.
+
+        Args:
+        - delta_r: Relative position vector (target - observer).
+        - measurement_dict: Measurement dictionary.
+        - r: Optional measurement covariance matrix.
+
+        Returns a tuple of:
+        - h: Measurement Jacobian.
+        - z: Actual measurement vector.
+        - z_hat: Predicted measurement vector.
+        - r: Measurement covariance.
+        """
+        # Extract azimuth and elevation from measurement dictionary
+        az, el = [float(x) for x in measurement_dict["az_el_rad"]]
+        # Actual measurement vector
+        z = np.array([[az], [el]], dtype=float)
+
+        # Predicted measurement vector
+        x_, y_, z_ = delta_r.flatten()
+        # Compute ranges
+        r_xy = np.hypot(x_, y_)
+        r_tot = np.linalg.norm(delta_r)
+
+        # Predicted azimuth and elevation
+        az_hat = np.arctan2(y_, x_)
+        el_hat = np.arctan2(z_, r_xy)
+
+        # Predicted measurement vector
+        z_hat = np.array([[az_hat], [el_hat]], dtype=float)
+
+        if r is None:
+            r = np.diag([max(self.meas_floor, (1.7e-3)**2),
+                        max(self.meas_floor, (1.7e-3)**2)]).astype(float)
+
+        # Jacobian wrt position
+        # eps is a small value added for numerical stability to prevent
+        # division by zero in Jacobian calculations.
+        eps = 1e-9
+        d_az_dx = -y_ / (r_xy**2 + eps)
+        d_az_dy = x_ / (r_xy**2 + eps)
+        d_az_dz = 0.0
+        d_el_dx = -(x_ * z_) / ((r_tot**2) * (r_xy + eps)) if r_tot > eps else 0.0
+        d_el_dy = -(y_ * z_) / ((r_tot**2) * (r_xy + eps)) if r_tot > eps else 0.0
+        d_el_dz = r_xy / (r_tot**2 + eps)
+
+        h_pos = np.array([[d_az_dx, d_az_dy, d_az_dz],
+                        [d_el_dx, d_el_dy, d_el_dz]], dtype=float)
+        h = np.hstack([h_pos, np.zeros((2, 3))])
+
+        return h, z, z_hat, r
+
+
+    def _build_radec_model(self, delta_r: np.ndarray, # pylint: disable=too-many-locals
+                           measurement_dict: Dict, r: Optional[np.ndarray]
+                           ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Handle right ascension/declination measurement.
+
+
+        Args:
+        - delta_r: Relative position vector (target - observer).
+        - measurement_dict: Measurement dictionary.
+        - r: Optional measurement covariance matrix.
+
+        Returns a tuple of:
+        - h: Measurement Jacobian.
+        - z: Actual measurement vector.
+        - z_hat: Predicted measurement vector.
+        - r: Measurement covariance.
+        """
+
+        # Extract right ascension and declination from measurement dictionary
+        ra, dec = [float(x) for x in measurement_dict.get("ra_dec_rad", [0.0, 0.0])]
+
+        # Actual measurement vector
+        z = np.array([[ra], [dec]], dtype=float)
+
+        # Predicted measurement vector
+        x_, y_, z_ = delta_r.flatten()
+        rho = float(np.linalg.norm(delta_r))
+
+        # Predicted right ascension and declination
+        ra_hat = np.arctan2(y_, x_)
+        dec_hat = np.arcsin(z_ / max(rho, 1e-9))
+        z_hat = np.array([[ra_hat], [dec_hat]], dtype=float)
+
+        # Jacobian wrt position
+        # eps is a small value added for numerical stability to prevent
+        # division by zero in Jacobian calculations.
+        eps = 1e-9
+        d_ra_dx = -y_ / (x_**2 + y_**2 + eps)
+        d_ra_dy = x_ / (x_**2 + y_**2 + eps)
+        d_ra_dz = 0.0
+        d_dec_dx = -x_ * z_ / ((rho**2) * np.sqrt(1.0 - (z_ / max(eps, rho))**2) + eps) \
+            if rho > eps else 0.0
+        d_dec_dy = -y_ * z_ / ((rho**2) * np.sqrt(1.0 - (z_ / max(eps, rho))**2) + eps) \
+            if rho > eps else 0.0
+        d_dec_dz = np.sqrt(1.0 - (z_ / max(eps, rho))**2) / (rho + eps)
+
+        h_pos = np.array([[d_ra_dx, d_ra_dy, d_ra_dz],
+                        [d_dec_dx, d_dec_dy, d_dec_dz]], dtype=float)
+        h = np.hstack([h_pos, np.zeros((2, 3))])
+
+        if r is None:
+            r = np.diag([max(self.meas_floor, (1.7e-3)**2),
+                        max(self.meas_floor, (1.7e-3)**2)]).astype(float)
+
+        return h, z, z_hat, r
+
     def _ensure_covariance(self, r_meas: Optional[np.ndarray]) -> Optional[np.ndarray]:
         """
         Ensure measurement covariance is valid, applying a floor if needed.
 
         Arguments:
-        - R_meas: Input measurement covariance.
+        - r_meas: Input measurement covariance.
 
         Returns:
         - Validated measurement covariance.
@@ -483,9 +609,14 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
             return None
 
         r_meas = np.array(r_meas, dtype=float)
+
+        # Symmetrisation step
         r_meas = 0.5 * (r_meas + r_meas.T)
 
         # Regularise tiny/negative eigenvalues
+        # w = eigenvalues, v = eigenvectors
         w, v = np.linalg.eigh(r_meas)
+
+        # Prevent there being eigenvalues smaller than the measurement floor
         w = np.clip(w, self.meas_floor, None)
         return v @ np.diag(w) @ v.T
