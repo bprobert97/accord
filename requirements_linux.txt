@@ -74,6 +74,8 @@ networkx==3.5
 notebook==7.4.4
 notebook_shim==0.2.4
 numpy==2.3.1
+numpy-typing-compat==20250818.2.3
+optype==0.13.4
 overrides==7.7.0
 packaging==25.0
 pandocfilters==1.5.1
@@ -100,6 +102,8 @@ requests==2.32.4
 rfc3339-validator==0.1.4
 rfc3986-validator==0.1.1
 rpds-py==0.26.0
+scipy==1.16.1
+scipy-stubs==1.16.1.1
 Send2Trash==1.8.3
 setuptools==80.9.0
 sgp4==2.24
