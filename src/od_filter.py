@@ -24,6 +24,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Union
 import numpy as np
+from scipy.integrate import solve_ivp
+from .module_crtbp import crtbp_dstt_dynamics
+from .module_stt import dstt_pred_mu_p
 
 @dataclass
 class State:
@@ -66,9 +69,8 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
     Simple square-root EKF-like estimator (improves numerical stability).
     Designed for processing one measurement at a time from multiple observers.
     - State: [r, v] (6x1) in ECI.
-    - Dynamics: nearly-constant velocity (NCV) for robustness (note: this is not
-    high-fidelity orbital dynamics, but sufficient for innovation-based
-    consensus scoring).
+    - Dynamics: CRTBP (Circular Restricted Three-Body Problem) with
+    STM (State Transition Matrix) and DSTT (Dynamic State Transition Tensor).
     - Measurements: range (1d), azimuth/elevation (2D), right ascension/declination (2D)
     """
 
@@ -90,6 +92,9 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         self.pos_noise = pos_noise
         self.vel_noise = vel_noise
         self.meas_floor = meas_floor
+        self.dimensions: int = 6
+        self.mu: float = 0.0122
+        self.q: np.ndarray = np.zeros([self.dimensions, self.dimensions])
 
     def process_measurement(self, measurements: Dict) -> ODProcessingResult:
 
@@ -372,34 +377,55 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
 
     def _predict(self, x: np.ndarray, p: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Propagate state and covariance forward by dt using NCV model.
+        Propagate state and covariance forward by dt using orbital dynamics
+        and STM/DSTT.
 
-        Arguments:
-        - x: Current state vector.
-        State transition matrix (stm) for a 6D state [r, v]:
-        Assumes nearly-constant velocity (NCV) model.
-        stm = | I3   dt*I3 |
-              | 0     I3   |
-        - p: Current covariance matrix.
+        Args:
+        - x: Current state vector (6x1).
+        - p: Current covariance matrix (6x6).
         - dt: Time step (s).
 
         Returns:
-        - Tuple of predicted state and covariance.
+        - Tuple of predicted state (6x1) and covariance (6x6).
         """
         # No prediction needed for zero time step
         if dt <= 0.0:
             return x, p
 
-        # stm is the state transition matrix
-        stm = np.block([[np.eye(3), dt * np.eye(3)], [np.zeros((3,3)), np.eye(3)]])
-        noise_covariance = self._update_noise_covariance(dt)
+        # Augmented state vector
+        # x (6), STM (6x6), DSTT (6 x dim x dim)
+        r_matrix = np.eye(self.dimensions)
 
-        # Make predictions (@ is matrix multiplication)
-        x_pred = stm @ x
-        p_pred = stm @ p @ stm.T + noise_covariance
+        x_aug = np.concatenate([
+            x.flatten(),                              # initial state
+            np.eye(6).reshape(-1),                    # STM initialised to I6
+            np.zeros((6 * (self.dimensions ** 2)))    # DSTT initialised to 0
+        ])
 
-        # Ensure covariance remains symmetric
-        p_pred = 0.5 * (p_pred + p_pred.T)
+        # Propagate dynamics + STM + DSTT
+        sol = solve_ivp( # type: ignore[call-overload]
+            crtbp_dstt_dynamics,
+            [0, dt],                                    # integrate over [0, dt]
+                                                        # TODO - should be last timestep and new one
+            x_aug,                                      # initial condition
+            args=(self.mu, r_matrix, self.dimensions),
+            method="RK45", max_step=np.inf, rtol=1e-12, atol=1e-12
+        )
+
+        final = sol.y[:, -1]
+
+        # Extract results
+        x_pred = final[0:6].reshape(6, 1)                     # propagated state
+        stm = final[6:42].reshape(6, 6)                       # 6x6 state transition matrix
+        dstt = final[42:].reshape(6,                          # 6 x dim x dim tensor
+                                  self.dimensions,
+                                  self.dimensions)
+
+        # Propagate covariance
+        mf, pf = dstt_pred_mu_p(p, stm, dstt, r_matrix, self.dimensions)
+        p_pred = pf + self.q  # add process noise
+        x_pred = x_pred + mf.reshape(6, 1)
+
         return x_pred, p_pred
 
     def _build_measurement_model(self, measurement_dict: Dict,
