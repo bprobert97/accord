@@ -406,7 +406,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         sol = solve_ivp( # type: ignore[call-overload]
             crtbp_dstt_dynamics,
             [0, dt],                                    # integrate over [0, dt]
-                                                        # TODO - should be last timestep and new one
             x_aug,                                      # initial condition
             args=(self.mu, r_matrix, self.dimensions),
             method="RK45", max_step=np.inf, rtol=1e-12, atol=1e-12
