@@ -76,21 +76,15 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
 
     # TODO tune init values
     def __init__(self,
-                 pos_noise: float = 10.0,
-                 vel_noise: float = 1e-2,
                  meas_floor: float = 1.0) -> None:
         """
         Initialise the SDEKF.
 
         Arguments:
-        - pos_noise: Process noise for position [m^2 / s].
-        - vel_noise: Process noise for velocity [(m/s)^2 / s].
         - meas_floor: Minimum variance floor to avoid singularities.
         """
 
         self.targets: Dict[str, State] = {}
-        self.pos_noise = pos_noise
-        self.vel_noise = vel_noise
         self.meas_floor = meas_floor
         self.dimensions: int = 6
         self.mu: float = 0.0122
@@ -352,28 +346,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         p0 = np.diag([1e6, 1e6, 1e6, 1e4, 1e4, 1e4]).astype(float)
         return State(state_estimate=x0, covariance=p0, last_update_seconds=timestamp)
 
-    def _update_noise_covariance(self, dt: float) -> np.ndarray:
-        """
-        Process noise covariance for NCV model.
-
-        Arguments:
-        - dt: Time step (s).
-
-        Returns:
-        - Covariance matrix
-        """
-        x_noise = self.pos_noise
-        v_noise = self.vel_noise
-        updated_x_noise = x_noise * dt * np.eye(3)
-        updated_v_noise = v_noise * dt * np.eye(3)
-
-        # Process noise covariance block structure:
-        # | position_noise   0           |
-        # | 0                velocity_noise |
-        return np.block([
-            [updated_x_noise, np.zeros((3, 3))],
-            [np.zeros((3, 3)), updated_v_noise]
-        ])
 
     def _predict(self, x: np.ndarray, p: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
         """
