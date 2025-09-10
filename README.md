@@ -27,9 +27,13 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── consensus_design.ipynb     # Initial consensys mechanism design
 │   └── dlt_design_mpl.ipynb       # Initial DAG design using matplotlib
 │   └── dlt_design_plotly.ipynb    # Initial DAG design using plotly
+│   └── od_flowchart.txt           # PlantUML syntax for the OD flowchart
+│   └── od_sequence_diagram.txt    # PlantUML syntax for the OD sequence diagram
 │
 ├── 📁 images/                         # Image assets
 │   └── consensus_flowchart.png        # Flowchart of consensus mechanism
+│   └── od_flowchart.png               # Flowchart of orbit determination calculations
+│   └── od_sequence_diagram.png        # Sequence diagram of orbit determination calculations
 │
 ├── 📁 references/                    # References
 │   └── references.ipynb              # List of project references
