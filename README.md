@@ -14,6 +14,8 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ## Related Publications
 
 * [B. Probert, R. A. Clark, E. Blasch, and M. Macdonald, “A Review of Distributed Ledger Technologies for Satellite Operations,” IEEE Access, vol. 13, pp. 123230–123258, 2025, doi: 10.1109/ACCESS.2025.3588688](https://ieeexplore.ieee.org/document/11079570)
+* [X. Zhou, D. Qiao, M. Malcolm, and X. Li, “Efficient Orbit Determination Using Measurement-Directional State Transition Tensor,” IEEE Transactions on Aerospace and Electronic Systems, vol. 61, no. 3, pp. 8014–8027, June 2025, doi: 10.1109/TAES.2025.3527410](https://ieeexplore.ieee.org/document/10852409)
+
 
 # Repository Layout
 
