@@ -1,40 +1,35 @@
 @startuml
-skinparam rectangle {
-  BackgroundColor<<public>> LightBlue
-  BackgroundColor<<internal>> White
-  BorderColor Black
-}
+start
+:Extract target_id, timestamp;
 
-rectangle process_measurement <<public>> {
-}
+if (Target already initialised?) then (no)
+  if (Can initialise with measurement?) then (yes)
+    :Initialise state vector + covariance;
+  else (no)
+    :Return weak prior ODProcessingResult;
+    stop
+  endif
+endif
 
-rectangle _timestamp_to_seconds <<internal>>
-rectangle _can_initialise <<internal>>
-rectangle _initialise_state <<internal>>
-rectangle _weak_prior_result <<internal>>
-rectangle _predict_to_time <<internal>>
-rectangle _predict <<internal>>
-rectangle _update_noise_covariance <<internal>>
-rectangle _update_with_measurement <<internal>>
-rectangle _build_measurement_model <<internal>>
-rectangle _build_range_model <<internal>>
-rectangle _build_azel_model <<internal>>
-rectangle _build_radec_model <<internal>>
-rectangle _ensure_covariance <<internal>>
+:Retrieve stored State;
+:Compute dt = timestamp - state.time;
 
-process_measurement --> _timestamp_to_seconds
-process_measurement --> _can_initialise
-process_measurement --> _initialise_state
-process_measurement --> _weak_prior_result
-process_measurement --> _predict_to_time
-process_measurement --> _update_with_measurement
+:Propagate state (predict step);
+:Call _predict(x, P, dt);
 
-_predict_to_time --> _predict
-_predict --> _update_noise_covariance
+:_predict builds augmented state;
+:Integrate with crtbp_dstt_dynamics via solve_ivp;
+:Extract STM, DSTT;
+:Call dstt_pred_mu_p to update covariance;
 
-_update_with_measurement --> _build_measurement_model
-_build_measurement_model --> _build_range_model
-_build_measurement_model --> _build_azel_model
-_build_measurement_model --> _build_radec_model
-_build_measurement_model --> _ensure_covariance
+:Obtain x_pred, P_pred;
+
+:Update with measurement;
+:Select measurement model (range / az-el / RA-Dec);
+:Compute z_hat, residual, H, R;
+:Kalman update (K, x_upd, P_post, NIS, dof);
+
+:Store updated state;
+:Return ODProcessingResult;
+stop
 @enduml
