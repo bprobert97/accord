@@ -87,7 +87,7 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         self.targets: Dict[str, State] = {}
         self.meas_floor = meas_floor
         self.dimensions: int = 6
-        self.mu: float = 0.0122
+        self.mu: float = 0.0121505839
         self.q: np.ndarray = np.zeros([self.dimensions, self.dimensions])
 
     def process_measurement(self, measurements: Dict) -> ODProcessingResult:
@@ -540,7 +540,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
                            ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Handle right ascension/declination measurement.
-
 
         Args:
         - delta_r: Relative position vector (target - observer).

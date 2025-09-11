@@ -31,7 +31,7 @@ from .utils import build_earth_satellite_list_from_str
 class ConsensusMechanism():
     """
     The Proof of Inter-Satellite Evaluation (PoISE) consensus mechanism.
-        
+
     TODO - need to check: if physically possible, how many times its been seen (maybe new param?)
     """
     # TODO - proof of Location XYO paper, and bidirectional heuristics (need to check for invalid,
