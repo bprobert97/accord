@@ -383,7 +383,7 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
             method="RK45", max_step=np.inf, rtol=1e-12, atol=1e-12
         )
 
-        final = sol.y[:, -1]
+        final = sol.y[:, -1] # State at final time (last column)
 
         # Extract results
         x_pred = final[0:6].reshape(6, 1)                     # propagated state
