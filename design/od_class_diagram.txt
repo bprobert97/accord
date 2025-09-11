@@ -1,0 +1,57 @@
+@startuml
+skinparam component {
+  BackgroundColor<<public>> LightBlue
+  BackgroundColor<<internal>> White
+  BorderColor Black
+}
+
+package "SDEKF" {
+  component process_measurement <<public>>
+
+  component _timestamp_to_seconds <<internal>>
+  component _can_initialise <<internal>>
+  component _initialise_state <<internal>>
+  component _weak_prior_result <<internal>>
+  component _predict_to_time <<internal>>
+  component _predict <<internal>>
+  component _update_noise_covariance <<internal>>
+  component _update_with_measurement <<internal>>
+  component _build_measurement_model <<internal>>
+  component _build_range_model <<internal>>
+  component _build_azel_model <<internal>>
+  component _build_radec_model <<internal>>
+  component _ensure_covariance <<internal>>
+}
+
+package "CRTBP Dynamics" {
+  component crtbp_dstt_dynamics <<public>>
+  component crtbp_dynamics <<internal>>
+  component cal_1st_tensor <<internal>>
+  component cal_2nd_tensor <<internal>>
+  component dstt_pred_mu_p <<public>>
+}
+
+' High-level dependencies
+process_measurement --> _timestamp_to_seconds
+process_measurement --> _can_initialise
+process_measurement --> _initialise_state
+process_measurement --> _weak_prior_result
+process_measurement --> _predict_to_time
+process_measurement --> _update_with_measurement
+
+' Prediction chain
+_predict_to_time --> _predict
+_predict --> crtbp_dstt_dynamics
+_predict --> dstt_pred_mu_p
+crtbp_dstt_dynamics --> crtbp_dynamics
+crtbp_dstt_dynamics --> cal_1st_tensor
+crtbp_dstt_dynamics --> cal_2nd_tensor
+_predict --> _update_noise_covariance
+
+' Update chain
+_update_with_measurement --> _build_measurement_model
+_build_measurement_model --> _build_range_model
+_build_measurement_model --> _build_azel_model
+_build_measurement_model --> _build_radec_model
+_build_measurement_model --> _ensure_covariance
+@enduml
