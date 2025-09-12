@@ -1,19 +1,29 @@
-[{
-    "OBJECT_NAME": "ISS (ZARYA)",
-    "OBJECT_ID": "1998-067A",
-    "EPOCH": "2024-05-06T19:53:04.999776",
-    "MEAN_MOTION": 15.50957674,
-    "ECCENTRICITY": 0.000358,
-    "INCLINATION": 51.6393,
-    "RA_OF_ASC_NODE": 160.4574,
-    "ARG_OF_PERICENTER": 140.6673,
-    "MEAN_ANOMALY": 205.725,
-    "EPHEMERIS_TYPE": 0,
-    "CLASSIFICATION_TYPE": "U",
-    "NORAD_CAT_ID": 25544,
-    "ELEMENT_SET_NO": 999,
-    "REV_AT_EPOCH": 45212,
-    "BSTAR": 0.0002731,
-    "MEAN_MOTION_DOT": 0.00015698,
-    "MEAN_MOTION_DDOT": 0
-}]
+[
+  {
+    "target_id": "sat_1",
+    "timestamp": 1234567890.0,
+    "observer_state_eci": {"r_m": [7000000.0, 0.0, 0.0]},
+    "range_m": 500000.0,
+    "R_meas": [[25.0]]
+  },
+  {
+    "target_id": "sat_2",
+    "timestamp": 1234567890.0,
+    "observer_state_eci": {"r_m": [7000000.0, 0.0, 0.0]},
+    "az_el_rad": [0.5, 0.1],
+    "R_meas": [[0.001, 0.0], [0.0, 0.001]]
+  },
+  {
+    "target_id": "sat_3",
+    "timestamp": 1234567890.0,
+    "observer_state_eci": {"r_m": [7000000.0, 0.0, 0.0]},
+    "ra_dec_rad": [1.2, 0.3]
+  },
+  {
+    "target_id": "sat_4",
+    "timestamp": 1234567890.0,
+    "observer_state_eci": {"r_m": [7000000.0, 0.0, 0.0]},
+    "los_eci": [0.7071, 0.7071, 0.0],
+    "range_m": 500000.0
+  }
+]

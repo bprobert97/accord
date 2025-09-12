@@ -30,7 +30,6 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import networkx as nx
 import numpy as np
-from skyfield.api import EarthSatellite
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.logger import get_logger
@@ -40,37 +39,6 @@ from src.transaction import Transaction, TransactionMetadata
 
 logger = get_logger(__name__)
 
-def create_noisy_transaction(base_sat: EarthSatellite) -> Transaction:
-    """
-    Create a single noisy transaction for the given base satellite.
-    Optionally override the default random noise.
-    """
-    noise = {
-        "mean_motion": np.random.normal(0, 0.01),       # rev/day
-        "eccentricity": np.random.normal(0, 0.00002),   # unitless
-        "inclination": np.random.normal(0, 0.05),       # degrees
-        "epoch_jitter": np.random.normal(0, 2)          # seconds
-    }
-
-    observed_eccentricity = base_sat.model.ecco + noise["eccentricity"]
-    observed_epoch = base_sat.epoch.utc_datetime() + timedelta(seconds=noise["epoch_jitter"])
-    observed_inclination = (base_sat.model.inclo * 180 / np.pi) + noise["inclination"]
-    observed_mean_motion = ((base_sat.model.no_kozai / (2 * np.pi)) * 1440) + noise["mean_motion"]
-
-    return Transaction(
-        sender_address=789,
-        recipient_address=123,
-        sender_private_key="dummy_key",
-        metadata=TransactionMetadata(),
-        tx_data=json.dumps({
-            "OBJECT_NAME": base_sat.name,
-            "OBJECT_ID": 25544,
-            "EPOCH": observed_epoch.isoformat() + "Z",
-            "MEAN_MOTION": observed_mean_motion,
-            "ECCENTRICITY": observed_eccentricity,
-            "INCLINATION": observed_inclination
-        })
-    )
 
 async def run_consensus_demo(initial_n_tx: int = 3,
                              n_test_tx: int = 1) -> tuple[Optional[DAG], Optional[list[float]]]:

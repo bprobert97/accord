@@ -24,12 +24,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import asyncio
 import copy
 from typing import Optional
-from skyfield.api import EarthSatellite
 from .dag import DAG
 from .logger import get_logger
 from .reputation import ReputationManager, MAX_REPUTATION
 from .transaction import Transaction, TransactionMetadata
-from .utils import build_tx_data_str, load_json_data
+from .utils import build_tx_data
 
 logger = get_logger(__name__)
 
@@ -53,26 +52,21 @@ class SatelliteNode():
         self.local_dag: Optional[DAG] = None
 
         # TODO This is for testing purposes. In reality, data will
-        # be loaded from a sensor
-        self.tle_data: list[Optional[EarthSatellite]] = load_json_data(
-            "od_data.json",
-            faulty_data = self.is_malicious)
+        # be loaded from a sensor rather than one big file
+        self.sensor_data: dict = build_tx_data()
 
     async def submit_transaction(self,
-                                 satellite: EarthSatellite,
                                  recipient_address: int) -> bool:
         """
         Builds a transaction from observed satellite data and submits it to the DAG.
 
         Args:
-        - satellite: The EarthSatellite object containing data relevant for building the transaction
         - recipient_address: TODO may not be needed in transaction
 
         Returns:
         A transaction that is submitted to the ledger
         """
-        # Build TLE/OD data string from the EarthSatellite object
-        tx_data_str = build_tx_data_str(satellite)
+        tx_data = str(self.sensor_data)
 
         # Create metadata and transaction
         metadata = TransactionMetadata()
@@ -80,7 +74,7 @@ class SatelliteNode():
                                   recipient_address=recipient_address,
                                   # TODO Replace with actual key handling
                                   sender_private_key="PLACEHOLDER_KEY",
-                                  tx_data=tx_data_str,
+                                  tx_data=tx_data,
                                   metadata=metadata)
 
         future = asyncio.get_running_loop().create_future()
