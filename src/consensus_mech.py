@@ -22,7 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 import numpy as np
-from skyfield.api import EarthSatellite, wgs84, load
+from scipy.stats import chi2
 from .dag import DAG
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
@@ -94,6 +94,30 @@ class ConsensusMechanism():
             return False
 
         return True
+
+    def nis_to_score(nis: float, dof: int) -> float:
+        """
+        Convert NIS into a normalised [0,1] correctness score.
+        1 = high agreement, perfect fit
+        0 = low agreement, extreme outlier
+
+        Args:
+        - nis: Normalised Innovation Squared value (>=0).
+        - dof: Degrees of freedom of the measurement.
+
+        Returns:
+        - Correctness score in [0,1].
+        """
+        # Ensure valid inputs
+        nis = max(0.0, float(nis))
+        dof = max(1, int(dof))
+
+        # Compute CDF (probability measurement is <= observed NIS)
+        cdf = chi2.cdf(nis, df=dof)
+
+        # Flip it so high NIS → low score, low NIS → high score
+        score = 1.0 - cdf
+        return float(score)
 
     def get_correctness_score(self, sat: EarthSatellite, dag: DAG) -> float:
         """
