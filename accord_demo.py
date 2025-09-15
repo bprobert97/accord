@@ -22,8 +22,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import asyncio
-from datetime import timedelta
-import json
 from typing import Optional
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -35,7 +33,6 @@ from src.dag import DAG
 from src.logger import get_logger
 from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
-from src.transaction import Transaction, TransactionMetadata
 
 logger = get_logger(__name__)
 
