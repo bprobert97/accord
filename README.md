@@ -26,7 +26,8 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── main.yml                       # CI configuration for github: Pylint and Mypy
 │
 ├── 📁 design/                      # Design documents
-│   └── consensus_design.ipynb     # Initial consensys mechanism design
+│   └── chi2_plot.py               # Plots of chi2 distributions and CDF distributions
+│   └── consensus_design.ipynb     # Initial consensus mechanism design
 │   └── dlt_design_mpl.ipynb       # Initial DAG design using matplotlib
 │   └── dlt_design_plotly.ipynb    # Initial DAG design using plotly
 │   └── od_class_diagram.txt       # PlantUML syntax for the OD class diagram
@@ -47,16 +48,27 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── consensus_mech.py          # Code for the PoISE consensus mechanism
 │   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure
 │   └── logger.py                  # Code for the app logger
+│   └── module_crtbp.py            # Code for circular restricted 3 body problem dynamics *
+│   └── module_stt.py              # Code for state transition tensor calculations *
+│   └── od_filter.py               # Code for the orbit determination calculation work
+│   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │   └── utils.py                   # Utility functions and global variables
 │
 ├── .gitignore               # Files/folders to ignore in Git
+├── .pylintrc                # Pylint configuration file
+├── accord_demo.py           # Demonstration of ACCORD
+├── changelog.md             # Release change log
 ├── LICENSE.MD               # License file
+├── mypy.ini                 # Mypy configuration
+├── od_data.json             # Example orbit determination data for use in consensus
 ├── README.md                # Project overview
-├── od_data.json            # Example orbit determination data for use in consensus
-├── requirements.txt        # List of python package dependencies
-└── accord_demo.py       # Demonstration of ACCORD
+├── requirements.txt         # List of python package dependencies
+└── requirements_linux.txt   # List of python package dependencies for linux and CI
+
+* - Adapted from ZHOUXINGYU-OASIS, ‘ZHOUXINGYU-OASIS/MDSTT: v1.0.0’. Zenodo, Jul. 29, 2024.
+doi: 10.5281/zenodo.13123587.
 </pre>
 
 # Installation
