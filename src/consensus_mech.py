@@ -1,3 +1,4 @@
+# pylint: disable=too-many-return-statements too-many-branches
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -20,14 +21,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
+import ast
 import json
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
-from .od_filter import ODProcessingResult
+from .od_filter import ODProcessingResult, SDEKF
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
-from .utils import build_earth_satellite_list_from_str
 
 R_EARTH = 6371e3  # metres
 
@@ -50,7 +51,7 @@ class ConsensusMechanism():
     def __init__(self) -> None:
         self.consensus_threshold : float = 0.6 # TODO - tune
 
-    def data_is_valid(obs: dict) -> bool:
+    def data_is_valid(self, obs: dict) -> bool:
         """
         Validate observation data for physical and logical consistency.
         Works with a CRTBP-based model.
@@ -62,13 +63,18 @@ class ConsensusMechanism():
         - True if data is valid, False otherwise.
         """
 
+        sat_pos = None
+
         # Check observer position
         r_obs = np.array(obs.get("observer_state_eci", {}).get("r_m", []), dtype=float)
         if r_obs.shape != (3,) or not np.isfinite(r_obs).all():
             return False
 
         # Ensure at least one measurement exists
-        has_measurement = any(key in obs for key in ["range_m", "az_el_rad", "ra_dec_rad", "los_eci"])
+        has_measurement = any(key in obs for key in ["range_m",
+                                                     "az_el_rad",
+                                                     "ra_dec_rad",
+                                                     "los_eci"])
         if not has_measurement:
             return False
 
@@ -105,13 +111,13 @@ class ConsensusMechanism():
 
         # Check covariance matrix
         if "R_meas" in obs:
-            R = np.array(obs["R_meas"], dtype=float)
-            if R.ndim != 2 or R.shape[0] != R.shape[1]:
+            r = np.array(obs["R_meas"], dtype=float)
+            if r.ndim != 2 or r.shape[0] != r.shape[1]:
                 return False
             # Must be symmetric and positive semidefinite
-            if not np.allclose(R, R.T, atol=1e-8):
+            if not np.allclose(r, r.T, atol=1e-8):
                 return False
-            eigvals = np.linalg.eigvalsh(R)
+            eigvals = np.linalg.eigvalsh(r)
             if np.any(eigvals < -1e-12):
                 return False
 
@@ -119,12 +125,12 @@ class ConsensusMechanism():
         # only possible with range + LOS
         if sat_pos is not None:
             h = np.linalg.norm(sat_pos) - R_EARTH
-            if not (200e3 <= h <= 2000e3):
+            if not 200e3 <= h <= 2000e3:
                 return False
 
         return True
 
-    def nis_to_score(nis: float, dof: int) -> float:
+    def nis_to_score(self, nis: float, dof: int) -> float:
         """
         Convert NIS into a normalised [0,1] correctness score.
         1 = high agreement, perfect fit
@@ -150,11 +156,13 @@ class ConsensusMechanism():
 
     def get_correctness_score(self, dag: DAG, result: ODProcessingResult) -> float:
         """
-        Determine the correctness score for transactional data being added to the DAG.
-        This is done by comparing the data provided by a satellite with historical data in the DAG.
-        TODO - change
-        Returns a correctness score between 0 (inconsistent) and 1 (high agreement)
+        Calculate correctness score based on NIS and past observations of the same target.
+        Args:
+        - dag: The current DAG containing past transactions.
+        - result: The ODProcessingResult containing NIS, DOF, and target ID.
 
+        Returns:
+        - Correctness score in [0,1]. 0 = low agreement, 1 = high agreement.
         """
 
         target_id = result.target_id
@@ -181,33 +189,45 @@ class ConsensusMechanism():
         return self.nis_to_score(nis, dof)
 
 
-    def estimate_accuracy(self, sat: EarthSatellite) -> float:
+    def calculate_dof_score(self, dof: int) -> float:
         """
-        Rough placeholder accuracy metric.
-        TODO: Replace with actual noise/uncertainty model.
+        Estimate a relative accuracy/reward score based on measurement DOF.
+        Higher DOF -> higher score (since it reduces OD computational effort).
+        Returns a value in [0,1].
+
+        Args:
+        - dof: Degrees of freedom of the measurement.
+
+        Returns:
+        - Accuracy score in [0,1]. 0 = low accuracy, 1 = high accuracy.
         """
-        # Use a dummy normal distribution around ideal speed 7.8 km/s
-        ideal_speed = 7.8
-        velocity = sat.at(sat.epoch).velocity.km_per_s
-        speed = np.linalg.norm(velocity)
 
-        deviation = abs(speed - ideal_speed)
+        # Define a simple mapping: normalize by a maximum useful DOF
+        # Theoretically, this could be up to 6 (full 3D position+velocity), but
+        # in practice, most measurements will have fewer DOF - maximum of 2.
+        max_dof = 2
 
-        if deviation < 0.3:
-            return 1.0
-        if deviation < 0.6:
-            return 0.7
-        if deviation < 1.0:
-            return 0.5
-        return 0.2
+        # Clip to avoid scores >1
+        # Relationship is linear TODO tune - could be non-linear
+        # dof = 1 returns 0.5, dof = 2 returns 1.0
+        return min(1.0, dof / max_dof)
 
     def calculate_consensus_score(self, correctness: float,
-                                  accuracy: float, reputation: float) -> float:
+                                  dof_reward: float, reputation: float) -> float:
         """
-        Weighted score. Tuneable weights.
+        Calculate overall consensus score from correctness, DOF reward, and node reputation.
+        Weights can be adjusted to tune the influence of each factor.
         TODO - tune
+
+        Args:
+        - correctness: Correctness score in [0,1].
+        - dof_reward: DOF-based reward score in [0,1].
+        - reputation: Node reputation in [0, MAX_REPUTATION].
+
+        Returns:
+        - Consensus score in [0,1]. Higher is better.
         """
-        return 0.7 * correctness + 0.3 * accuracy + 0.2 * reputation
+        return 0.7 * correctness + 0.3 * dof_reward + 0.2 * reputation
 
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
@@ -217,11 +237,6 @@ class ConsensusMechanism():
         Returns a bool of it consensus has been reached
         NOTE: Assume one witnessed satellite per transaction
         """
-        # 1)  Turn transaction data into an EarthSatellite object
-        # for validation using wsg4 and skyfield
-        sat = build_earth_satellite_list_from_str(load.timescale(),
-                                                  transaction.tx_data,
-                                                  sat_node.is_malicious)[0]
 
         # 2) If the list is empty, there is no data that can be valid
         if not transaction.tx_data:
@@ -230,6 +245,9 @@ class ConsensusMechanism():
                 sat_node.reputation, sat_node.exp_pos
                 )
             return False
+
+        # 1) Convert tx_data to dict
+        transaction_data: dict = ast.literal_eval(transaction.tx_data)
 
         # 2a) If we have data, submit a transaction
         dag.add_tx(transaction)
@@ -242,19 +260,23 @@ class ConsensusMechanism():
             return False
 
         # If we have valid data, try to reach consensus on it
-        if self.data_is_valid(sat):
+        if self.data_is_valid(transaction_data):
+
+            # Run SDEKF
+            sdekf = SDEKF()
+            processing_result: ODProcessingResult =sdekf.process_measurement(transaction_data)
             # 4) TODO Check if satellite has been witnessed before
             #4a if yes, does this data agree with other data/ is it correct?
             # Assign correctness score -> affects transaction
             #  This is going to be very tricky. How do I get this data?? Where do I
             # store it? Do I want this to tie in to how parents are selected?
             # TODO - 0.5 setting is from a recent reference - find and add here
-            correctness_score = self.get_correctness_score(sat, dag)
+            correctness_score = self.get_correctness_score(dag, processing_result)
 
             # 5) TODO is sensor data accurate (done regardless of previous witnessing).
             # Assign accuracy score -> affects transaction and node reputation
             # Again, might be tricky. Probability distribution here? Like in the PowerGraph paper?
-            accuracy_score = self.estimate_accuracy(sat)
+            dof_score = self.calculate_dof_score(processing_result.dof)
 
             # 6) TODO calculate consensus score - node reputation,
             # accuracy and correctness all factor
@@ -262,8 +284,8 @@ class ConsensusMechanism():
             # Need to develop an equation - this will take some reading and tuning
 
             consensus_score = self.calculate_consensus_score(correctness_score,
-                                                            accuracy_score,
-                                                            sat_node.reputation)
+                                                             dof_score,
+                                                             sat_node.reputation)
 
             sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
 
