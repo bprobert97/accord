@@ -24,9 +24,12 @@ import json
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
+from .od_filter import ODProcessingResult
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
 from .utils import build_earth_satellite_list_from_str
+
+R_EARTH = 6371e3  # metres
 
 class ConsensusMechanism():
     """
@@ -47,51 +50,77 @@ class ConsensusMechanism():
     def __init__(self) -> None:
         self.consensus_threshold : float = 0.6 # TODO - tune
 
-    def data_is_valid(self, sat: EarthSatellite) -> bool:
+    def data_is_valid(obs: dict) -> bool:
         """
-        Check if received data is valid, i.e. physically and logically possible for a LEO satellite
-        Assume data comes in a standard TLE format from a Celestrak JSON
-        Checks validity to reduce computation effort in consensus for data that is impossible
-        Assumes that TLE data is received and transformed correctly
-        TODO - find out what witness location data will look like for comparison and consensus
-        To prevent all of SpaceX agreeing that they didn't see any satellites over Ukraine, nope,
-        no way, they were in geostationary orbit above the North Pole
-        TODO - Josh idea, think about seeding the initial conditions with ground station data until
-        I have built up enough of a map. Could also be GNSS/GPS data if that works. Dont really mind
+        Validate observation data for physical and logical consistency.
+        Works with a CRTBP-based model.
+
+        Args:
+        - obs: Observation data dictionary.
+
+        Returns:
+        - True if data is valid, False otherwise.
         """
-        # Use sgp4 propagation to get altitude and velocity
-        # More suitable than keplerian motion
-        # The Two-Body-Keplerian orbit propagator is the less precise because
-        # it simplifies the gravitational field of the Earth as spherical and
-        # ignores all other sources of orbital perturbations. The SGP4
-        # orbit propagator enhances the accuracy by considering the
-        # oblateness of the Earth and the effects of atmospheric drag.
-        epoch = sat.epoch
-        state_vector = sat.at(epoch) # works in ITRF frame
-        altitude_km = (wgs84.height_of(state_vector)).km
-        velocity = state_vector.velocity.km_per_s
-        speed_kmps = np.linalg.norm(velocity)
 
-        # Circular orbit: Min speed 6.9 km/s
-        # Elliptical orbit: Max speed 10.07 km/s
-        # Plus buffer for error
-        if not 6.5 <= speed_kmps <= 10.5:
+        # Check observer position
+        r_obs = np.array(obs.get("observer_state_eci", {}).get("r_m", []), dtype=float)
+        if r_obs.shape != (3,) or not np.isfinite(r_obs).all():
             return False
 
-        # For LEO, satellites should have an inclination between 0 and 180 degrees
-        # Inclination is initially provided in radians
-        if not 0 <= (sat.model.inclo * 180 / np.pi) <= 180:
+        # Ensure at least one measurement exists
+        has_measurement = any(key in obs for key in ["range_m", "az_el_rad", "ra_dec_rad", "los_eci"])
+        if not has_measurement:
             return False
 
-        # See https://rhodesmill.org/skyfield/earth-satellites.html#detecting-propagation-errors
-        # If any elements don't make sense, the position is returned as [nan, nan, nan]
-        # e.g. if eccentricity is not between 0 and 1
-        if np.nan in state_vector.xyz.km:
-            return False
+        # Check range
+        if "range_m" in obs:
+            rng = obs["range_m"]
+            if not (isinstance(rng, (int, float)) and np.isfinite(rng)):
+                return False
+            if rng < 1e5 or rng > 5e7:  # 100 km to 50,000 km
+                return False
 
-        # Altitude should be in LEO range of 200km to 2000km above the Earth's surface
-        if not 200 <= altitude_km <= 2000:
-            return False
+        # Check LOS vector
+        if "los_eci" in obs:
+            los = np.array(obs["los_eci"], dtype=float)
+            if los.shape != (3,) or not np.isfinite(los).all():
+                return False
+            norm = np.linalg.norm(los)
+            if not np.isclose(norm, 1.0, atol=1e-3):
+                return False
+            if "range_m" in obs:  # can form satellite position
+                sat_pos = r_obs + rng * los
+
+        # Check az/el
+        if "az_el_rad" in obs:
+            az, el = obs["az_el_rad"]
+            if not (0 <= az < 2*np.pi and -np.pi/2 <= el <= np.pi/2):
+                return False
+
+        # Check RA/Dec
+        if "ra_dec_rad" in obs:
+            ra, dec = obs["ra_dec_rad"]
+            if not (0 <= ra < 2*np.pi and -np.pi/2 <= dec <= np.pi/2):
+                return False
+
+        # Check covariance matrix
+        if "R_meas" in obs:
+            R = np.array(obs["R_meas"], dtype=float)
+            if R.ndim != 2 or R.shape[0] != R.shape[1]:
+                return False
+            # Must be symmetric and positive semidefinite
+            if not np.allclose(R, R.T, atol=1e-8):
+                return False
+            eigvals = np.linalg.eigvalsh(R)
+            if np.any(eigvals < -1e-12):
+                return False
+
+        # LEO altitude bound check (200 to 2000km)
+        # only possible with range + LOS
+        if sat_pos is not None:
+            h = np.linalg.norm(sat_pos) - R_EARTH
+            if not (200e3 <= h <= 2000e3):
+                return False
 
         return True
 
@@ -119,7 +148,7 @@ class ConsensusMechanism():
         score = 1.0 - cdf
         return float(score)
 
-    def get_correctness_score(self, sat: EarthSatellite, dag: DAG) -> float:
+    def get_correctness_score(self, dag: DAG, result: ODProcessingResult) -> float:
         """
         Determine the correctness score for transactional data being added to the DAG.
         This is done by comparing the data provided by a satellite with historical data in the DAG.
@@ -127,34 +156,30 @@ class ConsensusMechanism():
         Returns a correctness score between 0 (inconsistent) and 1 (high agreement)
 
         """
-        # Try to match OBJECT_ID in historical transactions (basic implementation)
 
+        target_id = result.target_id
+        nis = result.nis
+        dof = result.dof
         matches = []
 
+        # If we've never seen this target_id before -> neutral score
         for tx_list in dag.ledger.values():
             for tx in tx_list:
                 try:
                     past_data = json.loads(tx.tx_data)
-                    if isinstance(past_data, dict) and \
-                        past_data.get("OBJECT_ID") == sat.model.satnum:
+                    if past_data.get("target_id") == target_id:
                         matches.append(past_data)
                 except (json.JSONDecodeError, TypeError):
                     continue
 
         if not matches:
-            return 0.5 # Neutral if not seen before
+            # Neutral value is the expected NIS for the given dof
+            # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
+            return self.nis_to_score(dof, dof)
 
-        # Very basic check — mean motion deviation, inclination deviation
-        past = matches[-1]
-        motion_dev = abs(((sat.model.no_kozai / (2 * np.pi)) * 1440)- float(past["MEAN_MOTION"]))
-        incl_dev = abs((sat.model.inclo * 180 / np.pi) - float(past["INCLINATION"]))
+        # Otherwise calculate correctness based on this measurement
+        return self.nis_to_score(nis, dof)
 
-        correctness_score = 1.0
-        if motion_dev > 0.1:
-            correctness_score -= 0.3 # TODO - tune
-        if incl_dev > 5:
-            correctness_score -= 0.3 # TODO - tune
-        return max(0.0, min(1.0, correctness_score))
 
     def estimate_accuracy(self, sat: EarthSatellite) -> float:
         """
