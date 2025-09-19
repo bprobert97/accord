@@ -23,12 +23,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
 import copy
+import json
 from typing import Optional
 from .dag import DAG
 from .logger import get_logger
 from .reputation import ReputationManager, MAX_REPUTATION
 from .transaction import Transaction, TransactionMetadata
-from .utils import build_tx_data
 
 logger = get_logger(__name__)
 
@@ -50,9 +50,19 @@ class SatelliteNode():
         self.rep_manager = ReputationManager()
         self.local_dag: Optional[DAG] = None
 
-        # TODO This is for testing purposes. In reality, data will
-        # be loaded from a sensor rather than one big file
-        self.sensor_data: dict = build_tx_data()
+        self.sensor_data: Optional[dict] = None  # will be filled later
+
+    def load_sensor_data(self, observation: dict) -> None:
+        """
+        Attach one observation record (from JSON) to this satellite.
+
+        Args:
+        - observation: a dict containing one observation record
+
+        Returns:
+        None. Updates self.sensor_data.
+        """
+        self.sensor_data = observation
 
     async def submit_transaction(self,
                                  recipient_address: int) -> bool:
@@ -65,7 +75,10 @@ class SatelliteNode():
         Returns:
         A transaction that is submitted to the ledger
         """
-        tx_data = str(self.sensor_data)
+        if self.sensor_data is None:
+            raise ValueError(f"Satellite {self.id} has no sensor data loaded.")
+
+        tx_data = json.dumps(self.sensor_data)
 
         # Create metadata and transaction
         metadata = TransactionMetadata()

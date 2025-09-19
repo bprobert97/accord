@@ -33,6 +33,7 @@ from src.logger import get_logger
 from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
 from src.transaction import Transaction, TransactionMetadata
+from src.utils import build_tx_data
 
 logger = get_logger(__name__)
 
@@ -71,37 +72,42 @@ def load_sensor_json(file_path: str = "sim_output.json", sender_address: int = 0
 # Consensus demo (JSON-driven)
 async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     """
-    Run ACCORD consensus using observations from a JSON file.
+    Run a demo of the consensus mechanism with multiple satellite nodes
+    submitting transactions to the DAG.
 
     Returns:
-        (final DAG, reputation history per node)
+    - The final DAG object after all transactions have been processed.
     """
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
 
-    # Load transactions from JSON
-    honest_txs = load_sensor_json()
-    n_nodes = len(honest_txs)
-    if n_nodes == 0:
+    # Load all JSON observations
+    # TODO - is this needed? I want each satellite to load its own data
+    observations = build_tx_data("sim_output.json")
+    if not observations:
         logger.info("No data in JSON file.")
         return None, None
 
-    # Create satellite nodes
-    # TODO - change ID with satellite node ID from the class
-    satellites: list[SatelliteNode] = []
-    for i in range(n_nodes):
-        sat = SatelliteNode(node_id=f"SAT-{i:03d}", queue=queue)
-        satellites.append(sat)
-
-    # Add transactions into DAG
-    rep_history: dict[str, list[float]] = {sat.id: [] for sat in satellites}
     asyncio.create_task(dag.listen())
 
+    satellites: list[SatelliteNode] = []
+    rep_history: dict[str, list[float]] = {}
+
+    # One satellite per observation (or choose grouping logic if needed)
+    # TODO - need to fix satelltie IDs as its one per ransaction right now.
+    # I need to simulate less satellites.
+    # I need the data to match the scenario in here.
+    # Also, TODO - update Matlab to use SGP4
+    for i, obs in enumerate(observations):
+        sat = SatelliteNode(node_id=f"SAT-{i:03d}", queue=queue)
+        sat.load_sensor_data(obs)
+        satellites.append(sat)
+        rep_history[sat.id] = []
+
+    # Submit each transaction via the satellite
     for sat in satellites:
-        await sat.submit_transaction(
-            recipient_address=123
-        )
+        await sat.submit_transaction(recipient_address=123)
         rep_history[sat.id].append(sat.reputation)
 
     return dag, rep_history
