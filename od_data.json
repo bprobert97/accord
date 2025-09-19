@@ -1,29 +1,76 @@
 [
   {
     "target_id": "sat_1",
-    "timestamp": 1234567890.0,
-    "observer_state_eci": {"r_m": [7000000.0, 0.0, 0.0]},
-    "range_m": 500000.0,
-    "R_meas": [[25.0]]
+    "timestamp": 1234567890,
+    "observer_state_eci": {
+      "r_m": [
+        7000000,
+        0,
+        0
+      ]
+    },
+    "range_m": 500000,
+    "R_meas": [
+      [
+        25
+      ]
+    ]
   },
   {
     "target_id": "sat_2",
-    "timestamp": 1234567890.0,
-    "observer_state_eci": {"r_m": [7000000.0, 0.0, 0.0]},
-    "az_el_rad": [0.5, 0.1],
-    "R_meas": [[0.001, 0.0], [0.0, 0.001]]
+    "timestamp": 1234567890,
+    "observer_state_eci": {
+      "r_m": [
+        7000000,
+        0,
+        0
+      ]
+    },
+    "az_el_rad": [
+      0.5,
+      0.1
+    ],
+    "R_meas": [
+      [
+        0.001,
+        0
+      ],
+      [
+        0,
+        0.001
+      ]
+    ]
   },
   {
     "target_id": "sat_3",
-    "timestamp": 1234567890.0,
-    "observer_state_eci": {"r_m": [7000000.0, 0.0, 0.0]},
-    "ra_dec_rad": [1.2, 0.3]
+    "timestamp": 1234567890,
+    "observer_state_eci": {
+      "r_m": [
+        7000000,
+        0,
+        0
+      ]
+    },
+    "ra_dec_rad": [
+      1.2,
+      0.3
+    ]
   },
   {
     "target_id": "sat_4",
-    "timestamp": 1234567890.0,
-    "observer_state_eci": {"r_m": [7000000.0, 0.0, 0.0]},
-    "los_eci": [0.7071, 0.7071, 0.0],
-    "range_m": 500000.0
+    "timestamp": 1234567890,
+    "observer_state_eci": {
+      "r_m": [
+        7000000,
+        0,
+        0
+      ]
+    },
+    "los_eci": [
+      0.7071,
+      0.7071,
+      0
+    ],
+    "range_m": 500000
   }
 ]
