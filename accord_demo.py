@@ -23,7 +23,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
 import json
-import random
 from typing import Optional
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -38,14 +37,15 @@ from src.transaction import Transaction, TransactionMetadata
 logger = get_logger(__name__)
 
 
-# Helpers for loading JSON → Transactions
-def load_sensor_json(file_path: str, sender_address: int = 0,
+# Helpers for loading JSON -> Transactions
+def load_sensor_json(file_path: str = "sim_output.json", sender_address: int = 0,
                      recipient_address: int = 123) -> list[Transaction]:
     """
     Load sensor observation data from JSON file and convert to Transaction objects.
 
     Args:
-    - file_path: path to JSON file with sensor observations
+    - file_path: path to JSON file with sensor observations. Defaults to the
+    json file returned by src/satellite_sim.mlx
     - sender_address: address of the sender (default 0)
     - recipient_address: address of the recipient (default 123)
 
@@ -69,14 +69,9 @@ def load_sensor_json(file_path: str, sender_address: int = 0,
 
 
 # Consensus demo (JSON-driven)
-async def run_consensus_demo(json_file: str,
-                             n_malicious: int = 0) -> tuple[Optional[DAG], Optional[dict]]:
+async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     """
     Run ACCORD consensus using observations from a JSON file.
-
-    Args:
-        json_file: path to a JSON file with sensor observations
-        n_malicious: number of malicious nodes (<= 1/3 of total)
 
     Returns:
         (final DAG, reputation history per node)
@@ -86,25 +81,21 @@ async def run_consensus_demo(json_file: str,
     dag = DAG(queue=queue, consensus_mech=poise)
 
     # Load transactions from JSON
-    honest_txs = load_sensor_json(json_file, sender_address=0)
+    honest_txs = load_sensor_json()
     n_nodes = len(honest_txs)
     if n_nodes == 0:
         logger.info("No data in JSON file.")
         return None, None
 
     # Create satellite nodes
+    # TODO - change ID with satellite node ID from the class
     satellites: list[SatelliteNode] = []
     for i in range(n_nodes):
         sat = SatelliteNode(node_id=f"SAT-{i:03d}", queue=queue)
         satellites.append(sat)
 
-    # Assign malicious subset
-    malicious_indices = random.sample(range(n_nodes), k=min(n_malicious, n_nodes))
-    for idx in malicious_indices:
-        satellites[idx].is_malicious = True
-
     # Add transactions into DAG
-    rep_history: dict = {sat.id: [] for sat in satellites}
+    rep_history: dict[str, list[float]] = {sat.id: [] for sat in satellites}
     asyncio.create_task(dag.listen())
 
     for sat in satellites:
@@ -117,6 +108,7 @@ async def run_consensus_demo(json_file: str,
 
 
 # Plots
+# TODO - need to fix graphs fix malicious nature of things too
 def plot_transaction_dag(dag: DAG) -> None:
     """
     Plot the transaction DAG.
@@ -212,7 +204,7 @@ def plot_reputation(rep_history: dict) -> None:
 
 # Run demo
 if __name__ == "__main__":
-    final_dag, rep_hist = asyncio.run(run_consensus_demo("sim_output.json", n_malicious=1))
+    final_dag, rep_hist = asyncio.run(run_consensus_demo())
     if final_dag:
         plot_transaction_dag(final_dag)
     if rep_hist:
