@@ -53,6 +53,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── od_filter.py               # Code for the orbit determination calculation work
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
+│   └── satellite_sim.mlx          # MATLAB Live Script performing satellite simulation work
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │   └── utils.py                   # Utility functions and global variables
 │
@@ -67,6 +68,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ├── README.md                # Project overview
 ├── requirements.txt         # List of python package dependencies
 └── requirements_linux.txt   # List of python package dependencies for linux and CI
+└── sim_output.json          # Orbit determination data for use in consensus generated from satellite_sim.mlx
 
 * - Adapted from ZHOUXINGYU-OASIS, ‘ZHOUXINGYU-OASIS/MDSTT: v1.0.0’. Zenodo, Jul. 29, 2024.
 doi: 10.5281/zenodo.13123587.
