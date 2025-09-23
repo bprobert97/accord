@@ -33,7 +33,7 @@ from .transaction import Transaction, TransactionMetadata
 if TYPE_CHECKING:
     from .consensus_mech import ConsensusMechanism
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 class DAG():
     """

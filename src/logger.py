@@ -22,25 +22,41 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import logging
 from logging import Logger
 
-def get_logger(name: str = __name__) -> Logger:
+def get_logger(name: str = "ACCORD", log_file: str = "app.log") -> Logger:
     """
-    Returns a logger for the application
+    Returns a logger that is safe to use across multiple modules.
+    Clears the log file on each run.
+
+    Args:
+    - name: The name of the logger.
+    - log_file: The file to write logs to.
+
+    Returns:
+    - A configured Logger instance.
     """
     logger = logging.getLogger(name)
-    if not logger.hasHandlers():  # Avoid adding multiple handlers
+
+    # Only configure if no handlers exist
+    if not logger.hasHandlers():
         logger.setLevel(logging.DEBUG)
+
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
 
         # Console handler
         ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)  # Adjust level for console output
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        ch.setLevel(logging.INFO)
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
-        # File handler (optional)
-        fh = logging.FileHandler('app.log')
+        # File handler – overwrite file each run
+        fh = logging.FileHandler(log_file, mode='w')
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
         logger.addHandler(fh)
+
+        # Optional: prevent messages from propagating to the root logger
+        logger.propagate = False
 
     return logger

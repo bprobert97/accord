@@ -26,11 +26,8 @@ import copy
 import json
 from typing import Optional
 from .dag import DAG
-from .logger import get_logger
 from .reputation import ReputationManager, MAX_REPUTATION
 from .transaction import Transaction, TransactionMetadata
-
-logger = get_logger(__name__)
 
 
 class SatelliteNode():
@@ -90,7 +87,6 @@ class SatelliteNode():
                                   metadata=metadata)
 
         future = asyncio.get_running_loop().create_future()
-        logger.info("Satellite %s: submitting transaction %s", self.id, transaction.hash)
         await self.queue.put((transaction, self, future))
         # Waits until DAG sets the result
         return await future
