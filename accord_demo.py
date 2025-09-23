@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals
+# pylint: disable=protected-access, too-many-locals, too-many-statements
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -25,6 +25,8 @@ import asyncio
 import json
 from typing import Optional
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
 import networkx as nx
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
@@ -168,7 +170,7 @@ def plot_transaction_dag(dag: DAG) -> None:
             node_color="lightblue",
             node_size=300,
             edgecolors=outline_color,
-            linewidths=2
+            linewidths=1
         )
 
     edge_colors = []
@@ -182,6 +184,41 @@ def plot_transaction_dag(dag: DAG) -> None:
 
     nx.draw_networkx_edges(graph, pos,
                            edge_color=edge_colors, arrowsize=15) # type: ignore [arg-type]
+
+    # Add legend
+    node_patch = mpatches.Patch(edgecolor="black", facecolor="lightblue",
+                                label="Initial Transaction", linewidth=1)
+    confirmed_patch = mpatches.Patch(edgecolor="green", facecolor="lightblue",
+                                     label="Confirmed Transaction", linewidth=1)
+    rejected_patch = mpatches.Patch(edgecolor="red", facecolor="lightblue",
+                                    label="Rejected Transaction", linewidth=1)
+    # Use Line2D for edge legend entries to look like lines
+    edge_confirmed = Line2D([0], [0], color="green", linewidth=1, label="Strong Edge")
+    edge_rejected = Line2D([0], [0], color="red", linewidth=1, label="Weak Edge")
+    edge_default = Line2D([0], [0], color="grey", linewidth=1, label="Default Edge")
+
+    # Place legend outside the plot area (top right)
+    plt.legend(
+        handles=[node_patch, confirmed_patch, rejected_patch, edge_confirmed,
+                 edge_rejected, edge_default],
+        loc="upper left",
+        bbox_to_anchor=(1, 1),
+        facecolor='none',
+        edgecolor='black',
+        labelcolor='black',
+        fontsize=18
+    )
+
+    plt.title("Transaction DAG", fontsize=12, color='black')
+    plt.xlabel("Time Step", color='black', fontsize=12)
+    n = len(sorted_keys)
+    step = 10
+    plt.xticks(
+        range(0, n, step),  # positions at every 10 timesteps
+        [str(i) for i in range(0, n, step)],  # labels
+        color="black",
+        fontsize=12
+    )
 
     ax = plt.gca()
 
@@ -210,7 +247,7 @@ def plot_transaction_dag(dag: DAG) -> None:
 
     # Set axis and tick colors to black
     ax.spines['bottom'].set_color('black')
-    ax.tick_params(axis='x', colors='black', labelsize=24)
+    ax.tick_params(axis='x', colors='black', labelsize=12)
     ax.xaxis.label.set_color('black')
 
     # Set transparent background
