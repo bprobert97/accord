@@ -50,7 +50,7 @@ class SatelliteNode():
         self.rep_manager = ReputationManager()
         self.local_dag: Optional[DAG] = None
 
-        self.sensor_data: Optional[dict] = None  # will be filled later
+        self.sensor_data: Optional[dict] = None
 
     def load_sensor_data(self, observation: dict) -> None:
         """

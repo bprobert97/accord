@@ -1,4 +1,4 @@
-# pylint: disable=protected-access
+# pylint: disable=protected-access, too-many-locals
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -26,7 +26,6 @@ import json
 from typing import Optional
 import matplotlib.pyplot as plt
 import networkx as nx
-import numpy as np
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.logger import get_logger
@@ -91,30 +90,28 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
 
     asyncio.create_task(dag.listen())
 
-    satellites: list[SatelliteNode] = []
-    rep_history: dict[str, list[float]] = {}
+    # Create one SatelliteNode per unique observer_id in the JSON
+    unique_ids = sorted({obs["observer_id"] for obs in observations})
+    satellites: dict[str, SatelliteNode] = {
+        sid: SatelliteNode(node_id=sid, queue=queue) for sid in unique_ids
+    }
+    rep_history: dict[str, list[float]] = {sid: [] for sid in unique_ids}
 
     # One satellite per observation (or choose grouping logic if needed)
-    # TODO - need to fix satelltie IDs as its one per ransaction right now.
-    # I need to simulate less satellites.
     # I need the data to match the scenario in here.
     # Also, TODO - update Matlab to use SGP4
-    for i, obs in enumerate(observations):
-        sat = SatelliteNode(node_id=f"SAT-{i:03d}", queue=queue)
+    # Assign each observation to the correct satellite and submit
+    for obs in observations:
+        sid = obs["observer_id"]
+        sat = satellites[sid]
         sat.load_sensor_data(obs)
-        satellites.append(sat)
-        rep_history[sat.id] = []
-
-    # Submit each transaction via the satellite
-    for sat in satellites:
         await sat.submit_transaction(recipient_address=123)
-        rep_history[sat.id].append(sat.reputation)
+        rep_history[sid].append(sat.reputation)
 
     return dag, rep_history
 
 
 # Plots
-# TODO - need to fix graphs fix malicious nature of things too
 def plot_transaction_dag(dag: DAG) -> None:
     """
     Plot the transaction DAG.
@@ -144,6 +141,21 @@ def plot_transaction_dag(dag: DAG) -> None:
     pos = {k: (i, (hash(k) % 100) / 100.0 - 0.5) for i, k in enumerate(sorted_keys)}
 
     plt.figure(figsize=(16, 6))
+
+    plt.axvline(x=2,
+                color="#000000",
+                linestyle="--",
+                linewidth=1.5,
+                label="Real Data Added",
+                zorder=1)
+
+    plt.axvline(x=5,
+                color="#000000",
+                linestyle="--",
+                linewidth=1.5,
+                label="BFT Quorum Reached",
+                zorder=1)
+
     for node in graph.nodes():
         outline_color = "black"
         if tx_status[node]["is_confirmed"]:
@@ -154,7 +166,7 @@ def plot_transaction_dag(dag: DAG) -> None:
             graph, pos,
             nodelist=[node],
             node_color="lightblue",
-            node_size=1800,
+            node_size=300,
             edgecolors=outline_color,
             linewidths=2
         )
@@ -170,9 +182,42 @@ def plot_transaction_dag(dag: DAG) -> None:
 
     nx.draw_networkx_edges(graph, pos,
                            edge_color=edge_colors, arrowsize=15) # type: ignore [arg-type]
-    nx.draw_networkx_labels(graph, pos, font_size=8, font_weight="bold")
-    plt.title("Transaction DAG", fontsize=14)
-    plt.axis("off")
+
+    ax = plt.gca()
+
+    ymin, _ = ax.get_ylim()
+
+    # Add rotated text along the vertical lines
+    ax.text(2 - 0.1, ymin + 0.05, "Real Data Added", color="#000000",
+        rotation=90, rotation_mode="anchor",
+        va="bottom", ha="left", fontsize=10,
+        zorder=10,
+        bbox={"facecolor": "none", "edgecolor": "none", "alpha": 0.7, "pad": 2})
+
+    ax.text(5 - 0.1, ymin + 0.05, "BFT Quorum Reached", color="#000000",
+            rotation=90, rotation_mode="anchor",
+            va="bottom", ha="left", fontsize=10,
+            zorder=10,
+            bbox={"facecolor": "none", "edgecolor": "none", "alpha": 0.7, "pad": 2})
+
+    ax.get_yaxis().set_visible(False)
+    ax.spines['bottom'].set_visible(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.xaxis.set_ticks_position('bottom')
+    ax.xaxis.set_label_position('bottom')
+
+    # Set axis and tick colors to black
+    ax.spines['bottom'].set_color('black')
+    ax.tick_params(axis='x', colors='black', labelsize=24)
+    ax.xaxis.label.set_color('black')
+
+    # Set transparent background
+    ax.set_facecolor('none')
+    plt.gcf().patch.set_alpha(0.0)
+
+    plt.tight_layout(rect=[0, 0, 0.85, 1]) # type: ignore [arg-type]
     plt.show()
 
 
@@ -191,20 +236,29 @@ def plot_reputation(rep_history: dict) -> None:
     neutral_level: float = MAX_REPUTATION / 2
     plt.figure(figsize=(8, 5))
 
-    for node_id, history in rep_history.items():
-        steps = list(range(len(history)))
-        exp_pos = (np.arange(len(history))).tolist()
-        target_curve = [REP_MGR._gompertz_target(e) for e in exp_pos]
-        plt.plot(steps, history, marker='o', label=f"{node_id} Reputation")
-        plt.plot(steps, target_curve, linestyle="--", color="orange")
+    max_len = max((len(h) for h in rep_history.values()), default=0)
+    steps = list(range(max_len))
 
+    # Plot reputation histories
+    for node_id, history in rep_history.items():
+        plt.plot(range(len(history)), history, marker="o", label=f"{node_id} Reputation")
+
+    # Plot target curve ONCE (using max length)
+    if max_len > 0:
+        target_curve = [REP_MGR._gompertz_target(e) for e in steps]
+        plt.plot(steps, target_curve, linestyle="--",
+                 color="orange", linewidth=2, label="Target curve")
+
+    # Neutral line
     plt.axhline(neutral_level, color="gray", linestyle=":", label=f"Neutral ({neutral_level})")
+
     plt.ylim(0, MAX_REPUTATION)
     plt.xlabel("Time step")
     plt.ylabel("Reputation")
     plt.title("Satellite Node Reputation over Time")
     plt.legend()
     plt.grid(True, linestyle=":")
+    plt.tight_layout()
     plt.show()
 
 
