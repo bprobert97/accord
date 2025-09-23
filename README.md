@@ -64,7 +64,6 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ├── changelog.md             # Release change log
 ├── LICENSE.MD               # License file
 ├── mypy.ini                 # Mypy configuration
-├── od_data.json             # Example orbit determination data for use in consensus
 ├── README.md                # Project overview
 ├── requirements.txt         # List of python package dependencies
 └── requirements_linux.txt   # List of python package dependencies for linux and CI
