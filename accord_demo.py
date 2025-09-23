@@ -34,7 +34,7 @@ from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
 from src.utils import load_json_data
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 # Consensus demo (JSON-driven)
 async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
@@ -72,6 +72,7 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
         sid = obs["observer_id"]
         sat = satellites[sid]
         sat.load_sensor_data(obs)
+        logger.info("Satellite %s: submitting transaction.", sid)
         await sat.submit_transaction(recipient_address=123)
         rep_history[sid].append(sat.reputation)
 
