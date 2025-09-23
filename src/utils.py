@@ -23,9 +23,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import json
 
 
-def build_tx_data(file_name: str = "sim_output.json") -> list[dict]:
+def load_json_data(file_name: str = "sim_output.json") -> list[dict]:
     """
-    Load transaction data from a JSON file.
+    Load data from a JSON file.
 
     Args:
     - file_name: The name of the JSON file to read data from.
