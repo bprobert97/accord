@@ -26,11 +26,14 @@ import json
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
+from .logger import get_logger
 from .od_filter import ODProcessingResult, SDEKF
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
 
 R_EARTH = 6371e3  # metres
+
+logger = get_logger()
 
 class ConsensusMechanism():
     """
@@ -68,6 +71,7 @@ class ConsensusMechanism():
         # Check observer position
         r_obs = np.array(obs.get("observer_state_eci", {}).get("r_m", []), dtype=float)
         if r_obs.shape != (3,) or not np.isfinite(r_obs).all():
+            logger.info("Observer position invalid or missing.")
             return False
 
         # Ensure at least one measurement exists
@@ -76,23 +80,28 @@ class ConsensusMechanism():
                                                      "ra_dec_rad",
                                                      "los_eci"])
         if not has_measurement:
+            logger.info("No valid measurement data present.")
             return False
 
         # Check range
         if "range_m" in obs:
             rng = obs["range_m"]
             if not (isinstance(rng, (int, float)) and np.isfinite(rng)):
+                logger.info("Range measurement invalid.")
                 return False
             if rng < 1e5 or rng > 5e7:  # 100 km to 50,000 km
+                logger.info("Range measurement out of bounds: %.1f m", rng)
                 return False
 
         # Check LOS vector
         if "los_eci" in obs:
             los = np.array(obs["los_eci"], dtype=float)
             if los.shape != (3,) or not np.isfinite(los).all():
+                logger.info("LOS vector invalid.")
                 return False
             norm = np.linalg.norm(los)
             if not np.isclose(norm, 1.0, atol=1e-3):
+                logger.info("LOS vector not unit length: norm=%.6f", norm)
                 return False
             if "range_m" in obs:  # can form satellite position
                 sat_pos = r_obs + rng * los
@@ -101,24 +110,35 @@ class ConsensusMechanism():
         if "az_el_rad" in obs:
             az, el = obs["az_el_rad"]
             if not (0 <= az < 2*np.pi and -np.pi/2 <= el <= np.pi/2):
+                logger.info("Azimuth/Elevation out of bounds: az=%.3f, el=%.3f", az, el)
                 return False
 
         # Check RA/Dec
         if "ra_dec_rad" in obs:
             ra, dec = obs["ra_dec_rad"]
             if not (0 <= ra < 2*np.pi and -np.pi/2 <= dec <= np.pi/2):
+                logger.info("RA/Dec out of bounds: ra=%.3f, dec=%.3f", ra, dec)
                 return False
 
         # Check covariance matrix
         if "R_meas" in obs:
             r = np.array(obs["R_meas"], dtype=float)
+            # Account for issues converting from MATLAB to json to Python
+            if r.ndim == 0:  # scalar
+                r = np.array([[float(r)]])
+            elif r.ndim == 1:  # vector
+                r = np.diag(r)
+
             if r.ndim != 2 or r.shape[0] != r.shape[1]:
+                logger.info("Covariance matrix R_meas invalid shape.")
                 return False
             # Must be symmetric and positive semidefinite
             if not np.allclose(r, r.T, atol=1e-8):
+                logger.info("Covariance matrix R_meas not symmetric.")
                 return False
             eigvals = np.linalg.eigvalsh(r)
             if np.any(eigvals < -1e-12):
+                logger.info("Covariance matrix R_meas not positive semidefinite.")
                 return False
 
         # LEO altitude bound check (200 to 2000km)
@@ -126,6 +146,7 @@ class ConsensusMechanism():
         if sat_pos is not None:
             h = np.linalg.norm(sat_pos) - R_EARTH
             if not 200e3 <= h <= 2000e3:
+                logger.info("Inferred satellite altitude out of LEO bounds: %.1f m", h)
                 return False
 
         return True
@@ -257,6 +278,8 @@ class ConsensusMechanism():
         # Length of DAG is 2 by default with genesis transactions. These are dummy data,
         # so we must have at least 4 real transactions on top to be BFT (2 + 4 =  total)
         if not dag.has_bft_quorum():
+            logger.info("Not enough transactions for BFT quorum.")
+            logger.info("Satellite reputation unchanged at %.2f", sat_node.reputation)
             return False
 
         # If we have valid data, try to reach consensus on it
@@ -291,13 +314,17 @@ class ConsensusMechanism():
 
             # 7) if consensus reached - strong node (maybe affects node reputation?),
             # else weak node (like IOTA)
+            logger.info("Consensus score: %.3f (threshold %.3f)",
+                        consensus_score, self.consensus_threshold)
             if consensus_score >= self.consensus_threshold:
                 transaction.metadata.consensus_reached = True
                 sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
                     sat_node.reputation, sat_node.exp_pos
                 )
                 transaction.metadata.is_confirmed = True
+                logger.info("Satellite reputation increased to %.2f", sat_node.reputation)
                 return True
+            logger.info("Consensus not reached. Score too low.")
 
         # If data is invalid, or consensus score is below threshold
         # the transaction is rejected and the node's reputation is penalised.
@@ -306,6 +333,8 @@ class ConsensusMechanism():
             sat_node.reputation, sat_node.exp_pos
         )
         transaction.metadata.is_rejected = True
+        # TODO - improve this as it can happen if data not valid but consensus not reached.
+        logger.info("Data not valid. Satellite reputation decreased to %.2f", sat_node.reputation)
         return False
 
 

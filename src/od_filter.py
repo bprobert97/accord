@@ -606,6 +606,16 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
 
         r_meas = np.array(r_meas, dtype=float)
 
+        # Normalise to 2D matrix
+        if r_meas.ndim == 0:           # scalar
+            r_meas = np.array([[float(r_meas)]])
+        elif r_meas.ndim == 1:         # vector → diagonal
+            r_meas = np.diag(r_meas)
+        elif r_meas.ndim == 2:
+            pass  # already a 2D matrix
+        else:
+            raise ValueError(f"Invalid covariance shape: ndim={r_meas.ndim}, shape={r_meas.shape}")
+
         # Symmetrisation step
         r_meas = 0.5 * (r_meas + r_meas.T)
 
