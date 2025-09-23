@@ -22,7 +22,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import asyncio
-import json
 from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -33,42 +32,9 @@ from src.dag import DAG
 from src.logger import get_logger
 from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
-from src.transaction import Transaction, TransactionMetadata
-from src.utils import build_tx_data
+from src.utils import load_json_data
 
 logger = get_logger(__name__)
-
-
-# Helpers for loading JSON -> Transactions
-def load_sensor_json(file_path: str = "sim_output.json", sender_address: int = 0,
-                     recipient_address: int = 123) -> list[Transaction]:
-    """
-    Load sensor observation data from JSON file and convert to Transaction objects.
-
-    Args:
-    - file_path: path to JSON file with sensor observations. Defaults to the
-    json file returned by src/satellite_sim.mlx
-    - sender_address: address of the sender (default 0)
-    - recipient_address: address of the recipient (default 123)
-
-    Returns:
-    - List of Transaction objects
-    """
-    with open(file_path, "r", encoding="utf-8") as f:
-        observations = json.load(f)
-
-    transactions = []
-    for obs in observations:
-        tx = Transaction(
-            sender_address=sender_address,
-            recipient_address=recipient_address,
-            sender_private_key="dummy_key",
-            tx_data=json.dumps(obs),
-            metadata=TransactionMetadata()
-        )
-        transactions.append(tx)
-    return transactions
-
 
 # Consensus demo (JSON-driven)
 async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
@@ -84,8 +50,7 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     dag = DAG(queue=queue, consensus_mech=poise)
 
     # Load all JSON observations
-    # TODO - is this needed? I want each satellite to load its own data
-    observations = build_tx_data("sim_output.json")
+    observations = load_json_data("sim_output.json")
     if not observations:
         logger.info("No data in JSON file.")
         return None, None
