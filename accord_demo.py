@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 import networkx as nx
+import numpy as np
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.logger import get_logger
@@ -248,18 +249,45 @@ def plot_reputation(rep_history: dict) -> None:
 
     # Plot target curve ONCE (using max length)
     if max_len > 0:
-        target_curve = [REP_MGR._gompertz_target(e) for e in steps]
+        # Simulate the max reputation trajectory (all positives, with decay)
+        exp_pos = 0
+        rep = MAX_REPUTATION / 2
+        target_curve = []
+        for _ in steps:
+            rep = REP_MGR.decay(rep)
+            gompertz_target = REP_MGR._gompertz_target(exp_pos)
+            rep = rep + REP_MGR.alpha * (gompertz_target - rep)
+            target_curve.append(rep)
+            exp_pos += 1
+        target_curve = np.array(target_curve) # type: ignore [assignment]
+
         plt.plot(steps, target_curve, linestyle="--",
                  color="orange", linewidth=2, label="Target curve")
+
+        # Byzantine region as offset below
+        lag = 5       # number of timesteps delay
+        margin = 0.0  # vertical buffer
+
+        # Build lagged version of target curve
+        byz_curve = np.zeros_like(target_curve)
+        byz_curve[lag:] = target_curve[:-lag] - margin # type: ignore [operator]
+        byz_curve[:lag] = target_curve[0] - margin
+
+        # Ensure it's always below the target
+        byz_curve = np.clip(byz_curve, 0, target_curve)
+
+        # Shade the band BETWEEN byz_curve and target_curve
+        plt.fill_between(steps, 50, byz_curve,
+                        color="grey", alpha=0.1, label="Byzantine region")
+
 
     # Neutral line
     plt.axhline(neutral_level, color="gray", linestyle=":", label=f"Neutral ({neutral_level})")
 
     plt.ylim(0, MAX_REPUTATION)
-    plt.xlabel("Time step")
-    plt.ylabel("Reputation")
-    plt.title("Satellite Node Reputation over Time")
-    plt.legend()
+    plt.xlabel("Time step [minutes]")
+    plt.ylabel("Reputation Score [-]")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.)
     plt.grid(True, linestyle=":")
     plt.tight_layout()
     plt.show()
