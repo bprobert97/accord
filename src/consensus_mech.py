@@ -41,7 +41,7 @@ class ConsensusMechanism():
     The Proof of Inter-Satellite Evaluation (PoISE) consensus mechanism.
     """
     def __init__(self) -> None:
-        self.consensus_threshold : float = 0.6
+        self.consensus_threshold : float = 0.3
 
     def data_is_valid(self, obs: dict) -> bool:
         """
@@ -303,10 +303,12 @@ class ConsensusMechanism():
                 )
                 transaction.metadata.is_confirmed = True
                 logger.info("Satellite reputation increased to %.2f", sat_node.reputation)
+                logger.info("Successful consensus score: %.2f", consensus_score)
                 return True
 
-            logger.info("Consensus threshold not met. \
-                        Satellite reputation decreased to %.2f", sat_node.reputation)
+            logger.info("Consensus threshold of %.2f does not met threshold. \
+                        Satellite reputation decreased to %.2f",
+                        consensus_score, sat_node.reputation)
 
         else:
             logger.info("Data not valid. Satellite reputation decreased to %.2f",
