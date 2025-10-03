@@ -39,21 +39,9 @@ logger = get_logger()
 class ConsensusMechanism():
     """
     The Proof of Inter-Satellite Evaluation (PoISE) consensus mechanism.
-
-    TODO - need to check: if physically possible, how many times its been seen (maybe new param?)
     """
-    # TODO - proof of Location XYO paper, and bidirectional heuristics (need to check for invalid,
-    # or valid but incorrect/inaccurate)(4.3, proof of proximity)
-    # TODO - format for data? class for verification/consensus? Need some calcs
-    # TODO TODAY - SLAM DRONE PAPER, and consensus on position, doppler shift?? what data so I
-    # have to choose from?
-    # DAGmap - map consensus could be something to build upon? does it have a ground truth?
-    # PowerGraph - consensus for trust level, calculates validity of transaction from probability
-    # level. I guess I need to calculate validity from some maths? possible - if yes, then how
-    # accurate/likely probability distruibution for observations? Algorithm one in PowerGraph paper
-
     def __init__(self) -> None:
-        self.consensus_threshold : float = 0.6 # TODO - tune
+        self.consensus_threshold : float = 0.6
 
     def data_is_valid(self, obs: dict) -> bool:
         """
@@ -230,7 +218,6 @@ class ConsensusMechanism():
         max_dof = 2
 
         # Clip to avoid scores >1
-        # Relationship is linear TODO tune - could be non-linear
         # dof = 1 returns 0.5, dof = 2 returns 1.0
         return min(1.0, dof / max_dof)
 
@@ -239,7 +226,6 @@ class ConsensusMechanism():
         """
         Calculate overall consensus score from correctness, DOF reward, and node reputation.
         Weights can be adjusted to tune the influence of each factor.
-        TODO - tune
 
         Args:
         - correctness: Correctness score in [0,1].
@@ -278,8 +264,8 @@ class ConsensusMechanism():
         # 2a) If we have data, submit a transaction
         dag.add_tx(transaction)
 
-        # 3) TODO Check we have enough data to be bft (3f + 1)
-        # if not, consensus cannot be reached.
+        # 3) Check we have enough data to be bft (3f + 1)
+        # If not, consensus cannot be reached.
         # Length of DAG is 2 by default with genesis transactions. These are dummy data,
         # so we must have at least 4 real transactions on top to be BFT (2 + 4 =  total)
         if not dag.has_bft_quorum():
@@ -293,24 +279,15 @@ class ConsensusMechanism():
             # Run SDEKF
             sdekf = SDEKF()
             processing_result: ODProcessingResult =sdekf.process_measurement(transaction_data)
-            # 4) TODO Check if satellite has been witnessed before
+
+            # 4) Check if satellite has been witnessed before
             #4a if yes, does this data agree with other data/ is it correct?
-            # Assign correctness score -> affects transaction
-            #  This is going to be very tricky. How do I get this data?? Where do I
-            # store it? Do I want this to tie in to how parents are selected?
-            # TODO - 0.5 setting is from a recent reference - find and add here
             correctness_score = self.get_correctness_score(dag, processing_result)
 
-            # 5) TODO is sensor data accurate (done regardless of previous witnessing).
-            # Assign accuracy score -> affects transaction and node reputation
-            # Again, might be tricky. Probability distribution here? Like in the PowerGraph paper?
+            # 5) Reward measurements with higher DOF (more accurate, reduced comp. intensity)
             dof_score = self.calculate_dof_score(processing_result.dof)
 
-            # 6) TODO calculate consensus score - node reputation,
-            # accuracy and correctness all factor
-            # Need to add in a time decay factor
-            # Need to develop an equation - this will take some reading and tuning
-
+            # 6) Calculate consensus score
             consensus_score = self.calculate_consensus_score(correctness_score,
                                                              dof_score,
                                                              sat_node.reputation)
@@ -341,15 +318,3 @@ class ConsensusMechanism():
         # TODO - improve this as it can happen if data not valid but consensus not reached.
         logger.info("Data not valid. Satellite reputation decreased to %.2f", sat_node.reputation)
         return False
-
-
-        # if all history is strong - strong edge connection, else weak edge connection.
-        # I guess I can't update edge connections or tx strength retroactively so..
-        # this bit is the same as tangle, so i may just try and run this consensus
-        # on a tangle like system or simulator like in references
-
-        # TODO - steps 4-6 are the key bits, work here. Get equations and find some
-        # tuning evidence. Need to transform into a DAG from a blockchain after that
-
-        # Reputation is tracked and updated throughout
-        # Transaction score is fixed once submitted

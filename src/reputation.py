@@ -42,8 +42,6 @@ class ReputationManager:
         max_rep: max possible reputation
         B, C: Gompertz curve parameters
         decay_rate: exponential decay per second (or tick)
-        TODO - tune alpha. Currently takes around 20 consecutive
-        positive interactions to be 90% trusted
         alpha: % of distance toward Gompertz target per positive event
         drop_factor: multiplicative penalty for negative events
         """

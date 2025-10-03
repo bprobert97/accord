@@ -45,8 +45,6 @@ class DAG():
     def __init__(self,
                  consensus_mech: ConsensusMechanism,
                  queue: asyncio.Queue) -> None:
-        # TODO - need a way to check that the DAG has not been tampered with
-
         # Ledger structure is:
         # key: string hash of transaction, value: Transaction class
         self.ledger: dict = self.create_genesis_tx()
@@ -74,6 +72,9 @@ class DAG():
         for the first real transaction.
         Have to set consensus_reached and is_confirmed = True here otherwise strong
         parents become impossible.
+
+        Returns:
+        - A dictionary of two genesis transactions and their IDs
         """
         genesis_metadata = TransactionMetadata(consensus_reached=True,
                                                is_confirmed=True)
@@ -90,7 +91,9 @@ class DAG():
         Randomly select 2 parents for the transaction.
         Weighted towards choosing newer parents in the DAG
         for now, not accounting for node reputation.
-        # THRESHOLDS affect tip selection for parents - TODO
+
+        Returns:
+        - The hashes of two parent transactions
         """
         keys = list(self.ledger.keys())
 
@@ -102,9 +105,6 @@ class DAG():
         # Linear bias in weights, favouring newer transactions
         # which will be later on (higher index) in the DAG as they
         # are ordered by timestamp
-        # TODO - check how I want this to be weighted
-        # Could be exponential:
-        # weights = [math.exp(i) for i in range(len(keys))].
         weights = [i + 1 for i in range(len(keys))]
 
         # Select 2 parents at random, with weighting
@@ -118,10 +118,14 @@ class DAG():
 
     def add_tx(self, transaction: Transaction) -> None:
         """
-        Add a transaction to the DAG
+        Add a transaction to the DAG.
+
+        Args:
+        - transaction: the data to be added to the DAG.
+
+        Returns:
+        - None. Adds transaction to the DAG.
         """
-        # TODO - tx or blocks?? start with tx for now
-        # TODO - fixed number of parents: 2
         parent1, parent2 = self.get_parents()
 
         # There is guaranteed to be two parents - the genesis transactions in the DAG.
@@ -136,6 +140,9 @@ class DAG():
         """
         Check if we have at least 3f + 1 real transactions (f = max faulty nodes tolerated).
         Genesis txs are ignored in this count.
+
+        Returns:
+        - A boolean indicating if BFT quorum is reached.
         """
         real_tx_count = max(0, len(self.ledger) - 2)  # exclude genesis
         # If f=1, we need 4 real tx (3*1+1)

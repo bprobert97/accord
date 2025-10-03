@@ -66,8 +66,6 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     rep_history: dict[str, list[float]] = {sid: [] for sid in unique_ids}
 
     # One satellite per observation (or choose grouping logic if needed)
-    # I need the data to match the scenario in here.
-    # Also, TODO - update Matlab to use SGP4
     # Assign each observation to the correct satellite and submit
     for obs in observations:
         sid = obs["observer_id"]
