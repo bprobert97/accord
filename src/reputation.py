@@ -58,21 +58,51 @@ class ReputationManager:
     def decay(self, current_rep: float) -> float:
         """
         Calculate the time decay for a node's reputation calculation
+
+        Args:
+        - current_rep: The node's reputation before a time decay is applied.
+
+        Returns:
+        - The node's reputation after a time decay is applied. The lower
+          bound from this decay is neutral reputation (max reputation / 2)
+          so as to not overly penalise inactive nodes, especially in async
+          situations where nodes may be out of contact for a longer period.
         """
+        neutral_rep: float = MAX_REPUTATION / 2
         now: float = time.time()
         delta_t: float = now - self._last_update
         self._last_update = now
-        return current_rep * np.exp(-self.decay_rate * delta_t)
+
+        # Exponential decay towards neutral reputation
+        decayed_rep = \
+            neutral_rep + ((current_rep - neutral_rep) * np.exp(-self.decay_rate * delta_t))
+
+        return min(max(decayed_rep, 0.0), MAX_REPUTATION)
 
     def _gompertz_target(self, exp_pos: int) -> float:
         """
-        Calculate Gompertz function impact on reputation
+        Calculate Gompertz function impact on reputation.
+
+        Args:
+        - exp_pos: The number of positive experiences the node has had.
+
+        Returns:
+        - The gompertz function impact on a node's reputation, used
+          as an upper bound for reputation.
         """
         return self.max_rep * np.exp(-self.offset * np.exp(-self.growth_rate * exp_pos))
 
     def apply_positive(self, current_rep: float, exp_pos: int) -> tuple[float, int]:
         """
-        Apply reputation effect for a positive node interaction
+        Apply reputation effect for a positive node interaction.
+
+        Args:
+        - current_rep: The node's reputation before a time decay is applied.
+        - exp_pos: The number of positive experiences the node has had.
+
+        Returns:
+        - The updated reputation and updated number of positive experiences,
+          increased by one.
         """
         current_rep = self.decay(current_rep)
         target = self._gompertz_target(exp_pos)
@@ -81,7 +111,15 @@ class ReputationManager:
 
     def apply_negative(self, current_rep: float, exp_pos: int) -> tuple[float, int]:
         """
-        Apply reputation effect for a negative node interaction
+        Apply reputation effect for a negative node interaction.
+
+        Args:
+        - current_rep: The node's reputation before a time decay is applied.
+        - exp_pos: The number of positive experiences the node has had.
+
+        Returns:
+        - The updated reputation and updated number of positive experiences,
+          that does not change.
         """
         current_rep = self.decay(current_rep)
         new_rep = current_rep * self.drop_factor
