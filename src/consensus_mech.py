@@ -296,8 +296,6 @@ class ConsensusMechanism():
 
             # 7) if consensus reached - strong node (maybe affects node reputation?),
             # else weak node (like IOTA)
-            logger.info("Consensus score: %.3f (threshold %.3f)",
-                        consensus_score, self.consensus_threshold)
             if consensus_score >= self.consensus_threshold:
                 transaction.metadata.consensus_reached = True
                 sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
@@ -306,8 +304,13 @@ class ConsensusMechanism():
                 transaction.metadata.is_confirmed = True
                 logger.info("Satellite reputation increased to %.2f", sat_node.reputation)
                 return True
-            logger.info("Consensus not reached. Score too low.")
 
+            logger.info("Consensus threshold not met. \
+                        Satellite reputation decreased to %.2f", sat_node.reputation)
+
+        else:
+            logger.info("Data not valid. Satellite reputation decreased to %.2f",
+                        sat_node.reputation)
         # If data is invalid, or consensus score is below threshold
         # the transaction is rejected and the node's reputation is penalised.
         transaction.metadata.consensus_reached = False
@@ -315,6 +318,4 @@ class ConsensusMechanism():
             sat_node.reputation, sat_node.exp_pos
         )
         transaction.metadata.is_rejected = True
-        # TODO - improve this as it can happen if data not valid but consensus not reached.
-        logger.info("Data not valid. Satellite reputation decreased to %.2f", sat_node.reputation)
         return False
