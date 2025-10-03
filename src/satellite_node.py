@@ -39,10 +39,7 @@ class SatelliteNode():
         self.id: str = node_id
         self.queue = queue
         self.exp_pos: int = 0
-        # Reputation starts at 0, affected by validity and accuracy
-        # TODO - need to consider how this affects consensus.
-        # If reputation low, does it get allowed? or does it affect
-        # consensus score?
+        # Reputation starts at a neutral level
         self.reputation: float = MAX_REPUTATION / 2
         self.rep_manager = ReputationManager()
         self.local_dag: Optional[DAG] = None
@@ -67,7 +64,7 @@ class SatelliteNode():
         Builds a transaction from observed satellite data and submits it to the DAG.
 
         Args:
-        - recipient_address: TODO may not be needed in transaction
+        - recipient_address: Crypographic address of the recipient
 
         Returns:
         A transaction that is submitted to the ledger
@@ -81,7 +78,6 @@ class SatelliteNode():
         metadata = TransactionMetadata()
         transaction = Transaction(sender_address=hash(self.id),
                                   recipient_address=recipient_address,
-                                  # TODO Replace with actual key handling
                                   sender_private_key="PLACEHOLDER_KEY",
                                   tx_data=tx_data,
                                   metadata=metadata)
@@ -97,8 +93,3 @@ class SatelliteNode():
         For now, replaces the local DAG with a deep copy.
         """
         self.local_dag = copy.deepcopy(network_dag)
-
-# TODO - need to allow node to submit a transaction to the ledger.
-# eventually will simulate this properly
-# Would likely need something to listen for the signal from the node??
-# Then when triggered, run consensus mechanism

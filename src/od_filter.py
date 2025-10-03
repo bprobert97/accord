@@ -63,8 +63,7 @@ class ODProcessingResult:
     dof: int
     post_cov: np.ndarray
 
-class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
-    # TODO - put this in part of the actual consensus mechanism using the innovation score
+class SDEKF:
     """
     Simple square-root EKF-like estimator (improves numerical stability).
     Designed for processing one measurement at a time from multiple observers.
@@ -74,7 +73,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
     - Measurements: range (1d), azimuth/elevation (2D), right ascension/declination (2D)
     """
 
-    # TODO tune init values
     def __init__(self,
                  meas_floor: float = 1.0) -> None:
         """
@@ -91,8 +89,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         self.q: np.ndarray = np.zeros([self.dimensions, self.dimensions])
 
     def process_measurement(self, measurements: Dict) -> ODProcessingResult:
-
-        # TODO - need to find uncertainty refs for noise measurements - if narrow gaussian, its okay
         """
         Process one cooperative measurement and update the per-target filter.
 
@@ -147,7 +143,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         - Mutates self.targets by adding a new entry for the target with a weak prior state.
         """
         # x0 is a zero state, p0 is large uncertainty
-        # TODO - tune these values
         x0 = np.zeros((6, 1))
         p0 = np.diag([1e10, 1e10, 1e10, 1e6, 1e6, 1e6])
 
@@ -339,10 +334,6 @@ class SDEKF: # TODO - ref Mals paper. Check this actually is doing what I want.
         x0[0:3, :] = r_tgt
 
         # Start with unknown velocity
-        # TODO - find paper The initial covariance values (1e6 m² for position,
-        # 1e4 (m/s)² for velocity) are chosen to reflect high initial uncertainty,
-        # similar to values used in practical orbit determination literature
-        # (see e.g. Vallado, "Fundamentals of Astrodynamics and Applications", 4th Ed.).
         p0 = np.diag([1e6, 1e6, 1e6, 1e4, 1e4, 1e4]).astype(float)
         return State(state_estimate=x0, covariance=p0, last_update_seconds=timestamp)
 
