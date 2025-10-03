@@ -28,6 +28,7 @@ from scipy.stats import chi2
 from .dag import DAG
 from .logger import get_logger
 from .od_filter import ODProcessingResult, SDEKF
+from .reputation import MAX_REPUTATION
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
 
@@ -248,7 +249,11 @@ class ConsensusMechanism():
         Returns:
         - Consensus score in [0,1]. Higher is better.
         """
-        return 0.7 * correctness + 0.3 * dof_reward + 0.2 * reputation
+        # Normalise reputation
+        rep_norm = min(max(reputation / MAX_REPUTATION, 0.0), 1.0)
+
+        # Weights must sum to one
+        return 0.6 * correctness + 0.25 * dof_reward + 0.15 * rep_norm
 
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
