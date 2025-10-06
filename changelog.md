@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.2.1] - 2025-10
+
+### Summary
+This is a patch release of the PoISE consensus mechanism, providing key bug fixes.
+
+### Added
+- Bug fix in od_filter.py to allow LOS only measurements to be processed correctly.
+- Additional plots for chi2 functions and consensus scores.
 ---
 
 ## [v0.2] - 2025-09
