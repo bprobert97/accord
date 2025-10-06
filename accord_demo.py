@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import asyncio
+import json
 from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -291,10 +292,155 @@ def plot_reputation(rep_history: dict) -> None:
     plt.show()
 
 
+def plot_consensus_scores(dag: DAG) -> None:
+    """
+    Plot the consensus scores for each transaction submitted by each satellite.
+
+    Args:
+    - dag: The final DAG object containing all transactions.
+
+    Returns:
+    - None. Displays one plot per satellite node.
+    """
+    # Collect consensus scores by satellite
+    scores_by_sat = {}
+
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            # Skip genesis or malformed transactions
+            if not hasattr(tx.metadata, "consensus_score"):
+                continue
+            try:
+                tx_data = json.loads(tx.tx_data)
+            except Exception:
+                continue
+
+            sat_id = tx_data.get("observer_id", "unknown")
+            score = tx.metadata.consensus_score
+            confirmed = getattr(tx.metadata, "is_confirmed", False)
+            rejected = getattr(tx.metadata, "is_rejected", False)
+
+            if sat_id not in scores_by_sat:
+                scores_by_sat[sat_id] = []
+            scores_by_sat[sat_id].append({
+                "score": score,
+                "confirmed": confirmed,
+                "rejected": rejected
+            })
+
+    if not scores_by_sat:
+        logger.info("No consensus scores available to plot.")
+        return
+
+    n_sats = len(scores_by_sat)
+    _, axes = plt.subplots(n_sats, 1, figsize=(8, 4 * n_sats), sharex=True)
+
+    if n_sats == 1:
+        axes = [axes]
+
+    for ax, (sat_id, records) in zip(axes, scores_by_sat.items()):
+        scores = [r["score"] for r in records]
+        colors = [
+            "green" if r["confirmed"] else
+            "red" if r["rejected"] else
+            "gray" for r in records
+        ]
+        ax.scatter(range(len(scores)), scores, c=colors, s=60)
+        ax.plot(range(len(scores)), scores, linestyle="--", alpha=0.5, color="black")
+
+        ax.axhline(0.3, color="blue", linestyle=":", label="Consensus Threshold (0.3)")
+        ax.set_ylim(0, 1)
+        ax.set_ylabel("Consensus Score")
+        ax.set_title(f"Satellite {sat_id}")
+        ax.grid(True, linestyle=":")
+
+    axes[-1].set_xlabel("Transaction Index")
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_consensus_nis_dof(dag: DAG) -> None:
+    """
+    Plot consensus score, NIS, and DOF for each satellite.
+    Consensus score on left y-axis, NIS on right y-axis.
+    DOF shown as markers.
+    """
+    # Collect by satellite
+    data_by_sat = {}
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "consensus_score"):
+                continue
+            try:
+                tx_data = json.loads(tx.tx_data)
+            except Exception:
+                continue
+            sid = tx_data.get("observer_id")
+            if not sid:
+                continue
+
+            data_by_sat.setdefault(sid, []).append({
+                "consensus": tx.metadata.consensus_score,
+                "nis": getattr(tx.metadata, "nis", None),
+                "dof": getattr(tx.metadata, "dof", None),
+                "confirmed": getattr(tx.metadata, "is_confirmed", False),
+                "rejected": getattr(tx.metadata, "is_rejected", False),
+            })
+
+    # Filter out satellites with no data
+    data_by_sat = {sid: vals for sid, vals in data_by_sat.items() if vals}
+    if not data_by_sat:
+        logger.info("No consensus/NIS/DOF data available to plot.")
+        return
+
+    n_sats = len(data_by_sat)
+    fig, axes = plt.subplots(n_sats, 1, figsize=(10, 5 * n_sats), sharex=True)
+    if n_sats == 1:
+        axes = [axes]
+
+    for ax, (sid, records) in zip(axes, data_by_sat.items()):
+        steps = range(len(records))
+        consensus = [r["consensus"] for r in records]
+        nis = [r["nis"] for r in records]
+        dof = [r["dof"] for r in records]
+
+        # Scatter consensus
+        colors = ["green" if r["confirmed"] else "red" if r["rejected"] else "gray"
+                  for r in records]
+        ax.scatter(steps, consensus, c=colors, s=60, label="Consensus Score")
+        ax.plot(steps, consensus, linestyle="--", alpha=0.5, color="black")
+        ax.axhline(0.3, color="blue", linestyle=":", label="Threshold (0.3)")
+        ax.set_ylabel("Consensus Score")
+        ax.set_ylim(0, 1)
+        ax.set_title(f"Satellite {sid}")
+        ax.grid(True, linestyle=":")
+
+        # Add NIS on secondary axis
+        ax2 = ax.twinx()
+        ax2.plot(steps, nis, "o-", color="orange", alpha=0.7, label="NIS")
+        ax2.set_ylabel("NIS Value", color="orange")
+        ax2.tick_params(axis="y", colors="orange")
+
+        # Optional DOF display as text/markers
+        for i, d in enumerate(dof):
+            ax.text(i, consensus[i] + 0.05, f"DOF={d}", ha="center", fontsize=8, color="gray")
+
+        # Merge legends
+        handles, labels = ax.get_legend_handles_labels()
+        handles2, labels2 = ax2.get_legend_handles_labels()
+        ax2.legend(handles + handles2, labels + labels2, loc="upper right")
+
+    axes[-1].set_xlabel("Transaction Index")
+    plt.tight_layout()
+    plt.show()
+
+
 # Run demo
 if __name__ == "__main__":
     final_dag, rep_hist = asyncio.run(run_consensus_demo())
     if final_dag:
         plot_transaction_dag(final_dag)
+        plot_consensus_scores(final_dag)
+        plot_consensus_nis_dof(final_dag)
     if rep_hist:
         plot_reputation(rep_hist)
