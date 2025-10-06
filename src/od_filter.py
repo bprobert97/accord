@@ -315,13 +315,17 @@ class SDEKF:
             ], dtype=float).reshape(3, 1)
 
         # If only RA/Dec (astronomical coordinates) are given, convert to a Cartesian unit vector
-        else:
+        elif "ra_dec_rad" in measurement_dict:
             ra, dec = [float(x) for x in measurement_dict["ra_dec_rad"]]
             u = np.array([
                 np.cos(dec) * np.cos(ra),
                 np.cos(dec) * np.sin(ra),
                 np.sin(dec),
             ], dtype=float).reshape(3, 1)
+
+        # 4️Fallback: if no direction info (range only), point along +X
+        else:
+            u = np.array([[1.0], [0.0], [0.0]])
 
         # Compute target position. rho = measured range from observer to target
         rho = float(measurement_dict.get("range_m", 0.0))
@@ -424,6 +428,8 @@ class SDEKF:
         delta_r = r_target - r_obs
         r = self._ensure_covariance(measurement_dict.get("R_meas"))
 
+        if "los_eci" in measurement_dict:
+            return self._build_los_model(delta_r, measurement_dict, r)
         if "range_m" in measurement_dict and "az_el_rad" not in measurement_dict \
             and "ra_dec_rad" not in measurement_dict:
             return self._build_range_model(delta_r, measurement_dict, r)
@@ -431,6 +437,46 @@ class SDEKF:
             return self._build_azel_model(delta_r, measurement_dict, r)
         return self._build_radec_model(delta_r, measurement_dict, r)
 
+    def _build_los_model(self, delta_r: np.ndarray,
+                         measurement_dict: Dict, r: Optional[np.ndarray]
+                         ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Handle LOS (3-vector) measurements, optionally with range.
+
+        Args:
+        - delta_r: Relative position vector (target - observer).
+        - measurement_dict: Measurement dictionary.
+        - r: Optional measurement covariance matrix.
+
+        Returns a tuple of:
+        - h: Measurement Jacobian.
+        - z: Actual measurement vector.
+        - z_hat: Predicted measurement vector.
+        - r: Measurement covariance.
+        """
+        # Actual LOS unit vector
+        los_meas = np.array(measurement_dict["los_eci"], dtype=float).reshape(3, 1)
+        los_meas /= np.linalg.norm(los_meas) + 1e-12
+
+        # Predicted LOS (normalize relative position)
+        los_pred = delta_r / (np.linalg.norm(delta_r) + 1e-12)
+
+        # Measurement vector and prediction
+        z = los_meas
+        z_hat = los_pred
+
+        # Jacobian: derivative of unit vector w.r.t. position
+        rnorm = np.linalg.norm(delta_r) + 1e-12
+        i3 = np.eye(3)
+        h_pos = (i3 - (delta_r @ delta_r.T) / (rnorm**2)) / rnorm
+        h = np.hstack([h_pos, np.zeros((3, 3))])
+
+        # Default covariance if not supplied
+        if r is None or r.shape != (3, 3):
+            sigma = max(self.meas_floor, 1e-3)
+            r = (sigma**2) * np.eye(3)
+
+        return h, z, z_hat, r
 
     def _build_range_model(self, delta_r: np.ndarray,
                            measurement_dict: Dict, r: Optional[np.ndarray]
