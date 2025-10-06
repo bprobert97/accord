@@ -261,8 +261,8 @@ class SDEKF:
         has_any_angle: bool = "az_el_rad" in measurement_dict or \
             "ra_dec_rad" in measurement_dict or "los_eci" in measurement_dict
 
-        can_initialise = has_obs and has_range and has_any_angle
-        return bool(can_initialise)
+        # Relaxed condition: need observer + (range or angle)
+        return bool(has_obs and (has_range or has_any_angle))
 
     @staticmethod
     def _norm(v: np.ndarray) -> float:
