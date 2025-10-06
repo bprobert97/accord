@@ -303,7 +303,7 @@ def plot_consensus_scores(dag: DAG) -> None:
     - None. Displays one plot per satellite node.
     """
     # Collect consensus scores by satellite
-    scores_by_sat: dict[int, list] = {}
+    scores_by_sat: dict[str, list] = {}
 
     for _, tx_list in dag.ledger.items():
         for tx in tx_list:
