@@ -292,6 +292,15 @@ class ConsensusMechanism():
                                                              dof_score,
                                                              sat_node.reputation)
 
+            # Store scores in metadata for later analysis
+            transaction.metadata.consensus_score = consensus_score
+            transaction.metadata.nis = processing_result.nis
+            transaction.metadata.dof = processing_result.dof
+
+            logger.info("NIS=%.3f, DOF=%d, correctness=%.3f, consensus_score=%.3f",
+            processing_result.nis, processing_result.dof,
+            correctness_score, consensus_score)
+
             sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
 
             # 7) if consensus reached - strong node (maybe affects node reputation?),

@@ -35,6 +35,9 @@ class TransactionMetadata:
     is_confirmed: bool = False
     parent_hashes: list[str] = field(default_factory=list)
     is_rejected: bool = False
+    consensus_score: float = 0.0
+    dof: int = 0
+    nis: float = 0.0
 
 class Transaction:
     """
