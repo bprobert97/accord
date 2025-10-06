@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements
+# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -303,7 +303,7 @@ def plot_consensus_scores(dag: DAG) -> None:
     - None. Displays one plot per satellite node.
     """
     # Collect consensus scores by satellite
-    scores_by_sat = {}
+    scores_by_sat: dict[int, list] = {}
 
     for _, tx_list in dag.ledger.items():
         for tx in tx_list:
@@ -366,7 +366,7 @@ def plot_consensus_nis_dof(dag: DAG) -> None:
     DOF shown as markers.
     """
     # Collect by satellite
-    data_by_sat = {}
+    data_by_sat: dict[str, list] = {}
     for _, tx_list in dag.ledger.items():
         for tx in tx_list:
             if not hasattr(tx.metadata, "consensus_score"):
@@ -394,7 +394,7 @@ def plot_consensus_nis_dof(dag: DAG) -> None:
         return
 
     n_sats = len(data_by_sat)
-    fig, axes = plt.subplots(n_sats, 1, figsize=(10, 5 * n_sats), sharex=True)
+    _, axes = plt.subplots(n_sats, 1, figsize=(10, 5 * n_sats), sharex=True)
     if n_sats == 1:
         axes = [axes]
 
