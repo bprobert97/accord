@@ -40,12 +40,13 @@ def crtbp_dynamics(y: np.ndarray, mu: float) -> np.ndarray:
     ])
     return dydt
 
-def crtbp_dstt_dynamics(y: np.ndarray, mu: float, r: np.ndarray,
+def crtbp_dstt_dynamics(t: float, y: np.ndarray, mu: float, r: np.ndarray,
                         dim: int) -> np.ndarray:
     """
     The dynamics of the CRTBP model (with STM and DSTT).
 
     Args:
+    - t: Unused time argument. For compability with solve_ivp.
     - y: Augmented state vector including STM and DSTT.
     - mu: Mass parameter of the two primary bodies.
     - R: Rotation matrix.

@@ -28,6 +28,7 @@ import random
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 from .logger import get_logger
+from .od_filter import SDEKF
 from .transaction import Transaction, TransactionMetadata
 
 if TYPE_CHECKING:
@@ -50,6 +51,7 @@ class DAG():
         self.ledger: dict = self.create_genesis_tx()
         self.consensus_mech = consensus_mech
         self.queue = queue
+        self.sdekf = SDEKF()
 
     async def listen(self) -> None:
         """
@@ -62,7 +64,8 @@ class DAG():
             consensus_result = self.consensus_mech.proof_of_inter_satellite_evaluation(
                 dag=self,
                 sat_node=satellite,
-                transaction=transaction
+                transaction=transaction,
+                sdekf=self.sdekf
             )
             future.set_result(consensus_result)
 
