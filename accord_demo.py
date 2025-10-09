@@ -359,10 +359,10 @@ def plot_consensus_scores(dag: DAG) -> None:
     plt.tight_layout()
     plt.show()
 
-def plot_consensus_nis_dof(dag: DAG) -> None:
+def plot_consensus_cdf_dof(dag: DAG) -> None:
     """
-    Plot consensus score, NIS, and DOF for each satellite.
-    Consensus score on left y-axis, NIS on right y-axis.
+    Plot consensus score, CDF, and DOF for each satellite.
+    Consensus score on left y-axis, CDF on right y-axis.
     DOF shown as markers.
     """
     # Collect by satellite
@@ -381,7 +381,7 @@ def plot_consensus_nis_dof(dag: DAG) -> None:
 
             data_by_sat.setdefault(sid, []).append({
                 "consensus": tx.metadata.consensus_score,
-                "nis": getattr(tx.metadata, "nis", None),
+                "cdf": getattr(tx.metadata, "cdf", None),
                 "dof": getattr(tx.metadata, "dof", None),
                 "confirmed": getattr(tx.metadata, "is_confirmed", False),
                 "rejected": getattr(tx.metadata, "is_rejected", False),
@@ -390,7 +390,7 @@ def plot_consensus_nis_dof(dag: DAG) -> None:
     # Filter out satellites with no data
     data_by_sat = {sid: vals for sid, vals in data_by_sat.items() if vals}
     if not data_by_sat:
-        logger.info("No consensus/NIS/DOF data available to plot.")
+        logger.info("No consensus/CDF/DOF data available to plot.")
         return
 
     n_sats = len(data_by_sat)
@@ -401,7 +401,7 @@ def plot_consensus_nis_dof(dag: DAG) -> None:
     for ax, (sid, records) in zip(axes, data_by_sat.items()):
         steps = range(len(records))
         consensus = [r["consensus"] for r in records]
-        nis = [r["nis"] for r in records]
+        cdf = [r["cdf"] for r in records]
         dof = [r["dof"] for r in records]
 
         # Scatter consensus
@@ -409,16 +409,16 @@ def plot_consensus_nis_dof(dag: DAG) -> None:
                   for r in records]
         ax.scatter(steps, consensus, c=colors, s=60, label="Consensus Score")
         ax.plot(steps, consensus, linestyle="--", alpha=0.5, color="black")
-        ax.axhline(0.3, color="blue", linestyle=":", label="Threshold (0.3)")
+        ax.axhline(0.4, color="blue", linestyle=":", label="Threshold (0.4)")
         ax.set_ylabel("Consensus Score")
         ax.set_ylim(0, 1)
         ax.set_title(f"Satellite {sid}")
         ax.grid(True, linestyle=":")
 
-        # Add NIS on secondary axis
+        # Add CDF on secondary axis
         ax2 = ax.twinx()
-        ax2.plot(steps, nis, "o-", color="orange", alpha=0.7, label="NIS")
-        ax2.set_ylabel("NIS Value", color="orange")
+        ax2.plot(steps, cdf, "o-", color="orange", alpha=0.7, label="CDF")
+        ax2.set_ylabel("CDF Value", color="orange")
         ax2.tick_params(axis="y", colors="orange")
 
         # Optional DOF display as text/markers
@@ -441,6 +441,6 @@ if __name__ == "__main__":
     if final_dag:
         plot_transaction_dag(final_dag)
         plot_consensus_scores(final_dag)
-        plot_consensus_nis_dof(final_dag)
+        plot_consensus_cdf_dof(final_dag)
     if rep_hist:
         plot_reputation(rep_hist)
