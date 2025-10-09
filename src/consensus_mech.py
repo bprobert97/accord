@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import ast
 import json
+import math
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
@@ -41,7 +42,11 @@ class ConsensusMechanism():
     The Proof of Inter-Satellite Evaluation (PoISE) consensus mechanism.
     """
     def __init__(self) -> None:
-        self.consensus_threshold : float = 0.3
+        self.consensus_threshold: float = 0.4
+        # Define a simple mapping: normalize by a maximum useful DOF
+        # Theoretically, this could be up to 6 (full 3D position+velocity), but
+        # in practice, most measurements will have fewer DOF - maximum of 3.
+        self.max_dof: int = 3
 
     def data_is_valid(self, obs: dict) -> bool:
         """
@@ -190,7 +195,11 @@ class ConsensusMechanism():
                 except (json.JSONDecodeError, TypeError):
                     continue
 
-        if not matches:
+        # If this satellite has not been seen before, give it a neutral score
+        # Also, if the filter has been initialised for the first time, return a
+        # neutral score
+        if not matches or \
+            math.isnan(nis) or nis < 1e-3:
             # Neutral value is the expected NIS for the given dof
             # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
             return self.nis_to_score(dof, dof)
@@ -209,17 +218,12 @@ class ConsensusMechanism():
         - dof: Degrees of freedom of the measurement.
 
         Returns:
-        - Accuracy score in [0,1]. 0 = low accuracy, 1 = high accuracy.
+        - DOF score in [0,1]. 0 = low accuracy, 1 = high accuracy.
         """
 
-        # Define a simple mapping: normalize by a maximum useful DOF
-        # Theoretically, this could be up to 6 (full 3D position+velocity), but
-        # in practice, most measurements will have fewer DOF - maximum of 2.
-        max_dof = 2
-
-        # Clip to avoid scores >1
-        # dof = 1 returns 0.5, dof = 2 returns 1.0
-        return min(1.0, dof / max_dof)
+        # Normalise DOF
+        # dof = 1 returns 0.33, dof = 2 returns 0.66, dof of 3 returns 1.0.
+        return min(1.0, dof / self.max_dof)
 
     def calculate_consensus_score(self, correctness: float,
                                   dof_reward: float, reputation: float) -> float:
@@ -230,7 +234,7 @@ class ConsensusMechanism():
         Args:
         - correctness: Correctness score in [0,1].
         - dof_reward: DOF-based reward score in [0,1].
-        - reputation: Node reputation in [0, MAX_REPUTATION].
+        - reputation: Node reputation in [0, 1].
 
         Returns:
         - Consensus score in [0,1]. Higher is better.
@@ -238,12 +242,18 @@ class ConsensusMechanism():
         # Normalise reputation
         rep_norm = min(max(reputation / MAX_REPUTATION, 0.0), 1.0)
 
-        # Weights must sum to one
-        return 0.6 * correctness + 0.25 * dof_reward + 0.15 * rep_norm
+        dof_term = self.consensus_threshold * (dof_reward + (1 - dof_reward) * correctness)
+        rep_term = (1 - self.consensus_threshold) * rep_norm
+
+        # Weights must sum to one.
+        # This formula means is a transaction has best correctness (1) but 0
+        # reputation, it can still reach consensus from DOF reward and bounce back.
+        return (correctness ** 2) * (dof_term + rep_term)
 
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
+                                            sdekf: SDEKF,
                                             transaction: Transaction) -> bool:
         """
         Returns a bool of it consensus has been reached
@@ -277,8 +287,8 @@ class ConsensusMechanism():
         if self.data_is_valid(transaction_data):
 
             # Run SDEKF
-            sdekf = SDEKF()
             processing_result: ODProcessingResult =sdekf.process_measurement(transaction_data)
+            logger.info("BCP123 %s", sdekf.targets)
 
             # 4) Check if satellite has been witnessed before
             #4a if yes, does this data agree with other data/ is it correct?
@@ -294,14 +304,17 @@ class ConsensusMechanism():
 
             # Store scores in metadata for later analysis
             transaction.metadata.consensus_score = consensus_score
-            transaction.metadata.nis = processing_result.nis
+            transaction.metadata.cdf = 1- correctness_score
             transaction.metadata.dof = processing_result.dof
 
-            logger.info("NIS=%.3f, DOF=%d, correctness=%.3f, consensus_score=%.3f",
+            logger.info("NIS=%.3f, DOF=%d, correctness=%.3f, consensus_score=%.3f, \
+                        reputation=%.3f",
             processing_result.nis, processing_result.dof,
-            correctness_score, consensus_score)
+            correctness_score, consensus_score, sat_node.reputation)
 
             sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
+            logger.info("Satellite reputation decayed to %.3f.",
+                        sat_node.reputation)
 
             # 7) if consensus reached - strong node (maybe affects node reputation?),
             # else weak node (like IOTA)
@@ -315,13 +328,11 @@ class ConsensusMechanism():
                 logger.info("Successful consensus score: %.2f", consensus_score)
                 return True
 
-            logger.info("Consensus threshold of %.2f does not met threshold. \
-                        Satellite reputation decreased to %.2f",
-                        consensus_score, sat_node.reputation)
+            logger.info("Consensus threshold of %.2f does not met threshold.",
+                        consensus_score)
 
         else:
-            logger.info("Data not valid. Satellite reputation decreased to %.2f",
-                        sat_node.reputation)
+            logger.info("Data not valid.")
         # If data is invalid, or consensus score is below threshold
         # the transaction is rejected and the node's reputation is penalised.
         transaction.metadata.consensus_reached = False
@@ -329,4 +340,7 @@ class ConsensusMechanism():
             sat_node.reputation, sat_node.exp_pos
         )
         transaction.metadata.is_rejected = True
+        logger.info("Satellite reputation decreased to %.2f",
+                    sat_node.reputation)
+        # If data is invalid, or consensus sco
         return False
