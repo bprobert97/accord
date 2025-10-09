@@ -25,8 +25,11 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Union
 import numpy as np
 from scipy.integrate import solve_ivp
+from .logger import get_logger
 from .module_crtbp import crtbp_dstt_dynamics
 from .module_stt import dstt_pred_mu_p
+
+logger = get_logger()
 
 @dataclass
 class State:
@@ -74,7 +77,7 @@ class SDEKF:
     """
 
     def __init__(self,
-                 meas_floor: float = 1.0) -> None:
+                 meas_floor: float = 100.0) -> None:
         """
         Initialise the SDEKF.
 
@@ -86,7 +89,8 @@ class SDEKF:
         self.meas_floor = meas_floor
         self.dimensions: int = 6
         self.mu: float = 0.0121505839
-        self.q: np.ndarray = np.zeros([self.dimensions, self.dimensions])
+        # Process noise - 10m for position and 0.1m/s for velocity
+        self.q: np.ndarray = np.diag([10.0, 10.0, 10.0, 0.1, 0.1, 0.1])
 
     def process_measurement(self, measurements: Dict) -> ODProcessingResult:
         """
@@ -106,6 +110,14 @@ class SDEKF:
         # Initialise if needed
         if target_id not in self.targets and self._can_initialise(measurements):
             self.targets[target_id] = self._initialise_state(measurements, timestamp)
+            # Return without performing predict/update on the same measurement:
+            state = self.targets[target_id]
+            return ODProcessingResult(target_id=target_id, nis=float('nan'),
+                                    dof=int(measurements.get('range_m') is not None and 1 or
+                                            len(measurements.get('ra_dec_rad') or
+                                                measurements.get('az_el_rad') or
+                                                measurements.get('los_eci') or [])),
+                                    post_cov=state.covariance)
 
         # If still not initialised, use weak prior
         if target_id not in self.targets:
@@ -219,6 +231,7 @@ class SDEKF:
 
         nis = float(y.T @ s_inv @ y)
         dof = int(z.shape[0])
+        logger.info(f"NIS raw residual norm=%.3f, S trace=%.3e", np.linalg.norm(y), np.trace(s))
 
         return x_upd, p_post, nis, dof
 
@@ -337,8 +350,12 @@ class SDEKF:
         # Set the first three rows to the estimated target position
         x0[0:3, :] = r_tgt
 
+        # ~7.5 km/s circular orbit for initial velocity guess
+        v_guess = np.array([[0.0], [7.5e3], [0.0]])
+        x0[3:6, :] = v_guess
+
         # Start with unknown velocity
-        p0 = np.diag([1e6, 1e6, 1e6, 1e4, 1e4, 1e4]).astype(float)
+        p0 = np.diag([1e4, 1e4, 1e4, 1e2, 1e2, 1e2]).astype(float)
         return State(state_estimate=x0, covariance=p0, last_update_seconds=timestamp)
 
 
