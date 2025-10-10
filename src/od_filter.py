@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Union
 import numpy as np
 from scipy.integrate import solve_ivp
+from scipy.stats import chi2
 from .logger import get_logger
 from .module_crtbp import crtbp_dstt_dynamics
 from .module_stt import dstt_pred_mu_p
@@ -231,7 +232,14 @@ class SDEKF:
 
         nis = float(y.T @ s_inv @ y)
         dof = int(z.shape[0])
-        logger.info(f"NIS raw residual norm=%.3f, S trace=%.3e", np.linalg.norm(y), np.trace(s))
+
+        # Chi-squared gating to catch outliers above 99.9% extremeity
+        high_gate = chi2.ppf(0.999, df=dof)
+
+        if nis > high_gate:
+            logger.info("NIS=%.3f rejected (>%.2f), outlier measurement", nis, high_gate)
+            # Skip update and revert to predicted state/covariance
+            return x_pred, p_pred, nis, dof
 
         return x_upd, p_post, nis, dof
 

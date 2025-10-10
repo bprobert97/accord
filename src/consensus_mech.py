@@ -198,8 +198,7 @@ class ConsensusMechanism():
         # If this satellite has not been seen before, give it a neutral score
         # Also, if the filter has been initialised for the first time, return a
         # neutral score
-        if not matches or \
-            math.isnan(nis) or nis < 1e-3:
+        if not matches or math.isnan(nis):
             # Neutral value is the expected NIS for the given dof
             # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
             return self.nis_to_score(dof, dof)
@@ -305,6 +304,7 @@ class ConsensusMechanism():
             # Store scores in metadata for later analysis
             transaction.metadata.consensus_score = consensus_score
             transaction.metadata.cdf = 1- correctness_score
+            transaction.metadata.nis = processing_result.nis
             transaction.metadata.dof = processing_result.dof
 
             logger.info("NIS=%.3f, DOF=%d, correctness=%.3f, consensus_score=%.3f, \
