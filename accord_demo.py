@@ -29,6 +29,7 @@ import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 import networkx as nx
 import numpy as np
+from scipy.stats import chi2
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.logger import get_logger
@@ -291,74 +292,6 @@ def plot_reputation(rep_history: dict) -> None:
     plt.tight_layout()
     plt.show()
 
-
-def plot_consensus_scores(dag: DAG) -> None:
-    """
-    Plot the consensus scores for each transaction submitted by each satellite.
-
-    Args:
-    - dag: The final DAG object containing all transactions.
-
-    Returns:
-    - None. Displays one plot per satellite node.
-    """
-    # Collect consensus scores by satellite
-    scores_by_sat: dict[str, list] = {}
-
-    for _, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            # Skip genesis or malformed transactions
-            if not hasattr(tx.metadata, "consensus_score"):
-                continue
-            try:
-                tx_data = json.loads(tx.tx_data)
-            except Exception:
-                continue
-
-            sat_id = tx_data.get("observer_id", "unknown")
-            score = tx.metadata.consensus_score
-            confirmed = getattr(tx.metadata, "is_confirmed", False)
-            rejected = getattr(tx.metadata, "is_rejected", False)
-
-            if sat_id not in scores_by_sat:
-                scores_by_sat[sat_id] = []
-            scores_by_sat[sat_id].append({
-                "score": score,
-                "confirmed": confirmed,
-                "rejected": rejected
-            })
-
-    if not scores_by_sat:
-        logger.info("No consensus scores available to plot.")
-        return
-
-    n_sats = len(scores_by_sat)
-    _, axes = plt.subplots(n_sats, 1, figsize=(8, 4 * n_sats), sharex=True)
-
-    if n_sats == 1:
-        axes = [axes]
-
-    for ax, (sat_id, records) in zip(axes, scores_by_sat.items()):
-        scores = [r["score"] for r in records]
-        colors = [
-            "green" if r["confirmed"] else
-            "red" if r["rejected"] else
-            "gray" for r in records
-        ]
-        ax.scatter(range(len(scores)), scores, c=colors, s=60)
-        ax.plot(range(len(scores)), scores, linestyle="--", alpha=0.5, color="black")
-
-        ax.axhline(0.3, color="blue", linestyle=":", label="Consensus Threshold (0.3)")
-        ax.set_ylim(0, 1)
-        ax.set_ylabel("Consensus Score")
-        ax.set_title(f"Satellite {sat_id}")
-        ax.grid(True, linestyle=":")
-
-    axes[-1].set_xlabel("Transaction Index")
-
-    plt.tight_layout()
-    plt.show()
-
 def plot_consensus_cdf_dof(dag: DAG) -> None:
     """
     Plot consensus score, CDF, and DOF for each satellite.
@@ -435,12 +368,197 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
     plt.show()
 
 
+def plot_nis_consistency(dag: DAG, confidence: float = 0.95) -> None:
+    """
+    Plot Normalized Innovation Squared (NIS) values for each satellite,
+    comparing them to expected chi-squared consistency bounds.
+
+    Args:
+    - dag: The final DAG object containing transactions (with NIS + DOF metadata).
+    - confidence: Confidence level for chi-square bounds (default=0.95).
+
+    Returns:
+    - None. Displays NIS plots with statistical consistency regions.
+    """
+
+    # Gather NIS data per satellite
+    nis_by_sat: dict[str, dict[str, list]] = {}
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "nis") or not hasattr(tx.metadata, "dof"):
+                continue
+            try:
+                tx_data = json.loads(tx.tx_data)
+            except Exception:
+                continue
+
+            sid = tx_data.get("observer_id", "unknown")
+            dof = getattr(tx.metadata, "dof", None)
+            nis = getattr(tx.metadata, "nis", None)
+            if nis is None or dof is None:
+                continue
+
+            nis_by_sat.setdefault(sid, {"nis": [], "dof": []})
+            nis_by_sat[sid]["nis"].append(nis)
+            nis_by_sat[sid]["dof"].append(dof)
+
+    if not nis_by_sat:
+        logger.info("No NIS/DOF data found in DAG.")
+        return
+
+    n_sats = len(nis_by_sat)
+    _, axes = plt.subplots(n_sats, 1, figsize=(10, 5 * n_sats), sharex=True)
+    if n_sats == 1:
+        axes = [axes]
+
+    for ax, (sid, data) in zip(axes, nis_by_sat.items()):
+        nis_vals = np.array(data["nis"])
+        dof_vals = np.array(data["dof"])
+        mean_dof = np.mean(dof_vals)
+
+        # Compute chi-square confidence bounds
+        chi2_lower = chi2.ppf((1 - confidence) / 2, df=mean_dof)
+        chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
+        expected_mean = mean_dof
+
+        steps = np.arange(len(nis_vals))
+
+        # Plot NIS over time
+        ax.plot(steps, nis_vals, "o-", color="black", label="NIS")
+        ax.axhline(expected_mean, color="blue", linestyle="--",
+                   label=f"Expected mean (DOF={mean_dof:.1f})")
+        ax.fill_between(
+            steps,
+            chi2_lower,
+            chi2_upper,
+            color="green",
+            alpha=0.1,
+            label=f"{int(confidence*100)}% confidence region"
+        )
+
+        # Rolling mean NIS (smooth trend)
+        if len(nis_vals) > 5:
+            window = 5
+            rolling_mean = np.convolve(nis_vals, np.ones(window)
+                                       / window, mode="valid")
+            ax.plot(range(window-1, len(nis_vals)), rolling_mean,
+                    color="red", linewidth=2, label="Rolling mean (5)")
+
+        ax.set_ylabel("NIS Value")
+        ax.set_title(f"NIS Consistency — Satellite {sid}")
+        ax.grid(True, linestyle=":")
+        ax.legend(loc="upper right")
+
+    axes[-1].set_xlabel("Transaction Index")
+    plt.tight_layout()
+    plt.show()
+
+def analyze_nis_tuning(dag: DAG, alpha_smooth: float = 0.2) -> Optional[dict]:
+    """
+    Analyze NIS statistics per satellite and recommend multiplicative scaling
+    for measurement covariances R (or for S in general).
+
+    Args:
+        dag: DAG containing transactions with metadata fields 'nis' and 'dof'
+             and tx_data containing 'observer_id'.
+        alpha_smooth: smoothing factor (0..1) to produce a smoothed recommended scale
+                     (useful for online/adaptive tuning). 0 => no smoothing.
+    Prints:
+        - Per-satellite count, mean NIS, median, std, DOF (mean), chi2 p-value for mean
+        - Recommended multiplicative scale alpha_reco = mean_nis / DOF_mean
+        - Recommended new sigma (if R is diagonal and originally derived from sigma^2)
+    """
+
+    nis_by_sat: dict[str, dict] = {}
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "nis") or not hasattr(tx.metadata, "dof"):
+                continue
+            try:
+                tx_data = json.loads(tx.tx_data)
+            except Exception:
+                continue
+            sid = tx_data.get("observer_id", "unknown")
+            nis = getattr(tx.metadata, "nis", None)
+            dof = getattr(tx.metadata, "dof", None)
+            if nis is None or dof is None:
+                continue
+            nis_by_sat.setdefault(sid, {"nis": [], "dof": []})
+            nis_by_sat[sid]["nis"].append(float(nis))
+            nis_by_sat[sid]["dof"].append(float(dof))
+
+    if not nis_by_sat:
+        logger.info("No NIS/DOF data available for tuning analysis.")
+        return None
+
+    # If you want to record previous alpha estimates, you can persist them externally and smooth.
+    # For this function we simply print suggested alphas.
+    for sid, data in nis_by_sat.items():
+        nis_vals = np.array(data["nis"])
+        dof_vals = np.array(data["dof"])
+        n = len(nis_vals)
+        mean_nis = float(np.mean(nis_vals))
+        med_nis = float(np.median(nis_vals))
+        std_nis = float(np.std(nis_vals, ddof=1)) if n > 1 else 0.0
+        mean_dof = float(np.mean(dof_vals))
+
+        # Chi-square test: is sum(NIS) consistent with chi2(n * DOF) ?
+        # Under H0: sum(NIS) ~ chi2(n * DOF)
+        sum_nis = float(np.sum(nis_vals))
+        df_total = n * mean_dof
+        p_value = 1.0 - chi2.cdf(sum_nis, df=df_total)
+
+        # Recommended multiplicative factor to apply to S (S_new = alpha * S).
+        # Choose alpha = mean_nis / DOF so the new mean NIS -> DOF.
+        alpha_reco = mean_nis / mean_dof if mean_dof > 0 else 1.0
+
+        # Smoothing (if you had a previous alpha you'd smooth; here we just show how to smooth)
+        alpha_smooth_val = alpha_reco  # placeholder if no history
+        if 0 < alpha_smooth < 1:
+            # If you store prev_alpha_per_sat somewhere, replace prev_alpha=1.0
+            prev_alpha = 1.0
+            alpha_smooth_val = prev_alpha * (1 - alpha_smooth) + alpha_reco * alpha_smooth
+
+        # If your R was diagonal with variance = sigma^2, new sigma = sqrt(alpha) * old_sigma
+        # We cannot know old_sigma here — but we can express relationship.
+        logger.info("=== NIS tuning for %s ===", sid)
+        logger.info("samples=%d, mean_NIS=%.4f, median=%.4f, std_NIS=%.4f, mean_DOF=%.3f",
+                    n, mean_nis, med_nis, std_nis, mean_dof)
+        logger.info("sum_NIS=%.4f over df_total=%.2f; chi2 right-tail p-value=%.4g",
+                    sum_nis, df_total, p_value)
+        logger.info("Recommended multiplicative scale on S (and R): alpha = mean_NIS / DOF = %.4f",
+                    alpha_reco)
+        logger.info("Smoothed alpha (if using smoothing) = %.4f", alpha_smooth_val)
+        logger.info("Interpretation:")
+        if alpha_reco > 1.2:
+            logger.info("  alpha > 1 => observed residuals larger \
+                        than predicted. Consider increasing R or inflating P.")
+        elif alpha_reco < 0.8:
+            logger.info("  alpha < 1 => observed residuals smaller than predicted. \
+                        Consider decreasing R (or check for model collapse).")
+        else:
+            logger.info("  alpha ≈ 1 => OK; no large changes needed.")
+
+        # Suggest concrete sigma change example
+        # (if original sigma known, new_sigma = sqrt(alpha)*old_sigma)
+        logger.info("If your measurement R was diag(sigma^2): new_sigma z" \
+        "= sqrt(alpha) * old_sigma (scale per-axis).")
+        logger.info("--------------------------------------------------------")
+
+    # Optionally, return an alpha map if caller wants to apply them
+    return {sid: float(np.mean(data["nis"]) / (np.mean(data["dof"])
+                                               if np.mean(data["dof"])>0 else 1.0))
+            for sid, data in nis_by_sat.items()}
+
+
 # Run demo
 if __name__ == "__main__":
     final_dag, rep_hist = asyncio.run(run_consensus_demo())
     if final_dag:
-        plot_transaction_dag(final_dag)
-        plot_consensus_scores(final_dag)
+        #plot_transaction_dag(final_dag)
         plot_consensus_cdf_dof(final_dag)
+        plot_nis_consistency(final_dag)
+        alpha_map = analyze_nis_tuning(final_dag)
+        print("Suggested alpha per satellite: " + str(alpha_map))
     if rep_hist:
         plot_reputation(rep_hist)
