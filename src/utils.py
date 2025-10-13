@@ -22,6 +22,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 
+RANGE_VAR_FLOOR: float = 25.0 ** 2       # 625 m^2
+ANGLE_VAR_FLOOR: float = (1.7e-3) ** 2   # ~2.89e-6 rad^2
+LOS_VAR_FLOOR: float = (1e-3) ** 2       # 1e-6 (unitless vector component variance)
+
 
 def load_json_data(file_name: str = "sim_output.json") -> list[dict]:
     """

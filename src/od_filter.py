@@ -1,4 +1,4 @@
-# pylint: disable=too-few-public-methods
+# pylint: disable=too-few-public-methods, broad-exception-caught, too-many-branches, consider-using-in
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -29,6 +29,7 @@ from scipy.stats import chi2
 from .logger import get_logger
 from .module_crtbp import crtbp_dstt_dynamics
 from .module_stt import dstt_pred_mu_p
+from .utils import RANGE_VAR_FLOOR, ANGLE_VAR_FLOOR, LOS_VAR_FLOOR
 
 logger = get_logger()
 
@@ -78,7 +79,7 @@ class SDEKF:
     """
 
     def __init__(self,
-                 meas_floor: float = 100.0) -> None:
+                 meas_floor: float = 25.0) -> None:
         """
         Initialise the SDEKF.
 
@@ -232,6 +233,40 @@ class SDEKF:
 
         nis = float(y.T @ s_inv @ y)
         dof = int(z.shape[0])
+
+        # --- BEGIN TEMPORARY DEBUGGING (DOF==1 only) ---
+        if dof == 1:
+            try:
+                # scalars for easy reading
+                z_val = float(z.ravel()[0])
+                zhat_val = float(z_hat.ravel()[0])
+                y_val = float((z - z_hat).ravel()[0])
+            except Exception:
+                z_val, zhat_val, y_val = z, z_hat, (z - z_hat) # type: ignore [assignment]
+
+            # basic matrix diagnostics
+            try:
+                s_val = float(s.ravel()[0]) if s.shape == (1, 1) else None
+                r_val = float(r.ravel()[0]) if r.shape == (1, 1) else None
+                ppos = np.diag(p_pred)[:3]  # position variances
+                h_shape = h.shape
+                s_eigs = np.linalg.eigvals(s) if s.shape == (1,1) \
+                    or s.shape==(1,1) else np.linalg.eigvals(s)
+                cond_s = np.linalg.cond(s)
+            except Exception:
+                s_val = r_val = None
+                ppos = None
+                s_eigs = None
+                cond_s = None
+
+            logger.info("DBG_RANGE: z=%s, z_hat=%s, y=%s, |y|=%g", \
+                        z_val, zhat_val, y_val, abs(y_val))
+            logger.info("DBG_RANGE: h.shape=%s, p_pred.pos_var=%s", \
+                        h_shape, ppos)
+            logger.info("DBG_RANGE: r=%s, s=%s, s_eigs=%s, cond(s)=%s", \
+                        r_val, s_val, s_eigs, cond_s)
+        # --- END DEBUGGING ---
+
 
         # Chi-squared gating to catch outliers above 99.9% extremeity
         high_gate = chi2.ppf(0.999, df=dof)
@@ -451,7 +486,7 @@ class SDEKF:
             r_obs = np.zeros((3, 1))
 
         delta_r = r_target - r_obs
-        r = self._ensure_covariance(measurement_dict.get("R_meas"))
+        r = self._ensure_covariance(measurement_dict)
 
         if "los_eci" in measurement_dict:
             return self._build_los_model(delta_r, measurement_dict, r)
@@ -498,7 +533,7 @@ class SDEKF:
 
         # Default covariance if not supplied
         if r is None or r.shape != (3, 3):
-            sigma = max(self.meas_floor, 1e-3)
+            sigma = self.meas_floor
             r = (sigma**2) * np.eye(3)
 
         return h, z, z_hat, r
@@ -535,7 +570,7 @@ class SDEKF:
         h = np.hstack([u.T, np.zeros((1, 3))])
 
         if r is None:
-            r = np.array([[max(self.meas_floor, 25.0)]], dtype=float)  # (5 m)^2 as floor
+            r = np.array([self.meas_floor], dtype=float)
 
         return h, z, z_hat, r
 
@@ -576,8 +611,7 @@ class SDEKF:
         z_hat = np.array([[az_hat], [el_hat]], dtype=float)
 
         if r is None:
-            r = np.diag([max(self.meas_floor, (1.7e-3)**2),
-                        max(self.meas_floor, (1.7e-3)**2)]).astype(float)
+            r = np.diag([self.meas_floor, self.meas_floor]).astype(float)
 
         # Jacobian wrt position
         # eps is a small value added for numerical stability to prevent
@@ -648,21 +682,23 @@ class SDEKF:
         h = np.hstack([h_pos, np.zeros((2, 3))])
 
         if r is None:
-            r = np.diag([max(self.meas_floor, (1.7e-3)**2),
-                        max(self.meas_floor, (1.7e-3)**2)]).astype(float)
+            r = np.diag([self.meas_floor,self.meas_floor]).astype(float)
 
         return h, z, z_hat, r
 
-    def _ensure_covariance(self, r_meas: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    def _ensure_covariance(self, measurement_dict: Dict) -> Optional[np.ndarray]:
         """
         Ensure measurement covariance is valid, applying a floor if needed.
 
         Arguments:
-        - r_meas: Input measurement covariance.
+        - measurement_dict: The measurement dictionary
 
         Returns:
         - Validated measurement covariance.
         """
+        r_meas = measurement_dict.get("R_meas")
+        observer = measurement_dict.get("observer_id")
+
         if r_meas is None:
             return None
 
@@ -687,4 +723,46 @@ class SDEKF:
 
         # Prevent there being eigenvalues smaller than the measurement floor
         w = np.clip(w, self.meas_floor, None)
-        return v @ np.diag(w) @ v.T
+        r_meas_final: np.ndarray = v @ np.diag(w) @ v.T
+
+        modality = None
+        if "range_m" in measurement_dict and not ("az_el_rad" in measurement_dict \
+                                                  or "ra_dec_rad" in measurement_dict):
+            modality = "range"
+        elif "az_el_rad" in measurement_dict or "ra_dec_rad" in measurement_dict:
+            modality = "angle"
+        elif "los_eci" in measurement_dict:
+            modality = "los"
+
+        # fallback by shape
+        if modality is None:
+            if r_meas.shape == (1, 1):
+                modality = "range"
+            elif r_meas.shape == (2, 2):
+                modality = "angle"
+            elif r_meas.shape == (3, 3):
+                modality = "los"
+
+        # Clamp using modality-appropriate floor
+        if modality == "range":
+            if float(r_meas[0, 0]) < RANGE_VAR_FLOOR:
+                logger.info("CLAMP: range R_meas %.6f < %.6f -> clamping (obs=%s)",
+                            float(r_meas[0, 0]), RANGE_VAR_FLOOR, observer)
+                r_meas[0, 0] = RANGE_VAR_FLOOR
+
+        elif modality == "angle":
+            # ensure diagonal >= ANGLE_VAR_FLOOR
+            for i in range(2):
+                if r_meas[i, i] < ANGLE_VAR_FLOOR:
+                    logger.info("CLAMP: range R_meas %.6f < %.6f -> clamping (obs=%s)",
+                            r_meas[i, i], ANGLE_VAR_FLOOR, observer)
+                    r_meas[i, i] = ANGLE_VAR_FLOOR
+
+        elif modality == "los":
+            for i in range(3):
+                if r_meas[i, i] < LOS_VAR_FLOOR:
+                    logger.info("CLAMP: range R_meas %.6f < %.6f -> clamping (obs=%s)",
+                            r_meas[i, i], LOS_VAR_FLOOR, observer)
+                    r_meas[i, i] = LOS_VAR_FLOOR
+
+        return r_meas_final

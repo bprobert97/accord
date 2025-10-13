@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
 import json
+import math
 from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -481,7 +482,7 @@ def analyze_nis_tuning(dag: DAG, alpha_smooth: float = 0.2) -> Optional[dict]:
             sid = tx_data.get("observer_id", "unknown")
             nis = getattr(tx.metadata, "nis", None)
             dof = getattr(tx.metadata, "dof", None)
-            if nis is None or dof is None:
+            if nis is None or dof is None or math.isnan(nis):
                 continue
             nis_by_sat.setdefault(sid, {"nis": [], "dof": []})
             nis_by_sat[sid]["nis"].append(float(nis))
@@ -537,7 +538,7 @@ def analyze_nis_tuning(dag: DAG, alpha_smooth: float = 0.2) -> Optional[dict]:
             logger.info("  alpha < 1 => observed residuals smaller than predicted. \
                         Consider decreasing R (or check for model collapse).")
         else:
-            logger.info("  alpha ≈ 1 => OK; no large changes needed.")
+            logger.info("  alpha ~= 1 => OK; no large changes needed.")
 
         # Suggest concrete sigma change example
         # (if original sigma known, new_sigma = sqrt(alpha)*old_sigma)
