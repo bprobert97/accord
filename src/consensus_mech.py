@@ -287,7 +287,6 @@ class ConsensusMechanism():
 
             # Run SDEKF
             processing_result: ODProcessingResult =sdekf.process_measurement(transaction_data)
-            logger.info("BCP123 %s", sdekf.targets)
 
             # 4) Check if satellite has been witnessed before
             #4a if yes, does this data agree with other data/ is it correct?
