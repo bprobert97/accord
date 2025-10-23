@@ -27,11 +27,10 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.stats import chi2
 from .logger import get_logger
-from .module_crtbp import crtbp_dstt_dynamics
 from .module_stt import dstt_pred_mu_p
 from .utils import RANGE_VAR_FLOOR, ANGLE_VAR_FLOOR, \
-    LOS_VAR_FLOOR, UNIT_T, scale_matrix, \
-        scale_matrix_inv
+    LOS_VAR_FLOOR
+from .module_gcrf import gcrf_dstt_dynamics, MU_EARTH
 
 logger = get_logger()
 
@@ -93,8 +92,8 @@ class SDEKF:
         self.meas_floor = meas_floor
         self.dimensions: int = 6
         self.mu: float = 0.0121505839 # Earth-Moon mass ratio
-        # Process noise - 10m for position and 0.1m/s for velocity
-        self.q: np.ndarray = np.diag([10.0, 10.0, 10.0, 0.1, 0.1, 0.1])
+        # Process noise
+        self.q: np.ndarray = np.diag([1e8, 1e8, 1e8, 1e4, 1e4, 1e4])
 
     def process_measurement(self, measurements: Dict) -> ODProcessingResult:
         """
@@ -237,40 +236,6 @@ class SDEKF:
         nis = float(y.T @ s_inv @ y)
         dof = int(z.shape[0])
 
-        # --- BEGIN TEMPORARY DEBUGGING (DOF==1 only) ---
-        if dof == 1:
-            try:
-                # scalars for easy reading
-                z_val = float(z.ravel()[0])
-                zhat_val = float(z_hat.ravel()[0])
-                y_val = float((z - z_hat).ravel()[0])
-            except Exception:
-                z_val, zhat_val, y_val = z, z_hat, (z - z_hat) # type: ignore [assignment]
-
-            # basic matrix diagnostics
-            try:
-                s_val = float(s.ravel()[0]) if s.shape == (1, 1) else None
-                r_val = float(r.ravel()[0]) if r.shape == (1, 1) else None
-                ppos = np.diag(p_pred)[:3]  # position variances
-                h_shape = h.shape
-                s_eigs = np.linalg.eigvals(s) if s.shape == (1,1) \
-                    or s.shape==(1,1) else np.linalg.eigvals(s)
-                cond_s = np.linalg.cond(s)
-            except Exception:
-                s_val = r_val = None
-                ppos = None
-                s_eigs = None
-                cond_s = None
-
-            logger.info("DBG_RANGE: z=%s, z_hat=%s, y=%s, |y|=%g", \
-                        z_val, zhat_val, y_val, abs(y_val))
-            logger.info("DBG_RANGE: h.shape=%s, p_pred.pos_var=%s", \
-                        h_shape, ppos)
-            logger.info("DBG_RANGE: r=%s, s=%s, s_eigs=%s, cond(s)=%s", \
-                        r_val, s_val, s_eigs, cond_s)
-        # --- END DEBUGGING ---
-
-
         # Chi-squared gating to catch outliers above 99.9% extremeity
         high_gate = chi2.ppf(0.999, df=dof)
 
@@ -404,68 +369,112 @@ class SDEKF:
         p0 = np.diag([1e4, 1e4, 1e4, 1e2, 1e2, 1e2]).astype(float)
         return State(state_estimate=x0, covariance=p0, last_update_seconds=timestamp)
 
-
     def _predict(self, x: np.ndarray, p: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Propagate state and covariance forward by dt using orbital dynamics
-        and STM/DSTT.
-
-        Args:
-        - x: Current state vector (6x1).
-        - p: Current covariance matrix (6x6).
-        - dt: Time step (s).
-
-        Returns:
-        - Tuple of predicted state (6x1) and covariance (6x6).
+        Propagate state and covariance forward by dt using two-body GCRF dynamics.
         """
-        # No prediction needed for zero time step
         if dt <= 0.0:
             return x, p
 
-        # Convert to nondimensional units
-        x_nd = scale_matrix_inv @ x
-        dt_nd = dt / UNIT_T
-        q_nd = scale_matrix_inv @ self.q @ scale_matrix_inv.T
-        p_nd = scale_matrix_inv @ p @ scale_matrix_inv.T
+        # Directly use SI units (no scaling)
+        q = self.q
+        p0 = p
 
-        # Augmented state vector
-        # x (6), STM (6x6), DSTT (6 x dim x dim)
+        # Augmented state [x, STM, DSTT]
         r_matrix = np.eye(self.dimensions)
-
         x_aug = np.concatenate([
-            x_nd.flatten(),                           # Initial state
-            np.eye(6).reshape(-1),                    # STM initialised to I6
-            np.zeros((6 * (self.dimensions ** 2)))    # DSTT initialised to 0
+            x.flatten(),                    # state
+            np.eye(6).reshape(-1),          # STM
+            np.zeros((6 * self.dimensions**2))
         ])
 
-        # Propagate dynamics + STM + DSTT
-        sol = solve_ivp( # type: ignore[call-overload]
-            crtbp_dstt_dynamics,
-            [0, dt_nd],                                    # integrate over [0, dt]
-            x_aug,                                      # initial condition
-            args=(self.mu, r_matrix, self.dimensions),
-            method="RK45", max_step=np.inf, rtol=1e-12, atol=1e-12
+        # Propagate using GCRF dynamics
+        sol = solve_ivp(
+            gcrf_dstt_dynamics,
+            [0, dt],
+            x_aug,
+            args=(MU_EARTH, self.dimensions),
+            method="RK45",
+            rtol=1e-12, atol=1e-12
         )
 
-        final = sol.y[:, -1] # State at final time (last column)
+        final = sol.y[:, -1]
 
         # Extract results
-        x_pred_nd = final[0:6].reshape(6, 1)                     # propagated state
-        stm = final[6:42].reshape(6, 6)                       # 6x6 state transition matrix
-        dstt = final[42:].reshape(6,                          # 6 x dim x dim tensor
-                                  self.dimensions,
-                                  self.dimensions)
+        x_pred = final[0:6].reshape(6, 1)
+        stm = final[6:42].reshape(6, 6)
+        dstt = final[42:].reshape(6, self.dimensions, self.dimensions)
 
         # Propagate covariance
-        mf, pf = dstt_pred_mu_p(p_nd, stm, dstt, r_matrix, self.dimensions)
-        p_pred_nd = pf + q_nd  # add process noise
-        x_pred_nd = x_pred_nd + mf.reshape(6, 1)
+        mf, pf = dstt_pred_mu_p(p0, stm, dstt, r_matrix, self.dimensions)
 
-        # Convert back to dimensional (SI) units
-        x_pred = scale_matrix @ x_pred_nd
-        p_pred = scale_matrix @ p_pred_nd @ scale_matrix.T
+        # Add process noise in SI units
+        p_pred = pf + q
+        x_pred = x_pred + mf.reshape(6, 1)
 
         return x_pred, p_pred
+
+    # def _predict(self, x: np.ndarray, p: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
+    #     """
+    #     Propagate state and covariance forward by dt using orbital dynamics
+    #     and STM/DSTT.
+
+    #     Args:
+    #     - x: Current state vector (6x1).
+    #     - p: Current covariance matrix (6x6).
+    #     - dt: Time step (s).
+
+    #     Returns:
+    #     - Tuple of predicted state (6x1) and covariance (6x6).
+    #     """
+    #     # No prediction needed for zero time step
+    #     if dt <= 0.0:
+    #         return x, p
+
+    #     # Convert to nondimensional units
+    #     x_nd = scale_matrix_inv @ x
+    #     dt_nd = dt / UNIT_T
+    #     q_nd = scale_matrix_inv @ self.q @ scale_matrix_inv.T
+    #     p_nd = scale_matrix_inv @ p @ scale_matrix_inv.T
+
+    #     # Augmented state vector
+    #     # x (6), STM (6x6), DSTT (6 x dim x dim)
+    #     r_matrix = np.eye(self.dimensions)
+
+    #     x_aug = np.concatenate([
+    #         x_nd.flatten(),                           # Initial state
+    #         np.eye(6).reshape(-1),                    # STM initialised to I6
+    #         np.zeros((6 * (self.dimensions ** 2)))    # DSTT initialised to 0
+    #     ])
+
+    #     # Propagate dynamics + STM + DSTT
+    #     sol = solve_ivp( # type: ignore[call-overload]
+    #         crtbp_dstt_dynamics,
+    #         [0, dt_nd],                                    # integrate over [0, dt]
+    #         x_aug,                                      # initial condition
+    #         args=(self.mu, r_matrix, self.dimensions),
+    #         method="RK45", max_step=np.inf, rtol=1e-12, atol=1e-12
+    #     )
+
+    #     final = sol.y[:, -1] # State at final time (last column)
+
+    #     # Extract results
+    #     x_pred_nd = final[0:6].reshape(6, 1)                     # propagated state
+    #     stm = final[6:42].reshape(6, 6)                       # 6x6 state transition matrix
+    #     dstt = final[42:].reshape(6,                          # 6 x dim x dim tensor
+    #                               self.dimensions,
+    #                               self.dimensions)
+
+    #     # Propagate covariance
+    #     mf, pf = dstt_pred_mu_p(p_nd, stm, dstt, r_matrix, self.dimensions)
+    #     p_pred_nd = pf + q_nd  # add process noise
+    #     x_pred_nd = x_pred_nd + mf.reshape(6, 1)
+
+    #     # Convert back to dimensional (SI) units
+    #     x_pred = scale_matrix @ x_pred_nd
+    #     p_pred = scale_matrix @ p_pred_nd @ scale_matrix.T
+
+    #     return x_pred, p_pred
 
     def _build_measurement_model(self, measurement_dict: Dict,
                                  x: np.ndarray) -> Tuple[np.ndarray,
