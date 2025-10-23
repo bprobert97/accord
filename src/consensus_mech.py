@@ -241,14 +241,29 @@ class ConsensusMechanism():
         # Normalise reputation
         rep_norm = min(max(reputation / MAX_REPUTATION, 0.0), 1.0)
 
-        dof_term = self.consensus_threshold * (dof_reward + (1 - dof_reward) * correctness)
-        rep_term = (1 - self.consensus_threshold) * rep_norm
+        # Normalise each variable relative to its threshold point
+        # Min acceptable correctness for consensus = 0.5
+        # Min DOF score = 0.33
+        # Min reputation = 0
+        # TODO - look at more tomorrow. Updates:
+        #- new ECI module (need to update docs, and code in new module_gcrf)
+        # - new consensus score mechanism with equation that ensures 'good enough'
+        # measurements are rewarded
+        # Need to check that 0.5 correctness is right? May need to switch to PDF from CDF?
+        # Because 0.4 correctness might actually be okay? shee chi2 plots
+        c_adj = max((correctness - 0.5) / (1 - 0.5), 0)     # scaled [0,1]
+        d_adj = max((dof_reward - 0.33) / (1 - 0.33), 0)
+        r_adj = max(rep_norm, 0)                            # rep threshold is 0
 
-        # Weights must sum to one.
-        # This formula means is a transaction has best correctness (1) but 0
-        # reputation, it can still reach consensus from DOF reward and bounce back.
-        return (correctness ** 2) * (dof_term + rep_term)
+        c_adj = c_adj ** 3 # Make correctness have more influence
 
+        # Combine multiplicatively (ensures monotonicity)
+        combined = 1 - (1 - c_adj) * (1 - d_adj) * (1 - r_adj)
+
+        # Scale to [threshold, 1]
+        consensus = self.consensus_threshold + (1 - self.consensus_threshold) * combined
+
+        return min(max(consensus, 0.0), 1.0)
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
