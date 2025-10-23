@@ -23,7 +23,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
 import json
-import math
 from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -454,103 +453,6 @@ def plot_nis_consistency(dag: DAG, confidence: float = 0.95) -> None:
     plt.tight_layout()
     plt.show()
 
-def analyze_nis_tuning(dag: DAG, alpha_smooth: float = 0.2) -> Optional[dict]:
-    """
-    Analyze NIS statistics per satellite and recommend multiplicative scaling
-    for measurement covariances R (or for S in general).
-
-    Args:
-        dag: DAG containing transactions with metadata fields 'nis' and 'dof'
-             and tx_data containing 'observer_id'.
-        alpha_smooth: smoothing factor (0..1) to produce a smoothed recommended scale
-                     (useful for online/adaptive tuning). 0 => no smoothing.
-    Prints:
-        - Per-satellite count, mean NIS, median, std, DOF (mean), chi2 p-value for mean
-        - Recommended multiplicative scale alpha_reco = mean_nis / DOF_mean
-        - Recommended new sigma (if R is diagonal and originally derived from sigma^2)
-    """
-
-    nis_by_sat: dict[str, dict] = {}
-    for _, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            if not hasattr(tx.metadata, "nis") or not hasattr(tx.metadata, "dof"):
-                continue
-            try:
-                tx_data = json.loads(tx.tx_data)
-            except Exception:
-                continue
-            sid = tx_data.get("observer_id", "unknown")
-            nis = getattr(tx.metadata, "nis", None)
-            dof = getattr(tx.metadata, "dof", None)
-            if nis is None or dof is None or math.isnan(nis):
-                continue
-            nis_by_sat.setdefault(sid, {"nis": [], "dof": []})
-            nis_by_sat[sid]["nis"].append(float(nis))
-            nis_by_sat[sid]["dof"].append(float(dof))
-
-    if not nis_by_sat:
-        logger.info("No NIS/DOF data available for tuning analysis.")
-        return None
-
-    # If you want to record previous alpha estimates, you can persist them externally and smooth.
-    # For this function we simply print suggested alphas.
-    for sid, data in nis_by_sat.items():
-        nis_vals = np.array(data["nis"])
-        dof_vals = np.array(data["dof"])
-        n = len(nis_vals)
-        mean_nis = float(np.mean(nis_vals))
-        med_nis = float(np.median(nis_vals))
-        std_nis = float(np.std(nis_vals, ddof=1)) if n > 1 else 0.0
-        mean_dof = float(np.mean(dof_vals))
-
-        # Chi-square test: is sum(NIS) consistent with chi2(n * DOF) ?
-        # Under H0: sum(NIS) ~ chi2(n * DOF)
-        sum_nis = float(np.sum(nis_vals))
-        df_total = n * mean_dof
-        p_value = 1.0 - chi2.cdf(sum_nis, df=df_total)
-
-        # Recommended multiplicative factor to apply to S (S_new = alpha * S).
-        # Choose alpha = mean_nis / DOF so the new mean NIS -> DOF.
-        alpha_reco = mean_nis / mean_dof if mean_dof > 0 else 1.0
-
-        # Smoothing (if you had a previous alpha you'd smooth; here we just show how to smooth)
-        alpha_smooth_val = alpha_reco  # placeholder if no history
-        if 0 < alpha_smooth < 1:
-            # If you store prev_alpha_per_sat somewhere, replace prev_alpha=1.0
-            prev_alpha = 1.0
-            alpha_smooth_val = prev_alpha * (1 - alpha_smooth) + alpha_reco * alpha_smooth
-
-        # If your R was diagonal with variance = sigma^2, new sigma = sqrt(alpha) * old_sigma
-        # We cannot know old_sigma here — but we can express relationship.
-        logger.info("=== NIS tuning for %s ===", sid)
-        logger.info("samples=%d, mean_NIS=%.4f, median=%.4f, std_NIS=%.4f, mean_DOF=%.3f",
-                    n, mean_nis, med_nis, std_nis, mean_dof)
-        logger.info("sum_NIS=%.4f over df_total=%.2f; chi2 right-tail p-value=%.4g",
-                    sum_nis, df_total, p_value)
-        logger.info("Recommended multiplicative scale on S (and R): alpha = mean_NIS / DOF = %.4f",
-                    alpha_reco)
-        logger.info("Smoothed alpha (if using smoothing) = %.4f", alpha_smooth_val)
-        logger.info("Interpretation:")
-        if alpha_reco > 1.2:
-            logger.info("  alpha > 1 => observed residuals larger \
-                        than predicted. Consider increasing R or inflating P.")
-        elif alpha_reco < 0.8:
-            logger.info("  alpha < 1 => observed residuals smaller than predicted. \
-                        Consider decreasing R (or check for model collapse).")
-        else:
-            logger.info("  alpha ~= 1 => OK; no large changes needed.")
-
-        # Suggest concrete sigma change example
-        # (if original sigma known, new_sigma = sqrt(alpha)*old_sigma)
-        logger.info("If your measurement R was diag(sigma^2): new_sigma z" \
-        "= sqrt(alpha) * old_sigma (scale per-axis).")
-        logger.info("--------------------------------------------------------")
-
-    # Optionally, return an alpha map if caller wants to apply them
-    return {sid: float(np.mean(data["nis"]) / (np.mean(data["dof"])
-                                               if np.mean(data["dof"])>0 else 1.0))
-            for sid, data in nis_by_sat.items()}
-
 
 # Run demo
 if __name__ == "__main__":
@@ -559,7 +461,5 @@ if __name__ == "__main__":
         #plot_transaction_dag(final_dag)
         plot_consensus_cdf_dof(final_dag)
         plot_nis_consistency(final_dag)
-        alpha_map = analyze_nis_tuning(final_dag)
-        print("Suggested alpha per satellite: " + str(alpha_map))
     if rep_hist:
         plot_reputation(rep_hist)

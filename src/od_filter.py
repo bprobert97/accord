@@ -1,4 +1,4 @@
-# pylint: disable=too-few-public-methods, broad-exception-caught, too-many-branches, consider-using-in
+# pylint: disable=too-few-public-methods, broad-exception-caught, too-many-branches, consider-using-in, too-many-locals
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -29,7 +29,9 @@ from scipy.stats import chi2
 from .logger import get_logger
 from .module_crtbp import crtbp_dstt_dynamics
 from .module_stt import dstt_pred_mu_p
-from .utils import RANGE_VAR_FLOOR, ANGLE_VAR_FLOOR, LOS_VAR_FLOOR
+from .utils import RANGE_VAR_FLOOR, ANGLE_VAR_FLOOR, \
+    LOS_VAR_FLOOR, UNIT_T, scale_matrix, \
+        scale_matrix_inv
 
 logger = get_logger()
 
@@ -90,7 +92,7 @@ class SDEKF:
         self.targets: Dict[str, State] = {}
         self.meas_floor = meas_floor
         self.dimensions: int = 6
-        self.mu: float = 0.0121505839
+        self.mu: float = 0.0121505839 # Earth-Moon mass ratio
         # Process noise - 10m for position and 0.1m/s for velocity
         self.q: np.ndarray = np.diag([10.0, 10.0, 10.0, 0.1, 0.1, 0.1])
 
@@ -186,6 +188,7 @@ class SDEKF:
         # Perform the prediction step
         x_pred, p_pred = self._predict(state.state_estimate, state.covariance, delta_t)
         state.last_update_seconds = timestamp
+
         return x_pred, p_pred
 
 
@@ -419,12 +422,18 @@ class SDEKF:
         if dt <= 0.0:
             return x, p
 
+        # Convert to nondimensional units
+        x_nd = scale_matrix_inv @ x
+        dt_nd = dt / UNIT_T
+        q_nd = scale_matrix_inv @ self.q @ scale_matrix_inv.T
+        p_nd = scale_matrix_inv @ p @ scale_matrix_inv.T
+
         # Augmented state vector
         # x (6), STM (6x6), DSTT (6 x dim x dim)
         r_matrix = np.eye(self.dimensions)
 
         x_aug = np.concatenate([
-            x.flatten(),                              # initial state
+            x_nd.flatten(),                           # Initial state
             np.eye(6).reshape(-1),                    # STM initialised to I6
             np.zeros((6 * (self.dimensions ** 2)))    # DSTT initialised to 0
         ])
@@ -432,7 +441,7 @@ class SDEKF:
         # Propagate dynamics + STM + DSTT
         sol = solve_ivp( # type: ignore[call-overload]
             crtbp_dstt_dynamics,
-            [0, dt],                                    # integrate over [0, dt]
+            [0, dt_nd],                                    # integrate over [0, dt]
             x_aug,                                      # initial condition
             args=(self.mu, r_matrix, self.dimensions),
             method="RK45", max_step=np.inf, rtol=1e-12, atol=1e-12
@@ -441,16 +450,20 @@ class SDEKF:
         final = sol.y[:, -1] # State at final time (last column)
 
         # Extract results
-        x_pred = final[0:6].reshape(6, 1)                     # propagated state
+        x_pred_nd = final[0:6].reshape(6, 1)                     # propagated state
         stm = final[6:42].reshape(6, 6)                       # 6x6 state transition matrix
         dstt = final[42:].reshape(6,                          # 6 x dim x dim tensor
                                   self.dimensions,
                                   self.dimensions)
 
         # Propagate covariance
-        mf, pf = dstt_pred_mu_p(p, stm, dstt, r_matrix, self.dimensions)
-        p_pred = pf + self.q  # add process noise
-        x_pred = x_pred + mf.reshape(6, 1)
+        mf, pf = dstt_pred_mu_p(p_nd, stm, dstt, r_matrix, self.dimensions)
+        p_pred_nd = pf + q_nd  # add process noise
+        x_pred_nd = x_pred_nd + mf.reshape(6, 1)
+
+        # Convert back to dimensional (SI) units
+        x_pred = scale_matrix @ x_pred_nd
+        p_pred = scale_matrix @ p_pred_nd @ scale_matrix.T
 
         return x_pred, p_pred
 

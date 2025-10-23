@@ -39,7 +39,7 @@
     "observer_id": "sat_2",
     "observer_index": 2,
     "range_m": 500921.9384299703,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -208,7 +208,7 @@
       0.10179533450361748
     ],
     "range_m": 501054.31638927216,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -594,7 +594,7 @@
     "observer_id": "sat_2",
     "observer_index": 2,
     "range_m": 501309.2875733684,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -1502,7 +1502,7 @@
       -0.06699420581473484
     ],
     "range_m": 501741.55477049993,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -1714,7 +1714,7 @@
     "observer_id": "sat_2",
     "observer_index": 2,
     "range_m": 501814.2817319382,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -1806,7 +1806,7 @@
     "observer_id": "sat_2",
     "observer_index": 2,
     "range_m": 501819.39184501354,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -1902,7 +1902,7 @@
     "observer_id": "sat_2",
     "observer_index": 2,
     "range_m": 501867.039186428,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -2454,7 +2454,7 @@
       -0.029574559529206776
     ],
     "range_m": 501836.1001751541,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -3057,7 +3057,7 @@
       0.05393625835981272
     ],
     "range_m": 501733.95002807304,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -3259,7 +3259,7 @@
     "observer_id": "sat_2",
     "observer_index": 2,
     "range_m": 501625.24001644243,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -3336,7 +3336,7 @@
       -0.005705025032374521
     ],
     "range_m": 501561.5431034767,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -3574,7 +3574,7 @@
       0.05454989857772865
     ],
     "range_m": 501370.856925996,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
@@ -4487,7 +4487,7 @@
     "observer_id": "sat_2",
     "observer_index": 2,
     "range_m": 500766.79096780386,
-    "R_meas": 0.0625
+    "R_meas": 625
   },
   {
     "target_id": "sat_4",
