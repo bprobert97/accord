@@ -257,11 +257,19 @@ class ConsensusMechanism():
 
         c_adj = c_adj ** 3 # Make correctness have more influence
 
-        # Combine multiplicatively (ensures monotonicity)
-        combined = 1 - (1 - c_adj) * (1 - d_adj) * (1 - r_adj)
+        # Gate DOF and reputation by correctness
+        gate = 1 - (1 - d_adj) * (1 - r_adj)  # rises with both
 
-        # Scale to [threshold, 1]
+        # Combine: correctness gates contribution of DOF/reputation
+        combined = c_adj * gate
+
+        # Scale so baseline maps to threshold
         consensus = self.consensus_threshold + (1 - self.consensus_threshold) * combined
+
+       # TODO Drop below threshold when correctness = 0
+       # Should this be a discrete check, or more continuous for low correctness
+        if consensus == 0:
+            consensus = self.consensus_threshold * 0.9
 
         return min(max(consensus, 0.0), 1.0)
 
