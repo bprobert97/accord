@@ -42,7 +42,7 @@ class ConsensusMechanism():
     The Proof of Inter-Satellite Evaluation (PoISE) consensus mechanism.
     """
     def __init__(self) -> None:
-        self.consensus_threshold: float = 0.4
+        self.consensus_threshold: float = 0.6
         # Define a simple mapping: normalize by a maximum useful DOF
         # Theoretically, this could be up to 6 (full 3D position+velocity), but
         # in practice, most measurements will have fewer DOF - maximum of 3.
@@ -225,7 +225,9 @@ class ConsensusMechanism():
         return min(1.0, dof / self.max_dof)
 
     def calculate_consensus_score(self, correctness: float,
-                                  dof_reward: float, reputation: float) -> float:
+                                  dof_reward: float, reputation: float,
+                                  gamma: float = 0.35,
+                                  alpha: float = 0.8) -> float:
         """
         Calculate overall consensus score from correctness, DOF reward, and node reputation.
         Weights can be adjusted to tune the influence of each factor.
@@ -251,27 +253,38 @@ class ConsensusMechanism():
         # measurements are rewarded
         # Need to check that 0.5 correctness is right? May need to switch to PDF from CDF?
         # Because 0.4 correctness might actually be okay? shee chi2 plots
-        c_adj = max((correctness - 0.5) / (1 - 0.5), 0)     # scaled [0,1]
-        d_adj = max((dof_reward - 0.33) / (1 - 0.33), 0)
-        r_adj = max(rep_norm, 0)                            # rep threshold is 0
 
-        c_adj = c_adj ** 3 # Make correctness have more influence
+        # Relative to baselines (can go negative for correctness)
+        # c_rel = max(min((correctness - 0.5) / 0.5, 1.0), -1.0)      # [-1,1]
+        # d_rel = max(min((dof_reward - (1/3)) / (2/3), 1.0), 0.0)      # [0,1] with baseline at 0
+        # r_rel = rep_norm                                            # [0,1] with baseline at 0
 
-        # Gate DOF and reputation by correctness
-        gate = 1 - (1 - d_adj) * (1 - r_adj)  # rises with both
+        # # Nonlinear emphasis on correctness (continuous across 0.5)
+        # # gamma < 1 makes correctness more influential above 0.5 and penalizes below 0.5
+        # c_scale = ( (abs(c_rel) ** gamma) * (1 if c_rel >= 0 else -1) + 1 ) / 2  # maps back to [0,1]
 
-        # Combine: correctness gates contribution of DOF/reputation
-        combined = c_adj * gate
+        # # Cooperative DOF–reputation term (no weights, monotonic, bounded)
+        # dr_term = (1 - (1 - d_rel) * (1 - r_rel)) ** alpha
 
-        # Scale so baseline maps to threshold
-        consensus = self.consensus_threshold + (1 - self.consensus_threshold) * combined
+        # # Combine and calibrate to the threshold anchor
+        # combined = c_scale * dr_term
 
-       # TODO Drop below threshold when correctness = 0
-       # Should this be a discrete check, or more continuous for low correctness
-        if consensus == 0:
-            consensus = self.consensus_threshold * 0.9
+        # consensus = self.consensus_threshold + (combined - 0.5) * 2 * (1 - self.consensus_threshold)
 
-        return min(max(consensus, 0.0), 1.0)
+        # return min(max(consensus, 0.0), 1.0)
+
+        c = max(0.0, min(1.0, correctness))
+        r = max(0.0, min(1.0, rep_norm))
+        T = self.consensus_threshold
+
+        # Coefficients solving the four anchor equations
+        b  = T
+        c2 = 3*T - 1
+        d  = 2 - 4*T
+
+        s = b*c + c2*r + d*c*r  # bilinear surface S(c, r)
+        logger.info("[FOR PLOT] correctness: %.6f, reputation: %.6f, dof_norm: %.6f, consensus score: %.6f", correctness, reputation, dof_reward, s)
+        return max(0.0, min(1.0, s))  # clamp
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
