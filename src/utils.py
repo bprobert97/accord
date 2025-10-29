@@ -54,6 +54,8 @@ def load_json_data(file_name: str = "sim_output.json") -> list[dict]:
 
 
 def wrap_pi( d: np.ndarray) -> np.ndarray:
+    """
+    Wrap -pi to pi
+    """
     # Works elementwise: wrap to (-pi, pi]
     return np.arctan2(np.sin(d), np.cos(d))
-

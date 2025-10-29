@@ -225,9 +225,7 @@ class ConsensusMechanism():
         return min(1.0, dof / self.max_dof)
 
     def calculate_consensus_score(self, correctness: float,
-                                  dof_reward: float, reputation: float,
-                                  gamma: float = 0.35,
-                                  alpha: float = 0.8) -> float:
+                                  dof_reward: float, reputation: float) -> float:
         """
         Calculate overall consensus score from correctness, DOF reward, and node reputation.
         Weights can be adjusted to tune the influence of each factor.
@@ -261,7 +259,7 @@ class ConsensusMechanism():
 
         # # Nonlinear emphasis on correctness (continuous across 0.5)
         # # gamma < 1 makes correctness more influential above 0.5 and penalizes below 0.5
-        # c_scale = ( (abs(c_rel) ** gamma) * (1 if c_rel >= 0 else -1) + 1 ) / 2  # maps back to [0,1]
+        # c_scale = ( (abs(c_rel) ** gamma) * (1 if c_rel >= 0 else -1) + 1 ) / 2
 
         # # Cooperative DOF–reputation term (no weights, monotonic, bounded)
         # dr_term = (1 - (1 - d_rel) * (1 - r_rel)) ** alpha
@@ -269,21 +267,23 @@ class ConsensusMechanism():
         # # Combine and calibrate to the threshold anchor
         # combined = c_scale * dr_term
 
-        # consensus = self.consensus_threshold + (combined - 0.5) * 2 * (1 - self.consensus_threshold)
+        # consensus = self.consensus_threshold + (combined - 0.5) * \
+        # 2 * (1 - self.consensus_threshold)
 
         # return min(max(consensus, 0.0), 1.0)
 
         c = max(0.0, min(1.0, correctness))
         r = max(0.0, min(1.0, rep_norm))
-        T = self.consensus_threshold
+        t = self.consensus_threshold
 
         # Coefficients solving the four anchor equations
-        b  = T
-        c2 = 3*T - 1
-        d  = 2 - 4*T
+        b  = t
+        c2 = 3*t - 1
+        d  = 2 - 4*t
 
         s = b*c + c2*r + d*c*r  # bilinear surface S(c, r)
-        logger.info("[FOR PLOT] correctness: %.6f, reputation: %.6f, dof_norm: %.6f, consensus score: %.6f", correctness, reputation, dof_reward, s)
+        logger.info("[FOR PLOT] correctness: %.6f, reputation: %.6f, dof_norm: %.6f, \
+                    consensus score: %.6f", correctness, reputation, dof_reward, s)
         return max(0.0, min(1.0, s))  # clamp
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
