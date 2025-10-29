@@ -1,11 +1,36 @@
-# ekf_constellation_improved.py
+# pylint: disable=too-many-locals, invalid-name, too-many-statements, too-many-branches, too-many-positional-arguments, too-many-arguments
+"""
+The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
+Author: Beth Probert
+Email: beth.probert@strath.ac.uk
+
+Copyright (C) 2025 Applied Space Technology Laboratory
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+"""
+
+from dataclasses import dataclass
+from math import sqrt
+from typing import Tuple, List, Optional
 import numpy as np
 from numpy.typing import NDArray
-from typing import Tuple, List, Optional, Dict
 import matplotlib.pyplot as plt
-from filterpy.kalman import ExtendedKalmanFilter
-from filterpy.common import Q_discrete_white_noise, Saver
-from dataclasses import dataclass
+from scipy.stats import chi2
+from filterpy.kalman import ExtendedKalmanFilter # type: ignore
+from filterpy.common import Q_discrete_white_noise, Saver # type: ignore
+import sympy as sp # type: ignore
 
 @dataclass
 class ODProcessingResult:
@@ -22,15 +47,14 @@ class ODProcessingResult:
     - post_cov: A 6x6 posterior covariance matrix that provides a snapshot of
     how uncertain the filter is after the update.
     """
-    target_ids: List[int]
-    nis: List[float]
+    target_ids: List[str]
+    nis: List[List[float]]
     dof: int
     filters: List[ExtendedKalmanFilter]
     truth: np.ndarray
     sim_meas: np.ndarray
 
 # -------- Optional: SymPy Jacobian (compiled with lambdify) --------
-import sympy as sp
 
 def _build_sympy_measurement():
     px, py, pz, vx, vy, vz = sp.symbols('px py pz vx vy vz', real=True)
@@ -77,6 +101,9 @@ def H_jacobian(x: NDArray[np.float64], stations: NDArray[np.float64]) -> NDArray
     return np.vstack(rows)  # 2n x 6
 
 def constant_velocity_F(dt: float) -> NDArray[np.float64]:
+    """
+    TODO
+    """
     F = np.eye(6)
     F[0, 3] = dt
     F[1, 4] = dt
@@ -86,6 +113,9 @@ def constant_velocity_F(dt: float) -> NDArray[np.float64]:
 def make_satellite_ekf(dt: float, q_var: float, R: NDArray[np.float64], m: int,
                        x0: Optional[NDArray[np.float64]] = None,
                        P0: Optional[NDArray[np.float64]] = None) -> ExtendedKalmanFilter:
+    """
+    TODO
+    """
     ekf = ExtendedKalmanFilter(dim_x=6, dim_z=m)
     ekf.F = constant_velocity_F(dt)
     Q1 = Q_discrete_white_noise(dim=2, dt=dt, var=q_var)
@@ -97,6 +127,9 @@ def make_satellite_ekf(dt: float, q_var: float, R: NDArray[np.float64], m: int,
 
 def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64], H: NDArray[np.float64],
                   R: NDArray[np.float64]) -> NDArray[np.float64]:
+    """
+    TODO
+    """
     I = np.eye(P.shape[0])
     A = I - K @ H
     Pn = A @ P @ A.T + K @ R @ K.T
@@ -104,6 +137,9 @@ def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64], H: NDArray[np.
     return 0.5 * (Pn + Pn.T)
 
 def simulate_truth(x0: NDArray[np.float64], steps: int, dt: float, q: float) -> NDArray[np.float64]:
+    """
+    TODO
+    """
     F = constant_velocity_F(dt)
     G = np.zeros((6, 3))
     G[0:3, :] = 0.5 * dt * dt * np.eye(3)
@@ -120,13 +156,11 @@ def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
     """Return two-sided (1-alpha) central interval for Chi^2_dof.
     Uses SciPy if available; otherwise uses Wilson–Hilferty approximation."""
     try:
-        from scipy.stats import chi2
         lo = chi2.ppf((1 - alpha) / 2.0, dof)
         hi = chi2.ppf(1 - (1 - alpha) / 2.0, dof)
         return float(lo), float(hi)
-    except Exception:
+    except Exception: # pylint: disable=broad-exception-caught
         # Wilson–Hilferty approx: X^(1/3) ~ Normal(mu, sigma)
-        from math import sqrt
         z = 1.959963984540054  # ~N^-1(0.975)
         k = float(dof)
         c = 2.0 / (9.0 * k)
@@ -137,10 +171,17 @@ def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
 
 # -------- Adaptive noise helpers --------
 
-def estimate_measurement_noise(residuals: NDArray[np.float64]) -> NDArray[np.float64]:
+def estimate_measurement_noise(residuals: np.ndarray) -> np.ndarray:
+    """
+    TODO
+    """
     return np.cov(residuals.T)
 
-def adaptive_R_update(R: NDArray[np.float64], residuals: NDArray[np.float64], beta: float = 0.1) -> NDArray[np.float64]:
+def adaptive_R_update(R: NDArray[np.float64], residuals: NDArray[np.float64],
+                      beta: float = 0.1) -> NDArray[np.float64]:
+    """
+    TODO
+    """
     R_hat = estimate_measurement_noise(residuals)
     # keep positive-definite and blend (exponential forgetting)
     Rn = (1 - beta) * R + beta * R_hat
@@ -162,6 +203,9 @@ def simulate_constellation_and_estimate(
     R_forgetting_beta: float = 0.1,
     cond_warn_threshold: float = 1e12,
 ) -> ODProcessingResult:
+    """
+    TODO
+    """
     if seed is not None:
         np.random.seed(seed)
 
@@ -179,35 +223,35 @@ def simulate_constellation_and_estimate(
     offsets_vel = np.linspace(-50.0, 50.0, n_sats)
 
     truth = np.zeros((n_sats, steps, 6))
-    for i in range(n_sats):
-        x0_i = base_x0.copy()
-        x0_i[0] += offsets_pos[i]
-        x0_i[4] += offsets_vel[i]
-        truth[i] = simulate_truth(x0_i, steps, dt, q_process_truth)
+    for j in range(n_sats):
+        x0_j = base_x0.copy()
+        x0_j[0] += offsets_pos[j]
+        x0_j[4] += offsets_vel[j]
+        truth[j] = simulate_truth(x0_j, steps, dt, q_process_truth)
 
     meas = np.zeros((n_sats, steps, m))
-    for i in range(n_sats):
+    for d in range(n_sats):
         for k in range(steps):
-            h = hx(truth[i, k], stations)
+            h = hx(truth[d, k], stations)
             n = np.zeros(m)
             n[0::2] = np.random.normal(0.0, sig_r, n_stations)
             n[1::2] = np.random.normal(0.0, sig_rdot, n_stations)
-            meas[i, k] = h + n
+            meas[d, k] = h + n
 
     filters: List[ExtendedKalmanFilter] = []
     savers: List[Optional[Saver]] = []
-    for i in range(n_sats):
-        x_init = truth[i, 0] + np.array([2e3, 0.0, 0.0, 0.0, -20.0, 0.0], dtype=float)
+    for l in range(n_sats):
+        x_init = truth[l, 0] + np.array([2e3, 0.0, 0.0, 0.0, -20.0, 0.0], dtype=float)
         P_init = np.diag([1e6, 1e6, 1e6, 1e2, 1e2, 1e2])
         ekf = make_satellite_ekf(dt, q_process_filter, R.copy(), m, x_init, P_init)
         filters.append(ekf)
-        savers.append(Saver() if use_saver else None)
+        savers.append(Saver(ekf) if use_saver else None)
 
     nis_per_sat: List[List[float]] = [[] for _ in range(n_sats)]
     residual_logs: List[List[NDArray[np.float64]]] = [[] for _ in range(n_sats)]
 
     for k in range(steps):
-        for i, ekf in enumerate(filters):
+        for g, ekf in enumerate(filters):
             ekf.predict()
             try:
                 np.linalg.cholesky(ekf.P)
@@ -215,7 +259,7 @@ def simulate_constellation_and_estimate(
                 ekf.P += 1e-8 * np.eye(6)
 
             H = H_jacobian(ekf.x, stations)
-            z = meas[i, k]
+            z = meas[g, k]
             z_pred = hx(ekf.x, stations)
             y = z - z_pred
             S = H @ ekf.P @ H.T + ekf.R
@@ -229,20 +273,22 @@ def simulate_constellation_and_estimate(
             ekf.P = joseph_update(ekf.P, K, H, ekf.R)
 
             nis = float(y.T @ S_inv @ y)
-            nis_per_sat[i].append(nis)
-            residual_logs[i].append(y)
+            nis_per_sat[g].append(nis)
+            residual_logs[g].append(y)
 
-            if adaptive_R_every and (k + 1) % adaptive_R_every == 0 and len(residual_logs[i]) >= 10:
-                ekf.R = adaptive_R_update(ekf.R, np.asarray(residual_logs[i]), beta=R_forgetting_beta)
-                residual_logs[i].clear()
+            if adaptive_R_every and (k + 1) % adaptive_R_every == 0 \
+                and len(residual_logs[g]) >= 10:
+                ekf.R = adaptive_R_update(ekf.R, np.asarray(residual_logs[g]),
+                                          beta=R_forgetting_beta)
+                residual_logs[g].clear()
 
             if np.linalg.cond(ekf.P) > cond_warn_threshold:
-                print(f"Sat {i}: ill-conditioned P at step {k} (cond={np.linalg.cond(ekf.P):.2e})")
+                print(f"Sat {g}: ill-conditioned P at step {k} (cond={np.linalg.cond(ekf.P):.2e})")
             if np.linalg.cond(S) > cond_warn_threshold:
-                print(f"Sat {i}: ill-conditioned S at step {k} (cond={np.linalg.cond(S):.2e})")
+                print(f"Sat {g}: ill-conditioned S at step {k} (cond={np.linalg.cond(S):.2e})")
 
-            if use_saver and savers[i] is not None:
-                savers[i].save(ekf)
+            if use_saver and savers[g] is not None:
+                savers[g].save(ekf) # type: ignore [union-attr]
 
     if use_saver:
         for s in savers:
@@ -253,15 +299,20 @@ def simulate_constellation_and_estimate(
     # --- Plot per-satellite NIS with χ² band ---
     lo, hi = chi2_bounds(m, 0.95)
     plt.figure(figsize=(12, 5))
-    for i, nis in enumerate(nis_per_sat):
-        plt.plot(nis, label=f"Sat {i}")
+    for sat, nis in enumerate(nis_per_sat): #type: ignore [assignment]
+        plt.plot(nis, label=f"Sat {sat}")
     plt.axhline(lo, linestyle=':', label=f"χ² 95% lo={lo:.2f}")
     plt.axhline(hi, linestyle=':', label=f"χ² 95% hi={hi:.2f}")
     plt.axhline(m, color='r', linestyle='--', label=f"DoF = {m}")
-    plt.xlabel("Step"); plt.ylabel("NIS"); plt.title("Constellation NIS Over Time")
-    plt.legend(ncol=3); plt.tight_layout(); plt.show()
+    plt.xlabel("Step")
+    plt.ylabel("NIS")
+    plt.title("Constellation NIS Over Time")
+    plt.legend(ncol=3)
+    plt.tight_layout()
+    plt.show()
 
-    return ODProcessingResult(target_ids=ids_list,nis=nis_per_sat, dof=m, filters=filters, truth=truth, sim_meas=meas)
+    return ODProcessingResult(target_ids=ids_list,nis=nis_per_sat, dof=m,
+                              filters=filters, truth=truth, sim_meas=meas)
 
 # -------- Demo --------
 
@@ -272,4 +323,3 @@ if __name__ == "__main__":
     print(result.target_ids)
     for i, series in enumerate(result.nis):
         print(f"  Sat {i}: last-step NIS = {series[-1]:.3f}")
-

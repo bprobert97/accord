@@ -254,7 +254,6 @@ class SDEKF:
         np.sqrt(np.trace(r)),
         np.sqrt(np.trace(h @ p_pred @ h.T))
         )
-        logger.info("HPH trace=%.3e, R trace=%.3e, ratio=%.3e", np.trace(h @ p_pred @ h.T), np.trace(r), np.trace(h @ p_pred @ h.T) / np.trace(r))
 
 
         if nis > high_gate:
@@ -690,8 +689,8 @@ class SDEKF:
 
         # Jacobian wrt position (radians per meter)
         eps = 1e-9
-        denom_xy = (x_**2 + y_**2 + eps)
-        denom_rho2 = (rho**2 + eps)
+        denom_xy = x_**2 + y_**2 + eps
+        denom_rho2 = rho**2 + eps
 
         # base derivatives (radians per meter)
         d_ra_dx = -y_ / denom_xy
