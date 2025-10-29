@@ -29,7 +29,7 @@ from scipy.stats import chi2
 from .logger import get_logger
 from .module_stt import dstt_pred_mu_p
 from .utils import RANGE_VAR_FLOOR, ANGLE_VAR_FLOOR, \
-    LOS_VAR_FLOOR
+    LOS_VAR_FLOOR, wrap_pi
 from .module_gcrf import gcrf_dstt_dynamics, MU_EARTH
 
 logger = get_logger()
@@ -79,21 +79,16 @@ class SDEKF:
     - Measurements: range (1d), azimuth/elevation (2D), right ascension/declination (2D)
     """
 
-    def __init__(self,
-                 meas_floor: float = 25.0) -> None:
+    def __init__(self) -> None:
         """
         Initialise the SDEKF.
-
-        Arguments:
-        - meas_floor: Minimum variance floor to avoid singularities.
         """
 
         self.targets: Dict[str, State] = {}
-        self.meas_floor = meas_floor
         self.dimensions: int = 6
         self.mu: float = 0.0121505839 # Earth-Moon mass ratio
         # Process noise
-        self.q: np.ndarray = np.diag([1e8, 1e8, 1e8, 1e4, 1e4, 1e4])
+        self.q: np.ndarray = np.diag([1e4, 1e4, 1e4, 1e2, 1e2, 1e2])
 
     def process_measurement(self, measurements: Dict) -> ODProcessingResult:
         """
@@ -212,6 +207,19 @@ class SDEKF:
         # y = innovation
         # s = innovation covariance
         y = z - z_hat
+
+        # Shortest-arc residuals for angular measurements
+        if "az_el_rad" in measurements:
+            # wrap both az and el via shortest arc
+            y[0, 0] = wrap_pi(y[0, 0])   # azimuth
+            y[1, 0] = wrap_pi(y[1, 0])   # elevation
+            logger.info("H, az_el_rad: %s", np.linalg.norm(h))
+
+        elif "ra_dec_rad" in measurements:
+            y[0, 0] = wrap_pi(y[0, 0])   # right ascension
+            y[1, 0] = wrap_pi(y[1, 0])   # declination
+            logger.info("H, ra_dec_rad: %s", np.linalg.norm(h))
+
         s = h @ p_pred @ h.T + r
         s = 0.5 * (s + s.T)
 
@@ -238,6 +246,16 @@ class SDEKF:
 
         # Chi-squared gating to catch outliers above 99.9% extremeity
         high_gate = chi2.ppf(0.999, df=dof)
+
+        logger.info(
+        "NIS=%.3f | y_norm=%.3f | sqrt(tr(R))=%.3f | sqrt(tr(HPH^T))=%.3f",
+        nis,
+        np.linalg.norm(y),
+        np.sqrt(np.trace(r)),
+        np.sqrt(np.trace(h @ p_pred @ h.T))
+        )
+        logger.info("HPH trace=%.3e, R trace=%.3e, ratio=%.3e", np.trace(h @ p_pred @ h.T), np.trace(r), np.trace(h @ p_pred @ h.T) / np.trace(r))
+
 
         if nis > high_gate:
             logger.info("NIS=%.3f rejected (>%.2f), outlier measurement", nis, high_gate)
@@ -352,7 +370,7 @@ class SDEKF:
             u = np.array([[1.0], [0.0], [0.0]])
 
         # Compute target position. rho = measured range from observer to target
-        rho = float(measurement_dict.get("range_m", 0.0))
+        rho = float(measurement_dict.get("range_m", 7.5e5))
         r_tgt = r_obs + rho * u
 
         # Build initial state vector
@@ -366,7 +384,7 @@ class SDEKF:
         x0[3:6, :] = v_guess
 
         # Start with unknown velocity
-        p0 = np.diag([1e4, 1e4, 1e4, 1e2, 1e2, 1e2]).astype(float)
+        p0 = np.diag([1e10, 1e10, 1e10, 1e6, 1e6, 1e6]).astype(float)
         return State(state_estimate=x0, covariance=p0, last_update_seconds=timestamp)
 
     def _predict(self, x: np.ndarray, p: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
@@ -555,8 +573,7 @@ class SDEKF:
 
         # Default covariance if not supplied
         if r is None or r.shape != (3, 3):
-            sigma = self.meas_floor
-            r = (sigma**2) * np.eye(3)
+            r = (LOS_VAR_FLOOR) * np.eye(3)
 
         return h, z, z_hat, r
 
@@ -592,7 +609,7 @@ class SDEKF:
         h = np.hstack([u.T, np.zeros((1, 3))])
 
         if r is None:
-            r = np.array([self.meas_floor], dtype=float)
+            r = np.array([RANGE_VAR_FLOOR], dtype=float)
 
         return h, z, z_hat, r
 
@@ -633,7 +650,7 @@ class SDEKF:
         z_hat = np.array([[az_hat], [el_hat]], dtype=float)
 
         if r is None:
-            r = np.diag([self.meas_floor, self.meas_floor]).astype(float)
+            r = np.diag([ANGLE_VAR_FLOOR, ANGLE_VAR_FLOOR]).astype(float)
 
         # Jacobian wrt position
         # eps is a small value added for numerical stability to prevent
@@ -653,60 +670,51 @@ class SDEKF:
         return h, z, z_hat, r
 
 
-    def _build_radec_model(self, delta_r: np.ndarray, # pylint: disable=too-many-locals
-                           measurement_dict: Dict, r: Optional[np.ndarray]
-                           ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _build_radec_model(self, delta_r: np.ndarray,
+                       measurement_dict: Dict, r: Optional[np.ndarray]
+                       ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Handle right ascension/declination measurement.
-
-        Args:
-        - delta_r: Relative position vector (target - observer).
-        - measurement_dict: Measurement dictionary.
-        - r: Optional measurement covariance matrix.
-
-        Returns a tuple of:
-        - h: Measurement Jacobian.
-        - z: Actual measurement vector.
-        - z_hat: Predicted measurement vector.
-        - r: Measurement covariance.
         """
 
-        # Extract right ascension and declination from measurement dictionary
         ra, dec = [float(x) for x in measurement_dict.get("ra_dec_rad", [0.0, 0.0])]
-
-        # Actual measurement vector
         z = np.array([[ra], [dec]], dtype=float)
 
-        # Predicted measurement vector
         x_, y_, z_ = delta_r.flatten()
-        rho = float(np.linalg.norm(delta_r))
+        rho = float(np.linalg.norm(delta_r)) + 1e-9
 
         # Predicted right ascension and declination
         ra_hat = np.arctan2(y_, x_)
-        dec_hat = np.arcsin(z_ / max(rho, 1e-9))
+        dec_hat = np.arcsin(z_ / rho)
         z_hat = np.array([[ra_hat], [dec_hat]], dtype=float)
 
-        # Jacobian wrt position
-        # eps is a small value added for numerical stability to prevent
-        # division by zero in Jacobian calculations.
+        # Jacobian wrt position (radians per meter)
         eps = 1e-9
-        d_ra_dx = -y_ / (x_**2 + y_**2 + eps)
-        d_ra_dy = x_ / (x_**2 + y_**2 + eps)
-        d_ra_dz = 0.0
-        d_dec_dx = -x_ * z_ / ((rho**2) * np.sqrt(1.0 - (z_ / max(eps, rho))**2) + eps) \
-            if rho > eps else 0.0
-        d_dec_dy = -y_ * z_ / ((rho**2) * np.sqrt(1.0 - (z_ / max(eps, rho))**2) + eps) \
-            if rho > eps else 0.0
-        d_dec_dz = np.sqrt(1.0 - (z_ / max(eps, rho))**2) / (rho + eps)
+        denom_xy = (x_**2 + y_**2 + eps)
+        denom_rho2 = (rho**2 + eps)
+
+        # base derivatives (radians per meter)
+        d_ra_dx = -y_ / denom_xy
+        d_ra_dy =  x_ / denom_xy
+        d_ra_dz =  0.0
+
+        d_dec_dx = -x_ * z_ / (denom_rho2 * np.sqrt(1.0 - (z_ / rho)**2) + eps)
+        d_dec_dy = -y_ * z_ / (denom_rho2 * np.sqrt(1.0 - (z_ / rho)**2) + eps)
+        d_dec_dz =  np.sqrt(1.0 - (z_ / rho)**2) / (rho + eps)
 
         h_pos = np.array([[d_ra_dx, d_ra_dy, d_ra_dz],
                         [d_dec_dx, d_dec_dy, d_dec_dz]], dtype=float)
+
+        # --- FIX: scale by 1/rho to convert to radians per meter ---
+        h_pos /= rho
+
         h = np.hstack([h_pos, np.zeros((2, 3))])
 
         if r is None:
-            r = np.diag([self.meas_floor,self.meas_floor]).astype(float)
+            r = np.diag([ANGLE_VAR_FLOOR, ANGLE_VAR_FLOOR]).astype(float)
 
         return h, z, z_hat, r
+
 
     def _ensure_covariance(self, measurement_dict: Dict) -> Optional[np.ndarray]:
         """
@@ -739,14 +747,6 @@ class SDEKF:
         # Symmetrisation step
         r_meas = 0.5 * (r_meas + r_meas.T)
 
-        # Regularise tiny/negative eigenvalues
-        # w = eigenvalues, v = eigenvectors
-        w, v = np.linalg.eigh(r_meas)
-
-        # Prevent there being eigenvalues smaller than the measurement floor
-        w = np.clip(w, self.meas_floor, None)
-        r_meas_final: np.ndarray = v @ np.diag(w) @ v.T
-
         modality = None
         if "range_m" in measurement_dict and not ("az_el_rad" in measurement_dict \
                                                   or "ra_dec_rad" in measurement_dict):
@@ -776,15 +776,20 @@ class SDEKF:
             # ensure diagonal >= ANGLE_VAR_FLOOR
             for i in range(2):
                 if r_meas[i, i] < ANGLE_VAR_FLOOR:
-                    logger.info("CLAMP: range R_meas %.6f < %.6f -> clamping (obs=%s)",
+                    logger.info("CLAMP: angle R_meas %.6f < %.6f -> clamping (obs=%s)",
                             r_meas[i, i], ANGLE_VAR_FLOOR, observer)
                     r_meas[i, i] = ANGLE_VAR_FLOOR
 
         elif modality == "los":
             for i in range(3):
                 if r_meas[i, i] < LOS_VAR_FLOOR:
-                    logger.info("CLAMP: range R_meas %.6f < %.6f -> clamping (obs=%s)",
+                    logger.info("CLAMP: los R_meas %.6f < %.6f -> clamping (obs=%s)",
                             r_meas[i, i], LOS_VAR_FLOOR, observer)
                     r_meas[i, i] = LOS_VAR_FLOOR
+
+        # Regularise tiny/negative eigenvalues
+        # w = eigenvalues, v = eigenvectors
+        w, v = np.linalg.eigh(r_meas)
+        r_meas_final: np.ndarray = v @ np.diag(w) @ v.T
 
         return r_meas_final

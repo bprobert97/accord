@@ -342,7 +342,7 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
                   for r in records]
         ax.scatter(steps, consensus, c=colors, s=60, label="Consensus Score")
         ax.plot(steps, consensus, linestyle="--", alpha=0.5, color="black")
-        ax.axhline(0.4, color="blue", linestyle=":", label="Threshold (0.4)")
+        ax.axhline(0.6, color="blue", linestyle=":", label="Threshold (0.6)")
         ax.set_ylabel("Consensus Score")
         ax.set_ylim(0, 1)
         ax.set_title(f"Satellite {sid}")
@@ -453,6 +453,80 @@ def plot_nis_consistency(dag: DAG, confidence: float = 0.95) -> None:
     plt.tight_layout()
     plt.show()
 
+def plot_nis_consistency_overall(dag: DAG, confidence: float = 0.95) -> None:
+    """
+    Plot overall Normalized Innovation Squared (NIS) values (aggregated across all satellites),
+    comparing them to expected chi-squared consistency bounds.
+
+    Args:
+    - dag: The final DAG object containing transactions (with NIS + DOF metadata).
+    - confidence: Confidence level for chi-square bounds (default=0.95).
+
+    Returns:
+    - None. Displays NIS plot with statistical consistency region.
+    """
+
+    # Gather all NIS and DOF data
+    all_nis = []
+    all_dof = []
+
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "nis") or not hasattr(tx.metadata, "dof"):
+                continue
+            nis = getattr(tx.metadata, "nis", None)
+            dof = getattr(tx.metadata, "dof", None)
+            if nis is None or dof is None:
+                continue
+            all_nis.append(nis)
+            all_dof.append(dof)
+
+    if not all_nis:
+        logger.info("No NIS/DOF data found in DAG.")
+        return
+
+    # Convert to numpy arrays
+    nis_vals = np.array(all_nis)
+    dof_vals = np.array(all_dof)
+    mean_dof = np.mean(dof_vals)
+
+    # Compute chi-square confidence bounds
+    chi2_lower = chi2.ppf((1 - confidence) / 2, df=mean_dof)
+    chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
+    expected_mean = mean_dof
+
+    # Plot overall NIS sequence
+    steps = np.arange(len(nis_vals))
+    plt.figure(figsize=(10, 6))
+    plt.plot(steps, nis_vals, "o-", color="black", label="NIS")
+
+    # Expected mean and confidence region
+    plt.axhline(expected_mean, color="blue", linestyle="--",
+                label=f"Expected mean (DOF={mean_dof:.1f})")
+    plt.fill_between(
+        steps,
+        chi2_lower,
+        chi2_upper,
+        color="green",
+        alpha=0.1,
+        label=f"{int(confidence*100)}% confidence region"
+    )
+
+    # Rolling mean for trend visualization
+    if len(nis_vals) > 5:
+        window = 5
+        rolling_mean = np.convolve(nis_vals, np.ones(window) / window, mode="valid")
+        plt.plot(range(window-1, len(nis_vals)), rolling_mean,
+                 color="red", linewidth=2, label="Rolling mean (5)")
+
+    plt.title("Overall NIS Consistency (All Satellites Combined)")
+    plt.xlabel("Transaction Index")
+    plt.ylabel("NIS Value")
+    plt.grid(True, linestyle=":")
+    plt.legend(loc="upper right")
+    plt.tight_layout()
+    plt.show()
+
 
 # Run demo
 if __name__ == "__main__":
@@ -461,5 +535,6 @@ if __name__ == "__main__":
         #plot_transaction_dag(final_dag)
         plot_consensus_cdf_dof(final_dag)
         plot_nis_consistency(final_dag)
+        plot_nis_consistency_overall(final_dag)
     if rep_hist:
         plot_reputation(rep_hist)

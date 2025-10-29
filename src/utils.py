@@ -24,8 +24,8 @@ import json
 import numpy as np
 
 RANGE_VAR_FLOOR: float = 25.0 ** 2       # 625 m^2
-ANGLE_VAR_FLOOR: float = (1.7e-3) ** 2   # ~2.89e-6 rad^2
-LOS_VAR_FLOOR: float = (1e-3) ** 2       # 1e-6 (unitless vector component variance)
+ANGLE_VAR_FLOOR: float = 1e-6
+LOS_VAR_FLOOR: float = 1e-6
 
 UNIT_L: float = 38400e3 # Earth-Moon distance in metres
 UNIT_T: float = 3.751904644238777e+05 # Normalised angular speed
@@ -51,3 +51,9 @@ def load_json_data(file_name: str = "sim_output.json") -> list[dict]:
         data = json.load(file)
 
     return data
+
+
+def wrap_pi( d: np.ndarray) -> np.ndarray:
+    # Works elementwise: wrap to (-pi, pi]
+    return np.arctan2(np.sin(d), np.cos(d))
+
