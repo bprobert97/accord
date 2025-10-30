@@ -192,10 +192,10 @@ def simulate_truth_and_meas(N, steps, dt, sig_r, sig_rdot):
 
 # ----------------------- EKF ------------------------------
 def run_joint_ekf(
-    N=3, steps=1500, dt=1.0,
+    N=10, steps=3000, dt=60.0,
     sig_r=10.0, sig_rdot=0.02,
     q_acc_target=1e-6, q_acc_obs=1e-6,
-    seed=123,
+    seed=42,
 ) -> JointResult:
 
     if seed is not None: np.random.seed(seed)
@@ -365,8 +365,8 @@ if __name__ == "__main__":
         N=10,
         steps=3000,
         dt=60.0,
-        sig_r=25.0,
-        sig_rdot=0.2,
+        sig_r=10.0,
+        sig_rdot=0.02,
         q_acc_target=1e-5,
         q_acc_obs=1e-5,   # kept for signature compatibility
         seed=42,

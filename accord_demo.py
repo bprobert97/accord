@@ -23,7 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
 import json
-from typing import Optional
+from typing import Optional, List
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
@@ -32,14 +32,13 @@ import numpy as np
 from scipy.stats import chi2
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
+from src.filter import run_joint_ekf, ObservationRecord
 from src.logger import get_logger
 from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
-from src.utils import load_json_data
 
 logger = get_logger()
 
-# Consensus demo (JSON-driven)
 async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
@@ -52,8 +51,8 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
 
-    # Load all JSON observations
-    observations = load_json_data("sim_output.json")
+    results = run_joint_ekf()
+    observations: List[ObservationRecord] = results.obs_records
     if not observations:
         logger.info("No data in JSON file.")
         return None, None
@@ -61,8 +60,8 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     asyncio.create_task(dag.listen())
 
     # Create one SatelliteNode per unique observer_id in the JSON
-    unique_ids = sorted({obs["observer_id"] for obs in observations})
-    satellites: dict[str, SatelliteNode] = {
+    unique_ids = sorted({obs.observer for obs in observations})
+    satellites: dict[int, SatelliteNode] = {
         sid: SatelliteNode(node_id=sid, queue=queue) for sid in unique_ids
     }
     rep_history: dict[str, list[float]] = {sid: [] for sid in unique_ids}
@@ -70,7 +69,7 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     # One satellite per observation (or choose grouping logic if needed)
     # Assign each observation to the correct satellite and submit
     for obs in observations:
-        sid = obs["observer_id"]
+        sid = obs.observer
         sat = satellites[sid]
         sat.load_sensor_data(obs)
         logger.info("Satellite %s: submitting transaction.", sid)
