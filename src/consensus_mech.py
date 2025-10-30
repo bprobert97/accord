@@ -24,11 +24,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import ast
 import json
 import math
+from typing import List
 import numpy as np
 from scipy.stats import chi2
+import statistics
 from .dag import DAG
+from.filtertwo import JointResult
 from .logger import get_logger
-from .od_filter import ODProcessingResult, SDEKF
 from .reputation import MAX_REPUTATION
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
@@ -145,7 +147,7 @@ class ConsensusMechanism():
 
         return True
 
-    def nis_to_score(self, nis: float, dof: int) -> float:
+    def nis_to_score(self, nis: List[float], dof: int) -> float:
         """
         Convert NIS into a normalised [0,1] correctness score.
         1 = high agreement, perfect fit
@@ -158,6 +160,7 @@ class ConsensusMechanism():
         Returns:
         - Correctness score in [0,1].
         """
+        # TODO - nis average and latest score [-1]
         # Ensure valid inputs
         nis = max(0.0, float(nis))
         dof = max(1, int(dof))
@@ -169,20 +172,20 @@ class ConsensusMechanism():
         score = 1.0 - cdf
         return float(score)
 
-    def get_correctness_score(self, dag: DAG, result: ODProcessingResult) -> float:
+    def get_correctness_score(self, dag: DAG, result: JointResult) -> float:
         """
         Calculate correctness score based on NIS and past observations of the same target.
         Args:
         - dag: The current DAG containing past transactions.
-        - result: The ODProcessingResult containing NIS, DOF, and target ID.
+        - result: The ODProcessingResult containing NIS, DOF, and target ID. TODO
 
         Returns:
         - Correctness score in [0,1]. 0 = low agreement, 1 = high agreement.
         """
 
-        target_id = result.target_id
-        nis = result.nis
-        dof = result.dof
+        target_ids = result.target_ids
+        nis_list = result.nis_per_target
+        dof_list = result.dof_per_target
         matches = []
 
         # If we've never seen this target_id before -> neutral score
@@ -190,7 +193,7 @@ class ConsensusMechanism():
             for tx in tx_list:
                 try:
                     past_data = json.loads(tx.tx_data)
-                    if past_data.get("target_id") == target_id:
+                    if past_data.get("target_id") in target_ids:
                         matches.append(past_data)
                 except (json.JSONDecodeError, TypeError):
                     continue
@@ -198,13 +201,15 @@ class ConsensusMechanism():
         # If this satellite has not been seen before, give it a neutral score
         # Also, if the filter has been initialised for the first time, return a
         # neutral score
-        if not matches or math.isnan(nis):
-            # Neutral value is the expected NIS for the given dof
-            # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
-            return self.nis_to_score(dof, dof)
+        for i in range(len(nis_list)):
+            dof = statistics.mean(dof_list[i])
+            if not matches or math.isnan(nis_list[i]):
+                # Neutral value is the expected NIS for the given dof
+                # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
+                return self.nis_to_score(dof, dof)
 
-        # Otherwise calculate correctness based on this measurement
-        return self.nis_to_score(nis, dof)
+            # Otherwise calculate correctness based on this measurement
+            return self.nis_to_score(nis_list[i], dof)
 
 
     def calculate_dof_score(self, dof: int) -> float:

@@ -1,525 +1,383 @@
-# pylint: disable=too-many-locals, invalid-name, too-many-statements, too-many-branches, too-many-positional-arguments, too-many-arguments
-"""
-The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
-Author: Beth Probert
-Email: beth.probert@strath.ac.uk
-
-Copyright (C) 2025 Applied Space Technology Laboratory
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-"""
-
 from dataclasses import dataclass
-from math import sqrt
-from typing import Tuple, List, Optional
+from typing import List, Tuple, Optional
 import numpy as np
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
-from filterpy.kalman import ExtendedKalmanFilter # type: ignore
-from filterpy.common import Q_discrete_white_noise, Saver # type: ignore
-import sympy as sp # type: ignore
+from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
+import statistics
+from scipy.linalg import expm
 
+# ----------------------- Constants -----------------------
+MU_EARTH = 3.986004418e14  # m^3/s^2
+Re = 6378e3
+
+# ----------------------- Result Types ---------------------
+@dataclass
+class ObservationRecord:
+    step: int
+    time: int
+    observer: int
+    target: int
+    nis: float
+    dof: int
 
 @dataclass
-class ODProcessingResult:
-    """
-    Output after processing constellation OD.
+class JointResult:
+    target_ids: List[str]                # ["sat_1", ...]
+    obs_records: List[ObservationRecord] # per-observation NIS records
+    x_hist: np.ndarray                   # (steps, 6*N)
+    truth: np.ndarray                    # (steps, 6*N)
+    z_hist: np.ndarray                   # (steps, 2*N*(N-1))
 
-    Attributes:
-    - target_ids: List of satellite IDs
-    - nis: NIS history per satellite
-    - dof: Degrees of freedom per update
-    - filters: EKF instances for each satellite
-    - truth: Ground truth state trajectories
-    - sim_meas: Simulated measurement data
-    """
-    target_ids: List[str]
-    nis: List[List[float]]
-    dof: int
-    filters: List[ExtendedKalmanFilter]
-    truth: np.ndarray
-    sim_meas: np.ndarray
+# ----------------------- Dynamics ------------------------
+def two_body_f(x6: NDArray[np.float64]) -> NDArray[np.float64]:
+    r = x6[:3]; v = x6[3:]
+    rn = np.linalg.norm(r)
+    a = -MU_EARTH * r / rn**3
+    return np.hstack([v, a])
 
-
-# ---------------- SymPy measurement model ----------------
-
-def _build_sympy_measurement():
-    """
-    Build symbolic range & range-rate measurement model and Jacobian using SymPy.
-
-    Args:
-    - None
-
-    Returns:
-    - h_fun: Callable range & range-rate function
-    - H_fun: Callable Jacobian function
-    """
-    px, py, pz, vx, vy, vz = sp.symbols('px py pz vx vy vz', real=True)
-    sx, sy, sz = sp.symbols('sx sy sz', real=True)
-    dp = sp.Matrix([px - sx, py - sy, pz - sz])
-    v = sp.Matrix([vx, vy, vz])
-    r = sp.sqrt(dp.dot(dp))
-    rdot = dp.dot(v) / r
-    h = sp.Matrix([r, rdot])
-    x = sp.Matrix([px, py, pz, vx, vy, vz])
-    H = sp.simplify(h.jacobian(x))
-    h_fun = sp.lambdify((px, py, pz, vx, vy, vz, sx, sy, sz), h, 'numpy')
-    H_fun = sp.lambdify((px, py, pz, vx, vy, vz, sx, sy, sz), H, 'numpy')
-    return h_fun, H_fun
-
-
-_H_MEAS, _H_JAC = _build_sympy_measurement()
-
-
-# ---------------- Utilities ----------------
-
-def hx(x: NDArray[np.float64], stations: NDArray[np.float64]) -> NDArray[np.float64]:
-    """
-    Compute nonlinear range & range-rate measurement for multiple stations.
-
-    Args:
-    - x: State vector [px, py, pz, vx, vy, vz]
-    - stations: (N×3) array of station position vectors
-
-    Returns:
-    - Measurement vector [r1, rdot1, r2, rdot2, ...]
-    """
-    p = x[:3]
-    v = x[3:]
-    zs = []
-    for (sx, sy, sz) in stations:
-        r, rdot = _H_MEAS(*p, *v, sx, sy, sz).reshape(-1)
-        if r < 1e-8:  # Avoid divide-by-zero
-            r = 1e-8
-            rdot = float(np.dot(p - np.array([sx, sy, sz]), v) / r)
-        zs += [float(r), float(rdot)]
-    return np.asarray(zs)
-
-
-def H_jacobian(x: NDArray[np.float64], stations: NDArray[np.float64]) -> NDArray[np.float64]:
-    """
-    Compute measurement Jacobian stacked for all stations.
-
-    Args:
-    - x: Satellite state vector
-    - stations: (N×3) station locations
-
-    Returns:
-    - Jacobian matrix (2N × 6)
-    """
-    p = x[:3]
-    v = x[3:]
-    rows = []
-    for (sx, sy, sz) in stations:
-        rows.append(np.asarray(_H_JAC(*p, *v, sx, sy, sz), dtype=float))
-    return np.vstack(rows)
-
-
-def hx_rel(x_t: NDArray[np.float64], x_o: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Relative range + range-rate: target observed by known observer."""
-    pt, vt = x_t[:3], x_t[3:]
-    po, vo = x_o[:3], x_o[3:]
-
-    rho = pt - po
-    r = np.linalg.norm(rho)
-    if r < 1e-8:
-        r = 1e-8
-
-    vrel = vt - vo
-    rdot = float(rho.dot(vrel) / r)
-
-    return np.array([r, rdot], dtype=float)
-
-
-def H_jacobian_rel_target(x_t: NDArray[np.float64], x_o: NDArray[np.float64]) -> NDArray[np.float64]:
-    """
-    Jacobian wrt target state only (observer state assumed known).
-    H is 2×6, mapping target's [px,py,pz,vx,vy,vz].
-    """
-    pt, vt = x_t[:3], x_t[3:]
-    po, vo = x_o[:3], x_o[3:]
-
-    rho = pt - po
-    r = np.linalg.norm(rho)
-    if r < 1e-8:
-        r = 1e-8
-
-    rhat = rho / r
-    vrel = vt - vo
-    I = np.eye(3)
-
-    # ∂r/∂p_t , ∂r/∂v_t
-    H1 = np.hstack([rhat, np.zeros(3)])
-
-    # ∂ṙ/∂p_t , ∂ṙ/∂v_t
-    d_rdot_d_pt = ((I - np.outer(rhat, rhat)) @ vrel) / r
-    d_rdot_d_vt = rhat
-
-    H2 = np.hstack([d_rdot_d_pt, d_rdot_d_vt])
-
-    return np.vstack([H1, H2])  # 2x6
-
-
-def constant_velocity_F(dt: float) -> NDArray[np.float64]:
-    """
-    Build state transition matrix for 3-D constant velocity model.
-
-    Args:
-    - dt: Time step (seconds)
-
-    Returns:
-    - 6×6 state transition matrix
-    """
-    F = np.eye(6)
-    F[0, 3] = dt
-    F[1, 4] = dt
-    F[2, 5] = dt
+def F_jacobian_6(x6: NDArray[np.float64]) -> NDArray[np.float64]:
+    r = x6[:3]; rn = np.linalg.norm(r); I3 = np.eye(3)
+    dadr = -MU_EARTH * (I3 / rn**3 - 3*np.outer(r, r)/rn**5)
+    F = np.zeros((6,6))
+    F[:3,3:] = I3
+    F[3:,:3] = dadr
     return F
 
+def rk4_step(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
+    k1 = two_body_f(x)
+    k2 = two_body_f(x + 0.5*dt*k1)
+    k3 = two_body_f(x + 0.5*dt*k2)
+    k4 = two_body_f(x + dt*k3)
+    return x + (dt/6.0)*(k1 + 2*k2 + 2*k3 + k4)
 
-def make_satellite_ekf(dt: float, q_var: float, R: NDArray[np.float64], m: int,
-                       x0: Optional[NDArray[np.float64]] = None,
-                       P0: Optional[NDArray[np.float64]] = None) -> ExtendedKalmanFilter:
-    """
-    Build EKF for satellite orbit estimation.
+def van_loan_discretization(F: NDArray[np.float64],
+                            L: NDArray[np.float64],
+                            Qc: NDArray[np.float64],
+                            dt: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    n = F.shape[0]
+    A = L @ Qc @ L.T
+    M = np.block([[F, A], [np.zeros((n,n)), -F.T]]) * dt
+    EM = expm(M)
+    Phi = EM[:n,:n]
+    J = EM[:n,n:]
+    Q = Phi @ J @ Phi.T
+    return Phi, 0.5*(Q + Q.T)
 
-    Args:
-    - dt: Time step
-    - q_var: Continuous-time process noise variance
-    - R: Measurement covariance matrix
-    - m: Measurement dimension
-    - x0: Optional initial state
-    - P0: Optional initial covariance
+def F_midpoint(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
+    k1 = two_body_f(x)
+    x_mid = x + 0.5 * dt * k1
+    Fm = F_jacobian_6(x_mid)
+    if not np.isfinite(Fm).all():
+        Fm = F_jacobian_6(x)
+    return Fm
 
-    Returns:
-    - Configured EKF instance
-    """
-    ekf = ExtendedKalmanFilter(dim_x=6, dim_z=m)
-    ekf.F = constant_velocity_F(dt)
-    Q1 = Q_discrete_white_noise(dim=2, dt=dt, var=q_var)
-    ekf.Q = np.kron(np.eye(3), Q1)
-    ekf.R = R
-    ekf.x = x0 if x0 is not None else np.zeros(6)
-    ekf.P = P0 if P0 is not None else np.eye(6)
-    return ekf
+# ----------------------- Truth propagation ----------------
+def propagate_truth_kepler(x0_stack: NDArray[np.float64], steps: int, dt: float) -> NDArray[np.float64]:
+    x = x0_stack.copy()
+    hist = np.zeros((steps, x0_stack.size))
+    for k in range(steps):
+        for s in range(0, x.size, 6):
+            x[s:s+6] = rk4_step(x[s:s+6], dt)
+        hist[k] = x
+    return hist
 
+# ----------------------- Measurement model ----------------
+def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[np.float64]:
+    pt, vt = target[:3], target[3:]
+    po, vo = obs[:3], obs[3:]
+    rho = pt - po
+    r = np.linalg.norm(rho); r = max(r, 1e-8)
+    vrel = vt - vo
+    rdot = float(rho.dot(vrel) / r)
+    return np.array([r, rdot])
 
-def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64], H: NDArray[np.float64],
-                  R: NDArray[np.float64]) -> NDArray[np.float64]:
-    """
-    Perform Joseph-form covariance update (numerically stable).
+def H_blocks_target_obs(target: NDArray[np.float64], obs: NDArray[np.float64]):
+    pt, vt = target[:3], target[3:]
+    po, vo = obs[:3], obs[3:]
+    rho = pt - po
+    r = np.linalg.norm(rho); r = max(r, 1e-8)
+    rhat = rho / r
+    I3 = np.eye(3)
+    vrel = vt - vo
 
-    Args:
-    - P: Prior covariance
-    - K: Kalman gain
-    - H: Measurement Jacobian
-    - R: Measurement noise covariance
+    H1_t = np.hstack([rhat, np.zeros(3)])
+    d_rdot_d_pt = ((I3 - np.outer(rhat, rhat)) @ vrel) / r
+    H2_t = np.hstack([d_rdot_d_pt, rhat])
+    Ht = np.vstack([H1_t, H2_t])
 
-    Returns:
-    - Updated covariance matrix
-    """
-    I = np.eye(P.shape[0])
-    A = I - K @ H
-    Pn = A @ P @ A.T + K @ R @ K.T
-    return 0.5 * (Pn + Pn.T)
+    H1_o = np.hstack([-rhat, np.zeros(3)])
+    d_rdot_d_po = -((I3 - np.outer(rhat, rhat)) @ vrel) / r
+    H2_o = np.hstack([d_rdot_d_po, -rhat])
+    Ho = np.vstack([H1_o, H2_o])
+    return Ht, Ho
 
+def hx_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
+    z = []
+    for i in range(N):
+        xi = x[6*i:6*i+6]
+        for j in range(N):
+            if i != j:
+                z.append(hx_block(x[6*j:6*j+6], xi))
+    return np.concatenate(z)
 
-def simulate_truth(x0: NDArray[np.float64], steps: int, dt: float, q: float) -> NDArray[np.float64]:
-    """
-    Propagate truth states using a stochastic constant-velocity model.
+def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
+    rows = []
+    for i in range(N):
+        xi = x[6*i:6*i+6]
+        for j in range(N):
+            if i == j: continue
+            xj = x[6*j:6*j+6]
+            Ht, Ho = H_blocks_target_obs(xj, xi)
+            R = np.zeros((2, 6*N))
+            R[:,6*j:6*j+6] = Ht
+            R[:,6*i:6*i+6] = Ho
+            rows.append(R)
+    return np.vstack(rows)
 
-    Args:
-    - x0: Initial state
-    - steps: Number of propagation steps
-    - dt: Time step (s)
-    - q: Continuous-time acceleration noise variance
+# ----------------------- EKF predict ----------------------
+def ekf_predict_joint(ekf, dt, N, q_acc_target, _unused):
+    x_prev = ekf.x.copy()
+    dim = 6*N
 
-    Returns:
-    - State trajectory array (steps × 6)
-    """
-    F = constant_velocity_F(dt)
-    G = np.zeros((6, 3))
-    G[0:3, :] = 0.5 * dt * dt * np.eye(3)
-    G[3:6, :] = dt * np.eye(3)
-    x = x0.copy()
-    traj = []
-    for _ in range(steps):
-        a = np.random.normal(0.0, np.sqrt(q), 3)
-        x = F @ x + G @ a
-        traj.append(x.copy())
-    return np.asarray(traj)
+    # propagate state
+    x = x_prev.copy()
+    for i in range(N):
+        x[6*i:6*i+6] = rk4_step(x[6*i:6*i+6], dt)
+    ekf.x = x
 
+    # propagate covariance (block-diag)
+    Phi = np.eye(dim)
+    Qd = np.zeros((dim,dim))
+    L = np.zeros((6,3)); L[3:,:] = np.eye(3)
 
-def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
-    """
-    Compute central chi-square bounds for NIS consistency.
+    for i in range(N):
+        Fi = F_midpoint(x_prev[6*i:6*i+6], dt)
+        Qci = np.eye(3)*q_acc_target
+        Phii, Qdi = van_loan_discretization(Fi, L, Qci, dt)
+        Phi[6*i:6*i+6,6*i:6*i+6] = Phii
+        Qd [6*i:6*i+6,6*i:6*i+6] = Qdi
 
-    Args:
-    - dof: Degrees of freedom
-    - alpha: Confidence level
+    ekf.P = Phi @ ekf.P @ Phi.T + Qd
+    ekf.P = 0.5*(ekf.P + ekf.P.T)
 
-    Returns:
-    - (lower bound, upper bound)
-    """
-    try:
-        lo = chi2.ppf((1 - alpha) / 2.0, dof)
-        hi = chi2.ppf(1 - (1 - alpha) / 2.0, dof)
-        return float(lo), float(hi)
-    except Exception:
-        z = 1.959963984540054
-        k = float(dof)
-        c = 2.0 / (9.0 * k)
-        lo = k * (1 - z * sqrt(c))**3
-        hi = k * (1 + z * sqrt(c))**3
-        return lo, hi
+# ----------------------- Truth + measurement sim ----------
+def simulate_truth_and_meas(N, steps, dt, sig_r, sig_rdot):
+    base = np.array([Re+500e3, 0,0, 0,7600,0])
+    x0 = []
+    for i in range(N):
+        off = np.array([(i-(N-1)/2)*15e3, 0,0, 0,(i-(N-1)/2)*3,0])
+        x0.append(base+off)
+    x0_stack = np.concatenate(x0)
 
+    truth = propagate_truth_kepler(x0_stack, steps, dt)
 
-def estimate_measurement_noise(residuals: np.ndarray) -> np.ndarray:
-    """
-    Estimate measurement covariance from residuals.
+    M = N*(N-1)
+    z_hist = np.zeros((steps, 2*M))
+    for k in range(steps):
+        xk = truth[k]
+        z = []
+        for i in range(N):
+            xi = xk[6*i:6*i+6]
+            for j in range(N):
+                if i != j:
+                    z.append(hx_block(xk[6*j:6*j+6], xi))
+        z_true = np.concatenate(z)
+        noise = np.zeros(2*M)
+        noise[0::2] = np.random.normal(0,sig_r, M)
+        noise[1::2] = np.random.normal(0,sig_rdot, M)
+        z_hist[k] = z_true + noise
+    return truth, z_hist
 
-    Args:
-    - residuals: Innovation matrix (time x dims)
+# ----------------------- EKF ------------------------------
+def run_joint_ekf(
+    N=3, steps=1500, dt=1.0,
+    sig_r=10.0, sig_rdot=0.02,
+    q_acc_target=1e-6, q_acc_obs=1e-6,
+    seed=123,
+) -> JointResult:
 
-    Returns:
-    - Sample covariance matrix
-    """
-    return np.cov(residuals.T)
+    if seed is not None: np.random.seed(seed)
+    truth, z_hist = simulate_truth_and_meas(N, steps, dt, sig_r, sig_rdot)
 
+    dim_x = 6*N
+    M = N*(N-1)
+    dim_z = 2*M
 
-def adaptive_R_update(R: NDArray[np.float64], residuals: NDArray[np.float64],
-                      beta: float = 0.1) -> NDArray[np.float64]:
-    """
-    Adaptively update measurement covariance using exponential forgetting.
+    R = np.diag([sig_r**2, sig_rdot**2]*M)
+    ekf = ExtendedKalmanFilter(dim_x=dim_x, dim_z=dim_z)
 
-    Args:
-    - R: Current R matrix
-    - residuals: Recent innovations
-    - beta: Forgetting factor (0-1)
+    x0_est = truth[0].copy()
+    for i in range(N):
+        x0_est[6*i:6*i+6] += np.array([2e3,0,0,0,-10,0])
 
-    Returns:
-    - Updated R
-    """
-    R_hat = estimate_measurement_noise(residuals)
-    Rn = (1 - beta) * R + beta * R_hat
-    return 0.5 * (Rn + Rn.T)
+    P0 = np.zeros((dim_x,dim_x))
+    for i in range(N):
+        P0[6*i:6*i+6,6*i:6*i+6] = np.diag([1e8]*3+[1e4]*3)
 
+    ekf.x, ekf.P, ekf.R = x0_est, P0, R
 
-def simulate_constellation_and_estimate(
-    n_sats: int = 4,
-    steps: int = 200,
-    dt: float = 1.0,
-    q_process_truth: float = 1e-5,
-    q_process_filter: float = 1e-4,
-    sig_r: float = 30.0,
-    sig_rdot: float = 0.1,
-    seed: Optional[int] = 123,
-    use_saver: bool = False,
-    adaptive_R_every: Optional[int] = 25,
-    R_forgetting_beta: float = 0.1,
-    cond_warn_threshold: float = 1e12,
-) -> ODProcessingResult:
-    """
-    Simulate satellite constellation, generate measurements, and run EKFs.
-
-    Args:
-    - n_sats: Number of satellites
-    - steps: Simulation length
-    - dt: Time step
-    - q_process_truth: True process noise
-    - q_process_filter: Filter-assumed process noise
-    - sig_r: Range noise stdev
-    - sig_rdot: Range-rate noise stdev
-    - seed: PRNG seed
-    - use_saver: Save EKF history
-    - adaptive_R_every: Adapt measurement noise every N steps
-    - R_forgetting_beta: Learning rate for adaptive R
-    - cond_warn_threshold: Condition number warning limit
-
-    Returns:
-    - ODProcessingResult struct
-    """
-
-    if seed is not None:
-        np.random.seed(seed)
-
-    observer_x0 = np.array([
-                6878e3,   # x position (m)
-                100e3,    # y position offset from targets (m)
-                0.0,      # z
-                0.0,      # vx
-                7600.0,   # vy (m/s circular LEO)
-                0.0       # vz
-            ], dtype=float)
-
-    observer_truth = simulate_truth(
-        observer_x0,
-        steps,
-        dt,
-        q_process_truth
-    )
-
-    # Each measurement has 2 DOF (range and range)
-    m = 2
-    R = np.diag([sig_r**2, sig_rdot**2])
-
-    base_x0 = np.array([6878e3, 0.0, 0.0, 0.0, 7600.0, 0.0], dtype=float)
-    offsets_pos = np.linspace(-50e3, 50e3, n_sats)
-    offsets_vel = np.linspace(-50.0, 50.0, n_sats)
-
-    truth = np.zeros((n_sats, steps, 6))
-    for j in range(n_sats):
-        x0_j = base_x0.copy()
-        x0_j[0] += offsets_pos[j]
-        x0_j[4] += offsets_vel[j]
-        truth[j] = simulate_truth(x0_j, steps, dt, q_process_truth)
-
-    # assume observer_truth is available (size: steps × 6)
-    meas = np.zeros((n_sats, steps, m))
-    for i in range(n_sats):
-        for k in range(steps):
-            z_true = hx_rel(truth[i, k], observer_truth[k])
-            noise = np.array([
-                np.random.normal(0.0, sig_r),
-                np.random.normal(0.0, sig_rdot)
-            ])
-            meas[i, k] = z_true + noise
-
-    filters: List[ExtendedKalmanFilter] = []
-    savers: List[Optional[Saver]] = []
-    for l in range(n_sats):
-        x_init = truth[l, 0] + np.array([2e3, 0.0, 0.0, 0.0, -20.0, 0.0], dtype=float)
-        P_init = np.diag([1e6, 1e6, 1e6, 1e2, 1e2, 1e2])
-        ekf = make_satellite_ekf(dt, q_process_filter, R.copy(), m, x_init, P_init)
-        filters.append(ekf)
-        savers.append(Saver(ekf) if use_saver else None)
-
-    nis_per_sat: List[List[float]] = [[] for _ in range(n_sats)]
-    residual_logs: List[List[NDArray[np.float64]]] = [[] for _ in range(n_sats)]
+    x_hist = np.zeros((steps,dim_x))
+    obs_records: List[ObservationRecord] = []
 
     for k in range(steps):
-        for g, ekf in enumerate(filters):
-            ekf.predict()
-            try:
-                np.linalg.cholesky(ekf.P)
-            except np.linalg.LinAlgError:
-                ekf.P += 1e-8 * np.eye(6)
+        ekf_predict_joint(ekf, dt, N, q_acc_target, q_acc_obs)
 
-            H = H_jacobian_rel_target(ekf.x, observer_truth[k])
-            z = meas[g, k]
-            z_pred = hx_rel(ekf.x, observer_truth[k])
-            y = z - z_pred
-            S = H @ ekf.P @ H.T + ekf.R
-            try:
-                S_inv = np.linalg.inv(S)
-            except np.linalg.LinAlgError:
-                S_inv = np.linalg.pinv(S)
+        H = H_joint(ekf.x, N)
+        z_pred = hx_joint(ekf.x, N)
+        y = z_hist[k] - z_pred
 
-            K = ekf.P @ H.T @ S_inv
-            ekf.x = ekf.x + K @ y
-            ekf.P = joseph_update(ekf.P, K, H, ekf.R)
+        S = H @ ekf.P @ H.T + ekf.R
+        S_inv = np.linalg.pinv(S)
+        K = ekf.P @ H.T @ S_inv
 
-            nis = float(y.T @ S_inv @ y)
-            nis_per_sat[g].append(nis)
-            residual_logs[g].append(y)
+        ekf.x = ekf.x + K @ y
+        I = np.eye(dim_x)
+        ekf.P = (I-K@H)@ekf.P@(I-K@H).T + K@ekf.R@K.T
+        ekf.P = 0.5*(ekf.P + ekf.P.T)
 
-            if adaptive_R_every and (k + 1) % adaptive_R_every == 0 \
-                and len(residual_logs[g]) >= 10:
-                ekf.R = adaptive_R_update(ekf.R, np.asarray(residual_logs[g]),
-                                          beta=R_forgetting_beta)
-                residual_logs[g].clear()
+        # log NIS for each ordered observation
+        idx = 0
+        for i in range(N): # observer
+            for j in range(N): # target
+                if i == j: continue
 
-            if np.linalg.cond(ekf.P) > cond_warn_threshold:
-                print(f"Sat {g}: ill-conditioned P at step {k} (cond={np.linalg.cond(ekf.P):.2e})")
-            if np.linalg.cond(S) > cond_warn_threshold:
-                print(f"Sat {g}: ill-conditioned S at step {k} (cond={np.linalg.cond(S):.2e})")
+                rows = slice(idx, idx+2)
+                yij = y[rows]
 
-            if use_saver and savers[g] is not None:
-                savers[g].save(ekf) # type: ignore [union-attr]
+                H_ij = np.zeros((2, dim_x))
+                Ht, Ho = H_blocks_target_obs(ekf.x[6*j:6*j+6], ekf.x[6*i:6*i+6])
+                H_ij[:,6*j:6*j+6] = Ht
+                H_ij[:,6*i:6*i+6] = Ho
 
-    if use_saver:
-        for s in savers:
-            if s is not None:
-                s.to_array()
-    ids_list = [f"sat_{i+1}" for i in range(len(nis_per_sat))]
+                S_ij = H_ij @ ekf.P @ H_ij.T + np.diag([sig_r**2, sig_rdot**2])
+                S_ij_inv = np.linalg.pinv(S_ij)
+                nis = float(yij.T @ S_ij_inv @ yij)
 
-    # --- Plot per-satellite NIS with χ² band ---
-    lo, hi = chi2_bounds(m, 0.95)
-    plt.figure(figsize=(12, 5))
-    for sat, nis in enumerate(nis_per_sat): #type: ignore [assignment]
-        plt.plot(nis, label=f"Sat {sat}")
-    plt.axhline(lo, linestyle=':', label=f"χ² 95% lo={lo:.2f}")
-    plt.axhline(hi, linestyle=':', label=f"χ² 95% hi={hi:.2f}")
-    plt.axhline(m, color='r', linestyle='--', label=f"DoF = {m}")
+                obs_records.append(
+                    ObservationRecord(
+                        step=k, observer=i, target=j, nis=nis, dof=yij.shape[0], time = k*dt
+                    )
+                )
+                idx += 2
+
+        x_hist[k] = ekf.x
+
+    print(obs_records)
+    return JointResult(
+        target_ids=[f"sat_{i+1}" for i in range(N)],
+        obs_records=obs_records,
+        x_hist=x_hist,
+        truth=truth,
+        z_hist=z_hist,
+    )
+
+# ----------------------- Plot Helpers --------------------
+def extract_mean_nis_per_sat(result: JointResult) -> list[list[float]]:
+    """
+    Converts obs_records (each obs event) into:
+    mean_nis[sat][step]
+    """
+    N = len(result.target_ids)
+    steps = result.x_hist.shape[0]
+
+    # Initialize storage
+    nis_matrix = [[[] for _ in range(steps)] for _ in range(N)]
+
+    # Fill list for each observer,step
+    for rec in result.obs_records:
+        nis_matrix[rec.observer][rec.step].append(rec.nis)
+
+    # Convert lists of values → mean per step
+    nis_mean = []
+    for i in range(N):
+        sat_means = []
+        for t in range(steps):
+            vals = nis_matrix[i][t]
+            if vals:
+                sat_means.append(float(np.mean(vals)))
+            else:
+                sat_means.append(np.nan)  # should not happen
+        nis_mean.append(sat_means)
+
+    return nis_mean
+
+def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
+    lo = chi2.ppf((1 - alpha) / 2.0, dof)
+    hi = chi2.ppf(1 - (1 - alpha) / 2.0, dof)
+    return float(lo), float(hi)
+
+def plot_nis(result: JointResult):
+    nis_per_sat = extract_mean_nis_per_sat(result)
+    N = len(result.target_ids)
+    dof = 2
+    lo, hi = chi2_bounds(dof, 0.95)
+
+    plt.figure(figsize=(11, 4))
+    for i in range(N):
+        plt.plot(nis_per_sat[i], label=f"Sat {i}")
+
+    plt.axhline(lo, ls=':', label=f"χ² 95% lo={lo:.2f}")
+    plt.axhline(hi, ls=':', label=f"χ² 95% hi={hi:.2f}")
+    plt.axhline(dof, color='r', ls='--', label=f"DoF = {dof}")
+
     plt.xlabel("Step")
-    plt.ylabel("NIS")
-    plt.title("Constellation NIS Over Time")
+    plt.ylabel("Mean NIS per sat (over N-1 links)")
+    plt.title("Per-Satellite Mean NIS (All-to-All Measurements)")
     plt.legend(ncol=3)
     plt.tight_layout()
     plt.show()
 
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused (required for 3D plotting)
+def plot_nis_consistency(result: JointResult, dof: int = 2, window: int = 50):
+    nis_per_sat = extract_mean_nis_per_sat(result)
+    N = len(result.target_ids)
 
-    fig = plt.figure(figsize=(7,6))
-    ax = fig.add_subplot(111, projection='3d')
+    lower = chi2.ppf(0.025, dof)
+    upper = chi2.ppf(0.975, dof)
 
-    # Target satellite trajectory
-    ax.plot(truth[0,:,0], truth[0,:,1], truth[0,:,2], label="Target Sat")
+    steps = len(nis_per_sat[0])
+    t = np.arange(steps)
 
-    # Observer satellite trajectory
-    ax.plot(observer_truth[:,0], observer_truth[:,1], observer_truth[:,2], label="Observer Sat")
+    plt.figure(figsize=(13,4))
+    for i in range(N):
+        x = np.array(nis_per_sat[i])
+        roll = np.convolve(x, np.ones(window)/window, mode='same')
+        plt.plot(t, x, alpha=0.35, label=f"Sat {i}")
+        plt.plot(t, roll, linewidth=2)
 
-    # Axis labels
-    ax.set_xlabel("x [m]")
-    ax.set_ylabel("y [m]")
-    ax.set_zlabel("z [m]")
+        frac = np.mean((x < lower) | (x > upper))
+        status = "⚠️" if frac > 0.10 else "✅"
+        print(f"{status} Sat {i}: {frac*100:.1f}% outside limits, mean={np.nanmean(x):.2f}")
 
-    ax.set_title("3D Satellite Orbits")
-    ax.legend()
-    ax.grid(True)
+    plt.axhline(lower, ls='--', color='gray')
+    plt.axhline(upper, ls='--', color='gray')
+    plt.axhline(dof, ls='-', color='red', label="DoF")
 
-    # Equal aspect ratio for 3D
-    max_range = np.array([
-        truth[0,:,0].max() - truth[0,:,0].min(),
-        truth[0,:,1].max() - truth[0,:,1].min(),
-        truth[0,:,2].max() - truth[0,:,2].min()
-    ]).max() / 2.0
-
-    mid_x = (truth[0,:,0].max() + truth[0,:,0].min()) * 0.5
-    mid_y = (truth[0,:,1].max() + truth[0,:,1].min()) * 0.5
-    mid_z = (truth[0,:,2].max() + truth[0,:,2].min()) * 0.5
-
-    ax.set_xlim(mid_x - max_range, mid_x + max_range)
-    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_zlim(mid_z - max_range, mid_z + max_range)
-
-    plt.show()
+    plt.title(f"NIS Consistency Check (window={window}, DoF={dof})")
+    plt.xlabel("Step"); plt.ylabel("Mean NIS per sat")
+    plt.legend(ncol=3); plt.grid(); plt.tight_layout(); plt.show()
 
 
-
-    return ODProcessingResult(target_ids=ids_list,nis=nis_per_sat, dof=m,
-                              filters=filters, truth=truth, sim_meas=meas)
-
-# -------- Demo --------
-
+# ----------------------- Demo -----------------------------
 if __name__ == "__main__":
-    # Constellation
-    result: ODProcessingResult = simulate_constellation_and_estimate(n_sats=4, use_saver=False)
-    print(f"Constellation: DoF per update = {result.dof}")
-    print(result.target_ids)
-    for i, series in enumerate(result.nis):
-        print(f"  Sat {i}: last-step NIS = {series[-1]:.3f}")
+    result = run_joint_ekf(
+        N=10,
+        steps=3000,
+        dt=60.0,
+        sig_r=25.0,
+        sig_rdot=0.2,
+        q_acc_target=1e-5,
+        q_acc_obs=1e-5,   # kept for signature compatibility
+        seed=42,
+    )
+
+    print("Satellites:", result.target_ids)
+
+    nis_matrix = extract_mean_nis_per_sat(result)
+    for i, series in enumerate(nis_matrix):
+        print(f"  Sat {i}: last-step mean NIS = {series[-1]:.3f}")
+
+    plot_nis(result)
+    plot_nis_consistency(result, window=80)
+
