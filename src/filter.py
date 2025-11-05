@@ -10,6 +10,8 @@ from scipy.linalg import expm
 # ----------------------- Constants -----------------------
 MU_EARTH = 3.986004418e14  # m^3/s^2
 Re = 6378e3
+STATE_DIM = 6 # State vector dimension (position and velocity)
+POS_VEL_DIM = 3 # Position or velocity dimension
 
 # ----------------------- Result Types ---------------------
 @dataclass
@@ -40,7 +42,7 @@ def two_body_f(x6: NDArray[np.float64]) -> NDArray[np.float64]:
     Returns:
     - The 6-element state derivative vector [vx, vy, vz, ax, ay, az].
     """
-    r = x6[:3]; v = x6[3:]
+    r = x6[:POS_VEL_DIM]; v = x6[POS_VEL_DIM:]
     rn = np.linalg.norm(r)
     a = -MU_EARTH * r / rn**3
     return np.hstack([v, a])
@@ -55,11 +57,11 @@ def F_jacobian_6(x6: NDArray[np.float64]) -> NDArray[np.float64]:
     Returns:
     - The 6x6 Jacobian matrix F.
     """
-    r = x6[:3]; rn = np.linalg.norm(r); I3 = np.eye(3)
+    r = x6[:POS_VEL_DIM]; rn = np.linalg.norm(r); I3 = np.eye(POS_VEL_DIM)
     dadr = -MU_EARTH * (I3 / rn**3 - 3*np.outer(r, r)/rn**5)
-    F = np.zeros((6,6))
-    F[:3,3:] = I3
-    F[3:,:3] = dadr
+    F = np.zeros((STATE_DIM,STATE_DIM))
+    F[:POS_VEL_DIM,POS_VEL_DIM:] = I3
+    F[POS_VEL_DIM:,:POS_VEL_DIM] = dadr
     return F
 
 def rk4_step(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
@@ -141,8 +143,8 @@ def propagate_truth_kepler(x0_stack: NDArray[np.float64], steps: int, dt: float)
     x = x0_stack.copy()
     hist = np.zeros((steps, x0_stack.size))
     for k in range(steps):
-        for s in range(0, x.size, 6):
-            x[s:s+6] = rk4_step(x[s:s+6], dt)
+        for s in range(0, x.size, STATE_DIM):
+            x[s:s+STATE_DIM] = rk4_step(x[s:s+STATE_DIM], dt)
         hist[k] = x
     return hist
 
@@ -158,8 +160,8 @@ def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[n
     Returns:
     - A 2-element array [range, range_rate].
     """
-    pt, vt = target[:3], target[3:]
-    po, vo = obs[:3], obs[3:]
+    pt, vt = target[:POS_VEL_DIM], target[POS_VEL_DIM:]
+    po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
     rho = pt - po
     r = np.linalg.norm(rho); r = max(r, 1e-8)
     vrel = vt - vo
@@ -179,20 +181,20 @@ def H_blocks_target_obs(target: NDArray[np.float64], obs: NDArray[np.float64]) -
         - Ht: 2x6 Jacobian matrix with respect to the target state.
         - Ho: 2x6 Jacobian matrix with respect to the observer state.
     """
-    pt, vt = target[:3], target[3:]
-    po, vo = obs[:3], obs[3:]
+    pt, vt = target[:POS_VEL_DIM], target[POS_VEL_DIM:]
+    po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
     rho = pt - po
     r = np.linalg.norm(rho); r = max(r, 1e-8)
     rhat = rho / r
-    I3 = np.eye(3)
+    I3 = np.eye(POS_VEL_DIM)
     vrel = vt - vo
 
-    H1_t = np.hstack([rhat, np.zeros(3)])
+    H1_t = np.hstack([rhat, np.zeros(POS_VEL_DIM)])
     d_rdot_d_pt = ((I3 - np.outer(rhat, rhat)) @ vrel) / r
     H2_t = np.hstack([d_rdot_d_pt, rhat])
     Ht = np.vstack([H1_t, H2_t])
 
-    H1_o = np.hstack([-rhat, np.zeros(3)])
+    H1_o = np.hstack([-rhat, np.zeros(POS_VEL_DIM)])
     d_rdot_d_po = -((I3 - np.outer(rhat, rhat)) @ vrel) / r
     H2_o = np.hstack([d_rdot_d_po, -rhat])
     Ho = np.vstack([H1_o, H2_o])
@@ -211,10 +213,10 @@ def hx_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     """
     z = []
     for i in range(N):
-        xi = x[6*i:6*i+6]
+        xi = x[STATE_DIM*i:STATE_DIM*i+STATE_DIM]
         for j in range(N):
             if i != j:
-                z.append(hx_block(x[6*j:6*j+6], xi))
+                z.append(hx_block(x[STATE_DIM*j:STATE_DIM*j+STATE_DIM], xi))
     return np.concatenate(z)
 
 def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
@@ -230,14 +232,14 @@ def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     """
     rows = []
     for i in range(N):
-        xi = x[6*i:6*i+6]
+        xi = x[STATE_DIM*i:STATE_DIM*i+STATE_DIM]
         for j in range(N):
             if i == j: continue
-            xj = x[6*j:6*j+6]
+            xj = x[STATE_DIM*j:STATE_DIM*j+STATE_DIM]
             Ht, Ho = H_blocks_target_obs(xj, xi)
-            R = np.zeros((2, 6*N))
-            R[:,6*j:6*j+6] = Ht
-            R[:,6*i:6*i+6] = Ho
+            R = np.zeros((2, STATE_DIM*N))
+            R[:,STATE_DIM*j:STATE_DIM*j+STATE_DIM] = Ht
+            R[:,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = Ho
             rows.append(R)
     return np.vstack(rows)
 
@@ -255,25 +257,25 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int, q_acc_target
     - _unused: An unused parameter, kept for signature compatibility.
     """
     x_prev = ekf.x.copy()
-    dim = 6*N
+    dim = STATE_DIM*N
 
     # propagate state
     x = x_prev.copy()
     for i in range(N):
-        x[6*i:6*i+6] = rk4_step(x[6*i:6*i+6], dt)
+        x[STATE_DIM*i:STATE_DIM*i+STATE_DIM] = rk4_step(x[STATE_DIM*i:STATE_DIM*i+STATE_DIM], dt)
     ekf.x = x
 
     # propagate covariance (block-diag)
     Phi = np.eye(dim)
     Qd = np.zeros((dim,dim))
-    L = np.zeros((6,3)); L[3:,:] = np.eye(3)
+    L = np.zeros((STATE_DIM,POS_VEL_DIM)); L[POS_VEL_DIM:,:] = np.eye(POS_VEL_DIM)
 
     for i in range(N):
-        Fi = F_midpoint(x_prev[6*i:6*i+6], dt)
-        Qci = np.eye(3)*q_acc_target
+        Fi = F_midpoint(x_prev[STATE_DIM*i:STATE_DIM*i+STATE_DIM], dt)
+        Qci = np.eye(POS_VEL_DIM)*q_acc_target
         Phii, Qdi = van_loan_discretization(Fi, L, Qci, dt)
-        Phi[6*i:6*i+6,6*i:6*i+6] = Phii
-        Qd [6*i:6*i+6,6*i:6*i+6] = Qdi
+        Phi[STATE_DIM*i:STATE_DIM*i+STATE_DIM,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = Phii
+        Qd [STATE_DIM*i:STATE_DIM*i+STATE_DIM,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = Qdi
 
     ekf.P = Phi @ ekf.P @ Phi.T + Qd
     ekf.P = 0.5*(ekf.P + ekf.P.T)
@@ -340,11 +342,125 @@ def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64], H: NDArray[np.
     Pn = A @ P @ A.T + K @ R @ K.T
     return 0.5 * (Pn + Pn.T)
 
+def _initialize_state_and_cov(N: int, truth: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Initializes the estimated state vector and its covariance matrix.
+
+    Args:
+    - N: The number of satellites.
+    - truth: The true state history, used to derive an initial estimate.
+
+    Returns:
+    - A tuple containing:
+        - x0_est: The initial estimated state vector.
+        - P0: The initial covariance matrix.
+    """
+    dim_x = STATE_DIM * N
+    x0_est = truth[0].copy()
+    for i in range(N):
+        x0_est[STATE_DIM*i:STATE_DIM*i+STATE_DIM] += np.array([2e3,0,0,0,-10,0])
+
+    P0 = np.zeros((dim_x,dim_x))
+    for i in range(N):
+        P0[STATE_DIM*i:STATE_DIM*i+STATE_DIM,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = np.diag([1e8]*POS_VEL_DIM+[1e4]*POS_VEL_DIM)
+    return x0_est, P0
+
+def _ekf_update(ekf: ExtendedKalmanFilter, z_k: np.ndarray, N: int) -> np.ndarray:
+    """
+    Performs the update step of the Extended Kalman Filter.
+
+    Args:
+    - ekf: The EKF object.
+    - z_k: The current measurement vector.
+    - N: The number of satellites.
+
+    Returns:
+    - The innovation vector (measurement residual).
+    """
+    H = H_joint(ekf.x, N)
+    z_pred = hx_joint(ekf.x, N)
+    y = z_k - z_pred
+
+    S = H @ ekf.P @ H.T + ekf.R
+    S_inv = np.linalg.pinv(S)
+    K = ekf.P @ H.T @ S_inv
+
+    ekf.x = ekf.x + K @ y
+    ekf.P = joseph_update(ekf.P, K, H, ekf.R)
+    return y
+
+def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int, dt: float, sig_r: float, sig_rdot: float) -> List[ObservationRecord]:
+    """
+    Calculates and logs the Normalized Innovation Squared (NIS) for each observation.
+
+    Args:
+    - y: The innovation vector (measurement residual).
+    - ekf: The EKF object.
+    - N: The number of satellites.
+    - k: The current simulation step.
+    - dt: The time step size.
+    - sig_r: Standard deviation of range measurement noise.
+    - sig_rdot: Standard deviation of range-rate measurement noise.
+
+    Returns:
+    - A list of ObservationRecord objects for the current step.
+    """
+    obs_records = []
+    dim_x = ekf.x.shape[0]
+    idx = 0
+    for i in range(N): # observer
+        for j in range(N): # target
+            if i == j: continue
+
+            rows = slice(idx, idx+2)
+            yij = y[rows]
+
+            H_ij = np.zeros((2, dim_x))
+            Ht, Ho = H_blocks_target_obs(ekf.x[STATE_DIM*j:STATE_DIM*j+STATE_DIM], ekf.x[STATE_DIM*i:STATE_DIM*i+STATE_DIM])
+            H_ij[:,STATE_DIM*j:STATE_DIM*j+STATE_DIM] = Ht
+            H_ij[:,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = Ho
+
+            S_ij = H_ij @ ekf.P @ H_ij.T + np.diag([sig_r**2, sig_rdot**2])
+            S_ij_inv = np.linalg.pinv(S_ij)
+            nis = float(yij.T @ S_ij_inv @ yij)
+
+            obs_records.append(
+                ObservationRecord(
+                    step=k, observer=i, target=j, nis=nis, dof=yij.shape[0], time = k*dt
+                )
+            )
+            idx += 2
+    return obs_records
+
+@dataclass
+class FilterConfig:
+    """
+    Configuration parameters for the Extended Kalman Filter simulation.
+
+    Attributes:
+    - N: Number of satellites in the constellation.
+    - steps: Number of simulation steps.
+    - dt: Time step size in seconds.
+    - sig_r: Standard deviation of range measurement noise in meters.
+    - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
+    - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
+    - q_acc_obs: Continuous-time process noise acceleration magnitude for observer satellites (kept for compatibility).
+    - seed: Random seed for reproducibility.
+    """
+    N: int = 10
+    steps: int = 3000
+    dt: float = 60.0
+    sig_r: float = 10.0
+    sig_rdot: float = 0.02
+    q_acc_target: float = 1e-6
+    q_acc_obs: float = 1e-6
+    seed: int | None = 42
+
+
 def run_joint_ekf(
-    N: int = 10, steps: int = 3000, dt: float = 60.0,
-    sig_r: float = 10.0, sig_rdot: float = 0.02,
-    q_acc_target: float = 1e-6, q_acc_obs: float = 1e-6,
-    seed: int | None = 42,
+    config: FilterConfig,
+    truth: np.ndarray,
+    z_hist: np.ndarray,
 ) -> JointResult:
     """
     Runs a joint Extended Kalman Filter simulation for a constellation of satellites.
@@ -362,73 +478,30 @@ def run_joint_ekf(
     Returns:
     - An object containing the simulation results, including truth, estimated states, and observation records.
     """
-    if seed is not None: np.random.seed(seed)
-    truth, z_hist = simulate_truth_and_meas(N, steps, dt, sig_r, sig_rdot)
+    if config.seed is not None: np.random.seed(config.seed)
 
-    dim_x = 6*N
-    M = N*(N-1)
+    dim_x = STATE_DIM*config.N
+    M = config.N*(config.N-1)
     dim_z = 2*M
 
-    R = np.diag([sig_r**2, sig_rdot**2]*M)
+    R = np.diag([config.sig_r**2, config.sig_rdot**2]*M)
     ekf = ExtendedKalmanFilter(dim_x=dim_x, dim_z=dim_z)
 
-    x0_est = truth[0].copy()
-    for i in range(N):
-        x0_est[6*i:6*i+6] += np.array([2e3,0,0,0,-10,0])
-
-    P0 = np.zeros((dim_x,dim_x))
-    for i in range(N):
-        P0[6*i:6*i+6,6*i:6*i+6] = np.diag([1e8]*3+[1e4]*3)
-
+    x0_est, P0 = _initialize_state_and_cov(config.N, truth)
     ekf.x, ekf.P, ekf.R = x0_est, P0, R
 
-    x_hist = np.zeros((steps,dim_x))
+    x_hist = np.zeros((config.steps,dim_x))
     obs_records: List[ObservationRecord] = []
 
-    for k in range(steps):
-        ekf_predict_joint(ekf, dt, N, q_acc_target, q_acc_obs)
-
-        H = H_joint(ekf.x, N)
-        z_pred = hx_joint(ekf.x, N)
-        y = z_hist[k] - z_pred
-
-        S = H @ ekf.P @ H.T + ekf.R
-        S_inv = np.linalg.pinv(S)
-        K = ekf.P @ H.T @ S_inv
-
-        ekf.x = ekf.x + K @ y
-        ekf.P = joseph_update(ekf.P, K, H, ekf.R)
-
-        # log NIS for each ordered observation
-        idx = 0
-        for i in range(N): # observer
-            for j in range(N): # target
-                if i == j: continue
-
-                rows = slice(idx, idx+2)
-                yij = y[rows]
-
-                H_ij = np.zeros((2, dim_x))
-                Ht, Ho = H_blocks_target_obs(ekf.x[6*j:6*j+6], ekf.x[6*i:6*i+6])
-                H_ij[:,6*j:6*j+6] = Ht
-                H_ij[:,6*i:6*i+6] = Ho
-
-                S_ij = H_ij @ ekf.P @ H_ij.T + np.diag([sig_r**2, sig_rdot**2])
-                S_ij_inv = np.linalg.pinv(S_ij)
-                nis = float(yij.T @ S_ij_inv @ yij)
-
-                obs_records.append(
-                    ObservationRecord(
-                        step=k, observer=i, target=j, nis=nis, dof=yij.shape[0], time = k*dt
-                    )
-                )
-                idx += 2
-
+    for k in range(config.steps):
+        ekf_predict_joint(ekf, config.dt, config.N, config.q_acc_target, config.q_acc_obs)
+        y = _ekf_update(ekf, z_hist[k], config.N)
+        obs_records.extend(_log_nis(y, ekf, config.N, k, config.dt, config.sig_r, config.sig_rdot))
         x_hist[k] = ekf.x
 
     print(obs_records)
     return JointResult(
-        target_ids=[f"sat_{i+1}" for i in range(N)],
+        target_ids=[f"sat_{i+1}" for i in range(config.N)],
         obs_records=obs_records,
         x_hist=x_hist,
         truth=truth,
@@ -549,38 +622,11 @@ def plot_nis_consistency(result: JointResult, dof: int = 2, window: int = 50) ->
     plt.title(f"NIS Consistency Check (window={window}, DoF={dof})")
     plt.xlabel("Step"); plt.ylabel("Mean NIS per sat")
     plt.legend(ncol=3); plt.grid(); plt.tight_layout(); plt.show()
-    nis_per_sat = extract_mean_nis_per_sat(result)
-    N = len(result.target_ids)
-
-    lower = chi2.ppf(0.025, dof)
-    upper = chi2.ppf(0.975, dof)
-
-    steps = len(nis_per_sat[0])
-    t = np.arange(steps)
-
-    plt.figure(figsize=(13,4))
-    for i in range(N):
-        x = np.array(nis_per_sat[i])
-        roll = np.convolve(x, np.ones(window)/window, mode='same')
-        plt.plot(t, x, alpha=0.35, label=f"Sat {i}")
-        plt.plot(t, roll, linewidth=2)
-
-        frac = np.mean((x < lower) | (x > upper))
-        status = "⚠️" if frac > 0.10 else "✅"
-        print(f"{status} Sat {i}: {frac*100:.1f}% outside limits, mean={np.nanmean(x):.2f}")
-
-    plt.axhline(lower, ls='--', color='gray')
-    plt.axhline(upper, ls='--', color='gray')
-    plt.axhline(dof, ls='-', color='red', label="DoF")
-
-    plt.title(f"NIS Consistency Check (window={window}, DoF={dof})")
-    plt.xlabel("Step"); plt.ylabel("Mean NIS per sat")
-    plt.legend(ncol=3); plt.grid(); plt.tight_layout(); plt.show()
 
 
 # ----------------------- Demo -----------------------------
 if __name__ == "__main__":
-    result = run_joint_ekf(
+    config = FilterConfig(
         N=10,
         steps=3000,
         dt=60.0,
@@ -590,6 +636,8 @@ if __name__ == "__main__":
         q_acc_obs=1e-5,   # kept for signature compatibility
         seed=42,
     )
+    truth, z_hist = simulate_truth_and_meas(config.N, config.steps, config.dt, config.sig_r, config.sig_rdot)
+    result = run_joint_ekf(config, truth, z_hist)
 
     print("Satellites:", result.target_ids)
 
