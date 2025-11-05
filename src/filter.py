@@ -1,11 +1,35 @@
+
+# pylint: disable= invalid-name, too-many-locals, too-many-arguments, too-many-positional-arguments, too-many-instance-attributes
+"""
+The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
+Author: Beth Probert
+Email: beth.probert@strath.ac.uk
+
+Copyright (C) 2025 Applied Space Technology Laboratory
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+"""
+
 from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
-from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
 from scipy.linalg import expm
+from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
 
 # ----------------------- Constants -----------------------
 MU_EARTH = 3.986004418e14  # m^3/s^2
@@ -16,8 +40,19 @@ POS_VEL_DIM = 3 # Position or velocity dimension
 # ----------------------- Result Types ---------------------
 @dataclass
 class ObservationRecord:
+    """
+    Represents a single observation record, typically used for NIS logging.
+
+    Attributes:
+    - step: The simulation step at which the observation was made.
+    - time: The time of the observation.
+    - observer: The ID of the observing satellite.
+    - target: The ID of the target satellite.
+    - nis: The Normalized Innovation Squared value for this observation.
+    - dof: The degrees of freedom for the NIS calculation.
+    """
     step: int
-    time: int
+    time: float
     observer: int
     target: int
     nis: float
@@ -25,6 +60,16 @@ class ObservationRecord:
 
 @dataclass
 class JointResult:
+    """
+    Stores the results of a joint EKF simulation.
+
+    Attributes:
+    - target_ids: A list of identifiers for the target satellites.
+    - obs_records: A list of ObservationRecord objects, containing NIS data for each observation.
+    - x_hist: History of the estimated stacked state vectors over time.
+    - truth: History of the true stacked state vectors over time.
+    - z_hist: History of the noisy stacked measurements over time.
+    """
     target_ids: List[str]                # ["sat_1", ...]
     obs_records: List[ObservationRecord] # per-observation NIS records
     x_hist: np.ndarray                   # (steps, 6*N)
@@ -42,7 +87,8 @@ def two_body_f(x6: NDArray[np.float64]) -> NDArray[np.float64]:
     Returns:
     - The 6-element state derivative vector [vx, vy, vz, ax, ay, az].
     """
-    r = x6[:POS_VEL_DIM]; v = x6[POS_VEL_DIM:]
+    r = x6[:POS_VEL_DIM]
+    v = x6[POS_VEL_DIM:]
     rn = np.linalg.norm(r)
     a = -MU_EARTH * r / rn**3
     return np.hstack([v, a])
@@ -57,7 +103,9 @@ def F_jacobian_6(x6: NDArray[np.float64]) -> NDArray[np.float64]:
     Returns:
     - The 6x6 Jacobian matrix F.
     """
-    r = x6[:POS_VEL_DIM]; rn = np.linalg.norm(r); I3 = np.eye(POS_VEL_DIM)
+    r = x6[:POS_VEL_DIM]
+    rn = np.linalg.norm(r)
+    I3 = np.eye(POS_VEL_DIM)
     dadr = -MU_EARTH * (I3 / rn**3 - 3*np.outer(r, r)/rn**5)
     F = np.zeros((STATE_DIM,STATE_DIM))
     F[:POS_VEL_DIM,POS_VEL_DIM:] = I3
@@ -128,7 +176,8 @@ def F_midpoint(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
     return Fm
 
 # ----------------------- Truth propagation ----------------
-def propagate_truth_kepler(x0_stack: NDArray[np.float64], steps: int, dt: float) -> NDArray[np.float64]:
+def propagate_truth_kepler(x0_stack: NDArray[np.float64],
+                           steps: int, dt: float) -> NDArray[np.float64]:
     """
     Propagates the true state of multiple satellites using Keplerian dynamics.
 
@@ -163,14 +212,18 @@ def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[n
     pt, vt = target[:POS_VEL_DIM], target[POS_VEL_DIM:]
     po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
     rho = pt - po
-    r = np.linalg.norm(rho); r = max(r, 1e-8)
+    r = np.linalg.norm(rho)
+    r = max(r, 1e-8) # type: ignore
     vrel = vt - vo
     rdot = float(rho.dot(vrel) / r)
     return np.array([r, rdot])
 
-def H_blocks_target_obs(target: NDArray[np.float64], obs: NDArray[np.float64]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+def H_blocks_target_obs(target: NDArray[np.float64],
+                        obs: NDArray[np.float64]) -> tuple[NDArray[np.float64],
+                                                           NDArray[np.float64]]:
     """
-    Calculates the Jacobian matrices for the measurement function with respect to target and observer states.
+    Calculates the Jacobian matrices for the measurement function with
+    respect to target and observer states.
 
     Args:
     - target: The 6-element state vector of the target satellite.
@@ -184,7 +237,8 @@ def H_blocks_target_obs(target: NDArray[np.float64], obs: NDArray[np.float64]) -
     pt, vt = target[:POS_VEL_DIM], target[POS_VEL_DIM:]
     po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
     rho = pt - po
-    r = np.linalg.norm(rho); r = max(r, 1e-8)
+    r = np.linalg.norm(rho)
+    r = max(r, 1e-8) # type: ignore
     rhat = rho / r
     I3 = np.eye(POS_VEL_DIM)
     vrel = vt - vo
@@ -234,7 +288,8 @@ def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     for i in range(N):
         xi = x[STATE_DIM*i:STATE_DIM*i+STATE_DIM]
         for j in range(N):
-            if i == j: continue
+            if i == j:
+                continue
             xj = x[STATE_DIM*j:STATE_DIM*j+STATE_DIM]
             Ht, Ho = H_blocks_target_obs(xj, xi)
             R = np.zeros((2, STATE_DIM*N))
@@ -244,7 +299,8 @@ def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     return np.vstack(rows)
 
 # ----------------------- EKF predict ----------------------
-def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int, q_acc_target: float, _unused: float) -> None:
+def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
+                      q_acc_target: float, _unused: float) -> None:
     """
     Performs the prediction step for the joint Extended Kalman Filter.
     Propagates the state and covariance of all satellites forward in time.
@@ -268,7 +324,8 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int, q_acc_target
     # propagate covariance (block-diag)
     Phi = np.eye(dim)
     Qd = np.zeros((dim,dim))
-    L = np.zeros((STATE_DIM,POS_VEL_DIM)); L[POS_VEL_DIM:,:] = np.eye(POS_VEL_DIM)
+    L = np.zeros((STATE_DIM,POS_VEL_DIM))
+    L[POS_VEL_DIM:,:] = np.eye(POS_VEL_DIM)
 
     for i in range(N):
         Fi = F_midpoint(x_prev[STATE_DIM*i:STATE_DIM*i+STATE_DIM], dt)
@@ -281,9 +338,12 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int, q_acc_target
     ekf.P = 0.5*(ekf.P + ekf.P.T)
 
 # ----------------------- Truth + measurement sim ----------
-def simulate_truth_and_meas(N: int, steps: int, dt: float, sig_r: float, sig_rdot: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+def simulate_truth_and_meas(N: int, steps: int, dt: float,
+                            sig_r: float, sig_rdot: float) -> tuple[NDArray[np.float64],
+                                                                    NDArray[np.float64]]:
     """
-    Simulates the true satellite trajectories and generates noisy inter-satellite measurements.
+    Simulates the true satellite trajectories and generates noisy
+    inter-satellite measurements.
 
     Args:
     - N: The number of satellites.
@@ -324,7 +384,8 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float, sig_r: float, sig_rdo
     return truth, z_hist
 
 # ----------------------- EKF ------------------------------
-def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64], H: NDArray[np.float64], R: NDArray[np.float64]) -> NDArray[np.float64]:
+def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64],
+                  H: NDArray[np.float64], R: NDArray[np.float64]) -> NDArray[np.float64]:
     """
     Numerically stable Joseph form of covariance update.
 
@@ -362,7 +423,8 @@ def _initialize_state_and_cov(N: int, truth: np.ndarray) -> Tuple[np.ndarray, np
 
     P0 = np.zeros((dim_x,dim_x))
     for i in range(N):
-        P0[STATE_DIM*i:STATE_DIM*i+STATE_DIM,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = np.diag([1e8]*POS_VEL_DIM+[1e4]*POS_VEL_DIM)
+        P0[STATE_DIM*i:STATE_DIM*i+STATE_DIM,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = \
+            np.diag([1e8]*POS_VEL_DIM+[1e4]*POS_VEL_DIM)
     return x0_est, P0
 
 def _ekf_update(ekf: ExtendedKalmanFilter, z_k: np.ndarray, N: int) -> np.ndarray:
@@ -389,7 +451,8 @@ def _ekf_update(ekf: ExtendedKalmanFilter, z_k: np.ndarray, N: int) -> np.ndarra
     ekf.P = joseph_update(ekf.P, K, H, ekf.R)
     return y
 
-def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int, dt: float, sig_r: float, sig_rdot: float) -> List[ObservationRecord]:
+def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
+             dt: float, sig_r: float, sig_rdot: float) -> List[ObservationRecord]:
     """
     Calculates and logs the Normalized Innovation Squared (NIS) for each observation.
 
@@ -410,13 +473,15 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int, dt: float
     idx = 0
     for i in range(N): # observer
         for j in range(N): # target
-            if i == j: continue
+            if i == j:
+                continue
 
             rows = slice(idx, idx+2)
             yij = y[rows]
 
             H_ij = np.zeros((2, dim_x))
-            Ht, Ho = H_blocks_target_obs(ekf.x[STATE_DIM*j:STATE_DIM*j+STATE_DIM], ekf.x[STATE_DIM*i:STATE_DIM*i+STATE_DIM])
+            Ht, Ho = H_blocks_target_obs(ekf.x[STATE_DIM*j:STATE_DIM*j+STATE_DIM],
+                                         ekf.x[STATE_DIM*i:STATE_DIM*i+STATE_DIM])
             H_ij[:,STATE_DIM*j:STATE_DIM*j+STATE_DIM] = Ht
             H_ij[:,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = Ho
 
@@ -444,7 +509,8 @@ class FilterConfig:
     - sig_r: Standard deviation of range measurement noise in meters.
     - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
     - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
-    - q_acc_obs: Continuous-time process noise acceleration magnitude for observer satellites (kept for compatibility).
+    - q_acc_obs: Continuous-time process noise acceleration magnitude for
+      observer satellites (kept for compatibility).
     - seed: Random seed for reproducibility.
     """
     N: int = 10
@@ -472,13 +538,16 @@ def run_joint_ekf(
     - sig_r: Standard deviation of range measurement noise in meters.
     - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
     - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
-    - q_acc_obs: Continuous-time process noise acceleration magnitude for observer satellites (kept for compatibility).
+    - q_acc_obs: Continuous-time process noise acceleration magnitude for observer satellites
+      kept for compatibility).
     - seed: Random seed for reproducibility.
 
     Returns:
-    - An object containing the simulation results, including truth, estimated states, and observation records.
+    - An object containing the simulation results, including truth,
+      estimated states, and observation records.
     """
-    if config.seed is not None: np.random.seed(config.seed)
+    if config.seed is not None:
+        np.random.seed(config.seed)
 
     dim_x = STATE_DIM*config.N
     M = config.N*(config.N-1)
@@ -517,13 +586,14 @@ def extract_mean_nis_per_sat(result: JointResult) -> list[list[float]]:
     - result: The result object containing observation records.
 
     Returns:
-    - A list of lists, where `mean_nis[sat_idx][step]` is the mean NIS for that satellite at that step.
+    - A list of lists, where `mean_nis[sat_idx][step]` is the mean NIS for that satellite
+      at that step.
     """
     N = len(result.target_ids)
     steps = result.x_hist.shape[0]
 
     # Initialize storage
-    nis_matrix = [[[] for _ in range(steps)] for _ in range(N)]
+    nis_matrix: List[List[List[float]]] = [[[] for _ in range(steps)] for _ in range(N)]
 
     # Fill list for each observer,step
     for rec in result.obs_records:
@@ -588,7 +658,8 @@ def plot_nis(result: JointResult) -> None:
 
 def plot_nis_consistency(result: JointResult, dof: int = 2, window: int = 50) -> None:
     """
-    Plots the NIS consistency check for each satellite, including rolling mean and chi-squared bounds.
+    Plots the NIS consistency check for each satellite, including
+    rolling mean and chi-squared bounds.
 
     Args:
     - result: The result object containing NIS data.
@@ -620,13 +691,16 @@ def plot_nis_consistency(result: JointResult, dof: int = 2, window: int = 50) ->
     plt.axhline(dof, ls='-', color='red', label="DoF")
 
     plt.title(f"NIS Consistency Check (window={window}, DoF={dof})")
-    plt.xlabel("Step"); plt.ylabel("Mean NIS per sat")
-    plt.legend(ncol=3); plt.grid(); plt.tight_layout(); plt.show()
-
+    plt.xlabel("Step")
+    plt.ylabel("Mean NIS per sat")
+    plt.legend(ncol=3)
+    plt.grid()
+    plt.tight_layout()
+    plt.show()
 
 # ----------------------- Demo -----------------------------
 if __name__ == "__main__":
-    config = FilterConfig(
+    default_config = FilterConfig(
         N=10,
         steps=3000,
         dt=60.0,
@@ -636,15 +710,19 @@ if __name__ == "__main__":
         q_acc_obs=1e-5,   # kept for signature compatibility
         seed=42,
     )
-    truth, z_hist = simulate_truth_and_meas(config.N, config.steps, config.dt, config.sig_r, config.sig_rdot)
-    result = run_joint_ekf(config, truth, z_hist)
+    end_truth, end_z_hist = simulate_truth_and_meas(default_config.N,
+                                                    default_config.steps,
+                                                    default_config.dt,
+                                                    default_config.sig_r,
+                                                    default_config.sig_rdot)
 
-    print("Satellites:", result.target_ids)
+    end_result = run_joint_ekf(default_config, end_truth, end_z_hist)
 
-    nis_matrix = extract_mean_nis_per_sat(result)
-    for i, series in enumerate(nis_matrix):
-        print(f"  Sat {i}: last-step mean NIS = {series[-1]:.3f}")
+    print("Satellites:", end_result.target_ids)
 
-    plot_nis(result)
-    plot_nis_consistency(result, window=80)
+    end_nis_matrix = extract_mean_nis_per_sat(end_result)
+    for num, series in enumerate(end_nis_matrix):
+        print(f"  Sat {num}: last-step mean NIS = {series[-1]:.3f}")
 
+    plot_nis(end_result)
+    plot_nis_consistency(end_result, window=80)
