@@ -12,3 +12,4 @@ pyvenv.cfg
 app.log
 /venv
 src/satellite_sim.asv
+GEMINI.md
