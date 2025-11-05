@@ -1,11 +1,10 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 import numpy as np
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
 from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
-import statistics
 from scipy.linalg import expm
 
 # ----------------------- Constants -----------------------
@@ -32,12 +31,30 @@ class JointResult:
 
 # ----------------------- Dynamics ------------------------
 def two_body_f(x6: NDArray[np.float64]) -> NDArray[np.float64]:
+    """
+    Calculates the state derivative for a two-body orbital system.
+
+    Args:
+    - x6: The 6-element state vector [px, py, pz, vx, vy, vz].
+
+    Returns:
+    - The 6-element state derivative vector [vx, vy, vz, ax, ay, az].
+    """
     r = x6[:3]; v = x6[3:]
     rn = np.linalg.norm(r)
     a = -MU_EARTH * r / rn**3
     return np.hstack([v, a])
 
 def F_jacobian_6(x6: NDArray[np.float64]) -> NDArray[np.float64]:
+    """
+    Calculates the 6x6 Jacobian matrix (F) for the two-body dynamics.
+
+    Args:
+    - x6: The 6-element state vector [px, py, pz, vx, vy, vz].
+
+    Returns:
+    - The 6x6 Jacobian matrix F.
+    """
     r = x6[:3]; rn = np.linalg.norm(r); I3 = np.eye(3)
     dadr = -MU_EARTH * (I3 / rn**3 - 3*np.outer(r, r)/rn**5)
     F = np.zeros((6,6))
@@ -46,6 +63,16 @@ def F_jacobian_6(x6: NDArray[np.float64]) -> NDArray[np.float64]:
     return F
 
 def rk4_step(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
+    """
+    Performs one step of Runge-Kutta 4th order integration for two-body dynamics.
+
+    Args:
+    - x: The current 6-element state vector [px, py, pz, vx, vy, vz].
+    - dt: The time step for integration.
+
+    Returns:
+    - The state vector after one integration step.
+    """
     k1 = two_body_f(x)
     k2 = two_body_f(x + 0.5*dt*k1)
     k3 = two_body_f(x + 0.5*dt*k2)
@@ -56,6 +83,20 @@ def van_loan_discretization(F: NDArray[np.float64],
                             L: NDArray[np.float64],
                             Qc: NDArray[np.float64],
                             dt: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """
+    Discretizes continuous-time system and noise matrices using the Van Loan method.
+
+    Args:
+    - F: Continuous-time state dynamics matrix.
+    - L: Noise gain matrix.
+    - Qc: Continuous-time process noise covariance matrix.
+    - dt: Time step.
+
+    Returns:
+    - A tuple containing:
+        - Phi: Discrete-time state transition matrix.
+        - Q: Discrete-time process noise covariance matrix.
+    """
     n = F.shape[0]
     A = L @ Qc @ L.T
     M = np.block([[F, A], [np.zeros((n,n)), -F.T]]) * dt
@@ -66,6 +107,17 @@ def van_loan_discretization(F: NDArray[np.float64],
     return Phi, 0.5*(Q + Q.T)
 
 def F_midpoint(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
+    """
+    Calculates the Jacobian matrix F at the midpoint of the integration step.
+    This is used for improved accuracy in the discretization of the process noise.
+
+    Args:
+    - x: The current 6-element state vector.
+    - dt: The time step.
+
+    Returns:
+    - The 6x6 Jacobian matrix F at the midpoint.
+    """
     k1 = two_body_f(x)
     x_mid = x + 0.5 * dt * k1
     Fm = F_jacobian_6(x_mid)
@@ -75,6 +127,17 @@ def F_midpoint(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
 
 # ----------------------- Truth propagation ----------------
 def propagate_truth_kepler(x0_stack: NDArray[np.float64], steps: int, dt: float) -> NDArray[np.float64]:
+    """
+    Propagates the true state of multiple satellites using Keplerian dynamics.
+
+    Args:
+    - x0_stack: Initial stacked state vector for all satellites.
+    - steps: Number of time steps to propagate.
+    - dt: Time step size.
+
+    Returns:
+    - A history of the true stacked state vectors over time.
+    """
     x = x0_stack.copy()
     hist = np.zeros((steps, x0_stack.size))
     for k in range(steps):
@@ -85,6 +148,16 @@ def propagate_truth_kepler(x0_stack: NDArray[np.float64], steps: int, dt: float)
 
 # ----------------------- Measurement model ----------------
 def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[np.float64]:
+    """
+    Calculates the expected range and range-rate measurement between an observer and a target.
+
+    Args:
+    - target: The 6-element state vector of the target satellite.
+    - obs: The 6-element state vector of the observing satellite.
+
+    Returns:
+    - A 2-element array [range, range_rate].
+    """
     pt, vt = target[:3], target[3:]
     po, vo = obs[:3], obs[3:]
     rho = pt - po
@@ -93,7 +166,19 @@ def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[n
     rdot = float(rho.dot(vrel) / r)
     return np.array([r, rdot])
 
-def H_blocks_target_obs(target: NDArray[np.float64], obs: NDArray[np.float64]):
+def H_blocks_target_obs(target: NDArray[np.float64], obs: NDArray[np.float64]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """
+    Calculates the Jacobian matrices for the measurement function with respect to target and observer states.
+
+    Args:
+    - target: The 6-element state vector of the target satellite.
+    - obs: The 6-element state vector of the observing satellite.
+
+    Returns:
+    - A tuple containing:
+        - Ht: 2x6 Jacobian matrix with respect to the target state.
+        - Ho: 2x6 Jacobian matrix with respect to the observer state.
+    """
     pt, vt = target[:3], target[3:]
     po, vo = obs[:3], obs[3:]
     rho = pt - po
@@ -114,6 +199,16 @@ def H_blocks_target_obs(target: NDArray[np.float64], obs: NDArray[np.float64]):
     return Ht, Ho
 
 def hx_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
+    """
+    Calculates the stacked expected measurements for all inter-satellite links.
+
+    Args:
+    - x: The stacked state vector of all N satellites.
+    - N: The number of satellites.
+
+    Returns:
+    - A stacked array of all expected range and range-rate measurements.
+    """
     z = []
     for i in range(N):
         xi = x[6*i:6*i+6]
@@ -123,6 +218,16 @@ def hx_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     return np.concatenate(z)
 
 def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
+    """
+    Calculates the stacked Jacobian matrix for the joint measurement model.
+
+    Args:
+    - x: The stacked state vector of all N satellites.
+    - N: The number of satellites.
+
+    Returns:
+    - The stacked Jacobian matrix H for the joint measurement.
+    """
     rows = []
     for i in range(N):
         xi = x[6*i:6*i+6]
@@ -137,7 +242,18 @@ def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     return np.vstack(rows)
 
 # ----------------------- EKF predict ----------------------
-def ekf_predict_joint(ekf, dt, N, q_acc_target, _unused):
+def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int, q_acc_target: float, _unused: float) -> None:
+    """
+    Performs the prediction step for the joint Extended Kalman Filter.
+    Propagates the state and covariance of all satellites forward in time.
+
+    Args:
+    - ekf: The EKF object containing the joint state and covariance.
+    - dt: The time step for prediction.
+    - N: The number of satellites.
+    - q_acc_target: The continuous-time process noise acceleration magnitude for targets.
+    - _unused: An unused parameter, kept for signature compatibility.
+    """
     x_prev = ekf.x.copy()
     dim = 6*N
 
@@ -163,7 +279,22 @@ def ekf_predict_joint(ekf, dt, N, q_acc_target, _unused):
     ekf.P = 0.5*(ekf.P + ekf.P.T)
 
 # ----------------------- Truth + measurement sim ----------
-def simulate_truth_and_meas(N, steps, dt, sig_r, sig_rdot):
+def simulate_truth_and_meas(N: int, steps: int, dt: float, sig_r: float, sig_rdot: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """
+    Simulates the true satellite trajectories and generates noisy inter-satellite measurements.
+
+    Args:
+    - N: The number of satellites.
+    - steps: The number of simulation steps.
+    - dt: The time step size.
+    - sig_r: Standard deviation of range measurement noise.
+    - sig_rdot: Standard deviation of range-rate measurement noise.
+
+    Returns:
+    - A tuple containing:
+        - truth: The history of true stacked state vectors.
+        - z_hist: The history of noisy stacked measurements.
+    """
     base = np.array([Re+500e3, 0,0, 0,7600,0])
     x0 = []
     for i in range(N):
@@ -191,13 +322,46 @@ def simulate_truth_and_meas(N, steps, dt, sig_r, sig_rdot):
     return truth, z_hist
 
 # ----------------------- EKF ------------------------------
-def run_joint_ekf(
-    N=10, steps=3000, dt=60.0,
-    sig_r=10.0, sig_rdot=0.02,
-    q_acc_target=1e-6, q_acc_obs=1e-6,
-    seed=42,
-) -> JointResult:
+def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64], H: NDArray[np.float64], R: NDArray[np.float64]) -> NDArray[np.float64]:
+    """
+    Numerically stable Joseph form of covariance update.
 
+    Args:
+    - P: The prior covariance matrix.
+    - K: The Kalman gain matrix.
+    - H: The measurement Jacobian matrix.
+    - R: The measurement noise covariance matrix.
+
+    Returns:
+    - The posterior covariance matrix, enforced to be symmetric.
+    """
+    I = np.eye(P.shape[0])
+    A = I - K @ H
+    Pn = A @ P @ A.T + K @ R @ K.T
+    return 0.5 * (Pn + Pn.T)
+
+def run_joint_ekf(
+    N: int = 10, steps: int = 3000, dt: float = 60.0,
+    sig_r: float = 10.0, sig_rdot: float = 0.02,
+    q_acc_target: float = 1e-6, q_acc_obs: float = 1e-6,
+    seed: int | None = 42,
+) -> JointResult:
+    """
+    Runs a joint Extended Kalman Filter simulation for a constellation of satellites.
+
+    Args:
+    - N: Number of satellites in the constellation.
+    - steps: Number of simulation steps.
+    - dt: Time step size in seconds.
+    - sig_r: Standard deviation of range measurement noise in meters.
+    - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
+    - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
+    - q_acc_obs: Continuous-time process noise acceleration magnitude for observer satellites (kept for compatibility).
+    - seed: Random seed for reproducibility.
+
+    Returns:
+    - An object containing the simulation results, including truth, estimated states, and observation records.
+    """
     if seed is not None: np.random.seed(seed)
     truth, z_hist = simulate_truth_and_meas(N, steps, dt, sig_r, sig_rdot)
 
@@ -233,9 +397,7 @@ def run_joint_ekf(
         K = ekf.P @ H.T @ S_inv
 
         ekf.x = ekf.x + K @ y
-        I = np.eye(dim_x)
-        ekf.P = (I-K@H)@ekf.P@(I-K@H).T + K@ekf.R@K.T
-        ekf.P = 0.5*(ekf.P + ekf.P.T)
+        ekf.P = joseph_update(ekf.P, K, H, ekf.R)
 
         # log NIS for each ordered observation
         idx = 0
@@ -276,8 +438,13 @@ def run_joint_ekf(
 # ----------------------- Plot Helpers --------------------
 def extract_mean_nis_per_sat(result: JointResult) -> list[list[float]]:
     """
-    Converts obs_records (each obs event) into:
-    mean_nis[sat][step]
+    Extracts the mean NIS per satellite per time step from the observation records.
+
+    Args:
+    - result: The result object containing observation records.
+
+    Returns:
+    - A list of lists, where `mean_nis[sat_idx][step]` is the mean NIS for that satellite at that step.
     """
     N = len(result.target_ids)
     steps = result.x_hist.shape[0]
@@ -304,11 +471,28 @@ def extract_mean_nis_per_sat(result: JointResult) -> list[list[float]]:
     return nis_mean
 
 def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
+    """
+    Calculates the lower and upper bounds for a chi-squared distribution.
+
+    Args:
+    - dof: Degrees of freedom for the chi-squared distribution.
+    - alpha: The confidence level (e.g., 0.95 for 95% confidence).
+
+    Returns:
+    - A tuple containing the lower and upper bounds.
+    """
     lo = chi2.ppf((1 - alpha) / 2.0, dof)
     hi = chi2.ppf(1 - (1 - alpha) / 2.0, dof)
     return float(lo), float(hi)
 
-def plot_nis(result: JointResult):
+def plot_nis(result: JointResult) -> None:
+    """
+    Plots the mean Normalized Innovation Squared (NIS) for each satellite over time.
+    Includes chi-squared bounds for consistency checking.
+
+    Args:
+    - result: The result object containing NIS data.
+    """
     nis_per_sat = extract_mean_nis_per_sat(result)
     N = len(result.target_ids)
     dof = 2
@@ -329,7 +513,42 @@ def plot_nis(result: JointResult):
     plt.tight_layout()
     plt.show()
 
-def plot_nis_consistency(result: JointResult, dof: int = 2, window: int = 50):
+def plot_nis_consistency(result: JointResult, dof: int = 2, window: int = 50) -> None:
+    """
+    Plots the NIS consistency check for each satellite, including rolling mean and chi-squared bounds.
+
+    Args:
+    - result: The result object containing NIS data.
+    - dof: Degrees of freedom for the chi-squared distribution.
+    - window: Window size for the rolling mean calculation.
+    """
+    nis_per_sat = extract_mean_nis_per_sat(result)
+    N = len(result.target_ids)
+
+    lower = chi2.ppf(0.025, dof)
+    upper = chi2.ppf(0.975, dof)
+
+    steps = len(nis_per_sat[0])
+    t = np.arange(steps)
+
+    plt.figure(figsize=(13,4))
+    for i in range(N):
+        x = np.array(nis_per_sat[i])
+        roll = np.convolve(x, np.ones(window)/window, mode='same')
+        plt.plot(t, x, alpha=0.35, label=f"Sat {i}")
+        plt.plot(t, roll, linewidth=2)
+
+        frac = np.mean((x < lower) | (x > upper))
+        status = "⚠️" if frac > 0.10 else "✅"
+        print(f"{status} Sat {i}: {frac*100:.1f}% outside limits, mean={np.nanmean(x):.2f}")
+
+    plt.axhline(lower, ls='--', color='gray')
+    plt.axhline(upper, ls='--', color='gray')
+    plt.axhline(dof, ls='-', color='red', label="DoF")
+
+    plt.title(f"NIS Consistency Check (window={window}, DoF={dof})")
+    plt.xlabel("Step"); plt.ylabel("Mean NIS per sat")
+    plt.legend(ncol=3); plt.grid(); plt.tight_layout(); plt.show()
     nis_per_sat = extract_mean_nis_per_sat(result)
     N = len(result.target_ids)
 
@@ -366,7 +585,7 @@ if __name__ == "__main__":
         steps=3000,
         dt=60.0,
         sig_r=10.0,
-        sig_rdot=0.02,
+        sig_rdot=0.2,
         q_acc_target=1e-5,
         q_acc_obs=1e-5,   # kept for signature compatibility
         seed=42,
