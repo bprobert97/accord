@@ -21,15 +21,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
-import ast
 import json
 import math
-from typing import List
 import numpy as np
 from scipy.stats import chi2
-import statistics
 from .dag import DAG
-from.filtertwo import JointResult
+from.filter import ObservationRecord
 from .logger import get_logger
 from .reputation import MAX_REPUTATION
 from .satellite_node import SatelliteNode
@@ -147,7 +144,7 @@ class ConsensusMechanism():
 
         return True
 
-    def nis_to_score(self, nis: List[float], dof: int) -> float:
+    def nis_to_score(self, nis: float, dof: int) -> float:
         """
         Convert NIS into a normalised [0,1] correctness score.
         1 = high agreement, perfect fit
@@ -172,20 +169,20 @@ class ConsensusMechanism():
         score = 1.0 - cdf
         return float(score)
 
-    def get_correctness_score(self, dag: DAG, result: JointResult) -> float:
+    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord) -> float:
         """
         Calculate correctness score based on NIS and past observations of the same target.
         Args:
         - dag: The current DAG containing past transactions.
-        - result: The ODProcessingResult containing NIS, DOF, and target ID. TODO
+        - obs_record: The observation record for the current measurement.
 
         Returns:
         - Correctness score in [0,1]. 0 = low agreement, 1 = high agreement.
         """
 
-        target_ids = result.target_ids
-        nis_list = result.nis_per_target
-        dof_list = result.dof_per_target
+        target_id = obs_record.target
+        nis = obs_record.nis
+        dof = obs_record.dof
         matches = []
 
         # If we've never seen this target_id before -> neutral score
@@ -193,7 +190,7 @@ class ConsensusMechanism():
             for tx in tx_list:
                 try:
                     past_data = json.loads(tx.tx_data)
-                    if past_data.get("target_id") in target_ids:
+                    if past_data.get("target") == target_id:
                         matches.append(past_data)
                 except (json.JSONDecodeError, TypeError):
                     continue
@@ -201,15 +198,13 @@ class ConsensusMechanism():
         # If this satellite has not been seen before, give it a neutral score
         # Also, if the filter has been initialised for the first time, return a
         # neutral score
-        for i in range(len(nis_list)):
-            dof = statistics.mean(dof_list[i])
-            if not matches or math.isnan(nis_list[i]):
-                # Neutral value is the expected NIS for the given dof
-                # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
-                return self.nis_to_score(dof, dof)
+        if not matches or math.isnan(nis):
+            # Neutral value is the expected NIS for the given dof
+            # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
+            return self.nis_to_score(float(dof), dof)
 
-            # Otherwise calculate correctness based on this measurement
-            return self.nis_to_score(nis_list[i], dof)
+        # Otherwise calculate correctness based on this measurement
+        return self.nis_to_score(nis, dof)
 
 
     def calculate_dof_score(self, dof: int) -> float:
@@ -293,7 +288,6 @@ class ConsensusMechanism():
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
-                                            sdekf: SDEKF,
                                             transaction: Transaction) -> bool:
         """
         Returns a bool of it consensus has been reached
@@ -309,7 +303,8 @@ class ConsensusMechanism():
             return False
 
         # 1) Convert tx_data to dict
-        transaction_data: dict = ast.literal_eval(transaction.tx_data)
+        transaction_data: dict = json.loads(transaction.tx_data)
+        obs_record = ObservationRecord(**transaction_data)
 
         # 2a) If we have data, submit a transaction
         dag.add_tx(transaction)
@@ -324,55 +319,50 @@ class ConsensusMechanism():
             return False
 
         # If we have valid data, try to reach consensus on it
-        if self.data_is_valid(transaction_data):
+        # The data validation part is removed as the observation record is assumed to be valid
 
-            # Run SDEKF
-            processing_result: ODProcessingResult =sdekf.process_measurement(transaction_data)
+        # 4) Check if satellite has been witnessed before
+        #4a if yes, does this data agree with other data/ is it correct?
+        correctness_score = self.get_correctness_score(dag, obs_record)
 
-            # 4) Check if satellite has been witnessed before
-            #4a if yes, does this data agree with other data/ is it correct?
-            correctness_score = self.get_correctness_score(dag, processing_result)
+        # 5) Reward measurements with higher DOF (more accurate, reduced comp. intensity)
+        dof_score = self.calculate_dof_score(obs_record.dof)
 
-            # 5) Reward measurements with higher DOF (more accurate, reduced comp. intensity)
-            dof_score = self.calculate_dof_score(processing_result.dof)
+        # 6) Calculate consensus score
+        consensus_score = self.calculate_consensus_score(correctness_score,
+                                                         dof_score,
+                                                         sat_node.reputation)
 
-            # 6) Calculate consensus score
-            consensus_score = self.calculate_consensus_score(correctness_score,
-                                                             dof_score,
-                                                             sat_node.reputation)
+        # Store scores in metadata for later analysis
+        transaction.metadata.consensus_score = consensus_score
+        transaction.metadata.cdf = 1- correctness_score
+        transaction.metadata.nis = obs_record.nis
+        transaction.metadata.dof = obs_record.dof
 
-            # Store scores in metadata for later analysis
-            transaction.metadata.consensus_score = consensus_score
-            transaction.metadata.cdf = 1- correctness_score
-            transaction.metadata.nis = processing_result.nis
-            transaction.metadata.dof = processing_result.dof
+        logger.info("NIS=%.3f, DOF=%d, correctness=%.3f, consensus_score=%.3f, \
+                    reputation=%.3f",
+        obs_record.nis, obs_record.dof,
+        correctness_score, consensus_score, sat_node.reputation)
 
-            logger.info("NIS=%.3f, DOF=%d, correctness=%.3f, consensus_score=%.3f, \
-                        reputation=%.3f",
-            processing_result.nis, processing_result.dof,
-            correctness_score, consensus_score, sat_node.reputation)
+        sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
+        logger.info("Satellite reputation decayed to %.3f.",
+                    sat_node.reputation)
 
-            sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
-            logger.info("Satellite reputation decayed to %.3f.",
-                        sat_node.reputation)
+        # 7) if consensus reached - strong node (maybe affects node reputation?),
+        # else weak node (like IOTA)
+        if consensus_score >= self.consensus_threshold:
+            transaction.metadata.consensus_reached = True
+            sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
+                sat_node.reputation, sat_node.exp_pos
+            )
+            transaction.metadata.is_confirmed = True
+            logger.info("Satellite reputation increased to %.2f", sat_node.reputation)
+            logger.info("Successful consensus score: %.2f", consensus_score)
+            return True
 
-            # 7) if consensus reached - strong node (maybe affects node reputation?),
-            # else weak node (like IOTA)
-            if consensus_score >= self.consensus_threshold:
-                transaction.metadata.consensus_reached = True
-                sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
-                    sat_node.reputation, sat_node.exp_pos
-                )
-                transaction.metadata.is_confirmed = True
-                logger.info("Satellite reputation increased to %.2f", sat_node.reputation)
-                logger.info("Successful consensus score: %.2f", consensus_score)
-                return True
+        logger.info("Consensus threshold of %.2f does not met threshold.",
+                    consensus_score)
 
-            logger.info("Consensus threshold of %.2f does not met threshold.",
-                        consensus_score)
-
-        else:
-            logger.info("Data not valid.")
         # If data is invalid, or consensus score is below threshold
         # the transaction is rejected and the node's reputation is penalised.
         transaction.metadata.consensus_reached = False

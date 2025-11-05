@@ -23,7 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
 import json
-from typing import Optional, List
+from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
@@ -32,7 +32,8 @@ import numpy as np
 from scipy.stats import chi2
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
-from src.filter import run_joint_ekf, ObservationRecord
+from src.filter import FilterConfig, \
+    simulate_truth_and_meas, JointEKF
 from src.logger import get_logger
 from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
@@ -47,34 +48,40 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     Returns:
     - The final DAG object after all transactions have been processed.
     """
+    config = FilterConfig()
+    if config.seed is not None:
+        np.random.seed(config.seed)
+
+    truth, z_hist = simulate_truth_and_meas(
+        config.N, config.steps, config.dt, config.sig_r, config.sig_rdot
+    )
+
+    ekf = JointEKF(config, truth[0])
+
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
 
-    results = run_joint_ekf()
-    observations: List[ObservationRecord] = results.obs_records
-    if not observations:
-        logger.info("No data in JSON file.")
-        return None, None
-
     asyncio.create_task(dag.listen())
 
     # Create one SatelliteNode per unique observer_id in the JSON
-    unique_ids = sorted({obs.observer for obs in observations})
+    unique_ids = sorted(list(range(config.N)))
     satellites: dict[int, SatelliteNode] = {
         sid: SatelliteNode(node_id=sid, queue=queue) for sid in unique_ids
     }
-    rep_history: dict[str, list[float]] = {sid: [] for sid in unique_ids}
+    rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
 
-    # One satellite per observation (or choose grouping logic if needed)
-    # Assign each observation to the correct satellite and submit
-    for obs in observations:
-        sid = obs.observer
-        sat = satellites[sid]
-        sat.load_sensor_data(obs)
-        logger.info("Satellite %s: submitting transaction.", sid)
-        await sat.submit_transaction(recipient_address=123)
-        rep_history[sid].append(sat.reputation)
+    for k in range(config.steps):
+        ekf.predict()
+        obs_records_step = ekf.update(z_hist[k], k)
+
+        for obs in obs_records_step:
+            sid = obs.observer
+            sat = satellites[sid]
+            sat.load_sensor_data(obs)
+            logger.info("Satellite %s: submitting transaction.", sid)
+            await sat.submit_transaction(recipient_address=123)
+            rep_history[str(sid)].append(sat.reputation)
 
     return dag, rep_history
 
