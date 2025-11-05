@@ -153,7 +153,7 @@ def van_loan_discretization(F: NDArray[np.float64],
     EM = expm(M)
     Phi = EM[:n,:n]
     J = EM[:n,n:]
-    Q = Phi @ J @ Phi.T
+    Q = Phi @ J
     return Phi, 0.5*(Q + Q.T)
 
 def F_midpoint(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
@@ -523,59 +523,48 @@ class FilterConfig:
     seed: int | None = 42
 
 
-def run_joint_ekf(
-    config: FilterConfig,
-    truth: np.ndarray,
-    z_hist: np.ndarray,
-) -> JointResult:
+class JointEKF:
     """
-    Runs a joint Extended Kalman Filter simulation for a constellation of satellites.
-
-    Args:
-    - N: Number of satellites in the constellation.
-    - steps: Number of simulation steps.
-    - dt: Time step size in seconds.
-    - sig_r: Standard deviation of range measurement noise in meters.
-    - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
-    - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
-    - q_acc_obs: Continuous-time process noise acceleration magnitude for observer satellites
-      kept for compatibility).
-    - seed: Random seed for reproducibility.
-
-    Returns:
-    - An object containing the simulation results, including truth,
-      estimated states, and observation records.
+    A class to manage the state and operations of a joint Extended Kalman Filter.
     """
-    if config.seed is not None:
-        np.random.seed(config.seed)
+    def __init__(self, config: FilterConfig, initial_truth: np.ndarray):
+        """
+        Initializes the JointEKF.
 
-    dim_x = STATE_DIM*config.N
-    M = config.N*(config.N-1)
-    dim_z = 2*M
+        Args:
+        - config: The configuration for the filter.
+        - initial_truth: The initial true state of the satellites.
+        """
+        self.config = config
+        dim_x = STATE_DIM * config.N
+        M = config.N * (config.N - 1)
+        dim_z = 2 * M
 
-    R = np.diag([config.sig_r**2, config.sig_rdot**2]*M)
-    ekf = ExtendedKalmanFilter(dim_x=dim_x, dim_z=dim_z)
+        R = np.diag([config.sig_r**2, config.sig_rdot**2] * M)
+        self.ekf = ExtendedKalmanFilter(dim_x=dim_x, dim_z=dim_z)
 
-    x0_est, P0 = _initialize_state_and_cov(config.N, truth)
-    ekf.x, ekf.P, ekf.R = x0_est, P0, R
+        x0_est, P0 = _initialize_state_and_cov(config.N, initial_truth[np.newaxis, :])
+        self.ekf.x, self.ekf.P, self.ekf.R = x0_est, P0, R
 
-    x_hist = np.zeros((config.steps,dim_x))
-    obs_records: List[ObservationRecord] = []
+    def predict(self) -> None:
+        """
+        Performs the prediction step of the EKF.
+        """
+        ekf_predict_joint(self.ekf, self.config.dt, self.config.N, self.config.q_acc_target, self.config.q_acc_obs)
 
-    for k in range(config.steps):
-        ekf_predict_joint(ekf, config.dt, config.N, config.q_acc_target, config.q_acc_obs)
-        y = _ekf_update(ekf, z_hist[k], config.N)
-        obs_records.extend(_log_nis(y, ekf, config.N, k, config.dt, config.sig_r, config.sig_rdot))
-        x_hist[k] = ekf.x
+    def update(self, z_k: np.ndarray, k: int) -> List[ObservationRecord]:
+        """
+        Performs the update step of the EKF and returns observation records.
 
-    print(obs_records)
-    return JointResult(
-        target_ids=[f"sat_{i+1}" for i in range(config.N)],
-        obs_records=obs_records,
-        x_hist=x_hist,
-        truth=truth,
-        z_hist=z_hist,
-    )
+        Args:
+        - z_k: The measurement vector for the current step.
+        - k: The current step index.
+
+        Returns:
+        - A list of ObservationRecord objects for the current step.
+        """
+        y = _ekf_update(self.ekf, z_k, self.config.N)
+        return _log_nis(y, self.ekf, self.config.N, k, self.config.dt, self.config.sig_r, self.config.sig_rdot)
 
 # ----------------------- Plot Helpers --------------------
 def extract_mean_nis_per_sat(result: JointResult) -> list[list[float]]:
@@ -698,6 +687,42 @@ def plot_nis_consistency(result: JointResult, dof: int = 2, window: int = 50) ->
     plt.tight_layout()
     plt.show()
 
+def run_joint_ekf_simulation(config: FilterConfig) -> JointResult:
+    """
+    Runs a full joint EKF simulation and returns the results.
+
+    Args:
+    - config: The configuration for the simulation.
+
+    Returns:
+    - A JointResult object containing the simulation results.
+    """
+    if config.seed is not None:
+        np.random.seed(config.seed)
+
+    truth, z_hist = simulate_truth_and_meas(
+        config.N, config.steps, config.dt, config.sig_r, config.sig_rdot
+    )
+
+    ekf = JointEKF(config, truth[0])
+
+    x_hist = np.zeros((config.steps, STATE_DIM * config.N))
+    obs_records: List[ObservationRecord] = []
+
+    for k in range(config.steps):
+        ekf.predict()
+        obs_records_step = ekf.update(z_hist[k], k)
+        obs_records.extend(obs_records_step)
+        x_hist[k] = ekf.ekf.x
+
+    return JointResult(
+        target_ids=[f"sat_{i+1}" for i in range(config.N)],
+        obs_records=obs_records,
+        x_hist=x_hist,
+        truth=truth,
+        z_hist=z_hist,
+    )
+
 # ----------------------- Demo -----------------------------
 if __name__ == "__main__":
     default_config = FilterConfig(
@@ -710,13 +735,7 @@ if __name__ == "__main__":
         q_acc_obs=1e-5,   # kept for signature compatibility
         seed=42,
     )
-    end_truth, end_z_hist = simulate_truth_and_meas(default_config.N,
-                                                    default_config.steps,
-                                                    default_config.dt,
-                                                    default_config.sig_r,
-                                                    default_config.sig_rdot)
-
-    end_result = run_joint_ekf(default_config, end_truth, end_z_hist)
+    end_result = run_joint_ekf_simulation(default_config)
 
     print("Satellites:", end_result.target_ids)
 

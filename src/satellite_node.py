@@ -24,10 +24,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import asyncio
 import copy
 import json
+import dataclasses
 from typing import Optional
 from .dag import DAG
 from .reputation import ReputationManager, MAX_REPUTATION
 from .transaction import Transaction, TransactionMetadata
+from .filter import ObservationRecord
 
 
 class SatelliteNode():
@@ -44,9 +46,9 @@ class SatelliteNode():
         self.rep_manager = ReputationManager()
         self.local_dag: Optional[DAG] = None
 
-        self.sensor_data: Optional[dict] = None
+        self.sensor_data: Optional[ObservationRecord] = None
 
-    def load_sensor_data(self, observation: dict) -> None:
+    def load_sensor_data(self, observation: ObservationRecord) -> None:
         """
         Attach one observation record (from JSON) to this satellite.
 
@@ -72,7 +74,7 @@ class SatelliteNode():
         if self.sensor_data is None:
             raise ValueError(f"Satellite {self.id} has no sensor data loaded.")
 
-        tx_data = json.dumps(self.sensor_data)
+        tx_data = json.dumps(dataclasses.asdict(self.sensor_data))
 
         # Create metadata and transaction
         metadata = TransactionMetadata()
