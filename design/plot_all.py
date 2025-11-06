@@ -9,15 +9,14 @@ cmap = "viridis"               # color map for correctness
 
 # === Step 1: Parse the log file ===
 pattern = re.compile(
-    r"correctness: ([0-9.]+), reputation: ([0-9.]+), dof_norm: ([0-9.]+), consensus score: ([0-9.]+)"
+    r"correctness: ([0-9.]+), reputation: ([0-9.]+), dof_norm: ([0-9.]+),\s*consensus score: ([0-9.]+)"
 )
 
 data = []
 with open(filename, "r") as f:
-    for line in f:
-        match = pattern.search(line)
-        if match:
-            data.append(tuple(map(float, match.groups())))
+    content = f.read()
+    for match in pattern.finditer(content):
+        data.append(tuple(map(float, match.groups())))
 
 # Convert to DataFrame
 df = pd.DataFrame(data, columns=["correctness", "reputation", "dof_norm", "consensus_score"])
