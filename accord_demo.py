@@ -40,17 +40,17 @@ from src.satellite_node import SatelliteNode
 
 logger = get_logger()
 
-async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
+async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optional[dict]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
 
+    Args:
+    - Optional filter config for running.
+
     Returns:
     - The final DAG object after all transactions have been processed.
     """
-    config = FilterConfig()
-    if config.seed is not None:
-        np.random.seed(config.seed)
 
     truth, z_hist = simulate_truth_and_meas(
         config.N, config.steps, config.dt, config.sig_r, config.sig_rdot
@@ -58,9 +58,33 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
 
     ekf = JointEKF(config, truth[0])
 
+    # First, run the EKF simulation and collect all observation records
+    all_obs_records = []
+    x_hist = np.zeros((config.steps, config.N * 6))
+    for k in range(config.steps):
+        ekf.predict()
+        obs_records_step = ekf.update(z_hist[k], k)
+        all_obs_records.extend(obs_records_step)
+        x_hist[k] = ekf.ekf.x
+
+    logger.info("BCP123 %s", all_obs_records)
+
+    # Create a JointResult object
+    from src.filter import JointResult, extract_mean_nis_per_sat
+    joint_result = JointResult(
+        target_ids=[f"sat_{i+1}" for i in range(config.N)],
+        obs_records=all_obs_records,
+        x_hist=x_hist,
+        truth=truth,
+        z_hist=z_hist,
+    )
+
+    # Extract the mean NIS per satellite
+    mean_nis_per_satellite = extract_mean_nis_per_sat(joint_result)
+
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
-    dag = DAG(queue=queue, consensus_mech=poise)
+    dag = DAG(queue=queue, consensus_mech=poise, mean_nis_per_satellite=mean_nis_per_satellite)
 
     asyncio.create_task(dag.listen())
 
@@ -71,11 +95,13 @@ async def run_consensus_demo() -> tuple[Optional[DAG], Optional[dict]]:
     }
     rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
 
-    for k in range(config.steps):
-        ekf.predict()
-        obs_records_step = ekf.update(z_hist[k], k)
+    # Group observations by step
+    obs_by_step = [[] for _ in range(config.steps)]
+    for obs in all_obs_records:
+        obs_by_step[obs.step].append(obs)
 
-        for obs in obs_records_step:
+    for k in range(config.steps):
+        for obs in obs_by_step[k]:
             sid = obs.observer
             sat = satellites[sid]
             sat.load_sensor_data(obs)
@@ -536,7 +562,18 @@ def plot_nis_consistency_overall(dag: DAG, confidence: float = 0.95) -> None:
 
 # Run demo
 if __name__ == "__main__":
-    final_dag, rep_hist = asyncio.run(run_consensus_demo())
+    default_config = FilterConfig(
+        N=4,
+        steps=1000,
+        dt=60.0,
+        sig_r=10.0,
+        sig_rdot=0.2,
+        q_acc_target=1e-5,
+        q_acc_obs=1e-5,   # kept for signature compatibility
+        seed=42,
+    )
+
+    final_dag, rep_hist = asyncio.run(run_consensus_demo(default_config))
     if final_dag:
         #plot_transaction_dag(final_dag)
         plot_consensus_cdf_dof(final_dag)
