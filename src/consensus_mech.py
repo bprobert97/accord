@@ -169,7 +169,7 @@ class ConsensusMechanism():
         score = 1.0 - cdf
         return float(score)
 
-    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord) -> float:
+    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord, mean_nis_per_satellite: list) -> float:
         """
         Calculate correctness score based on NIS and past observations of the same target.
         Args:
@@ -202,6 +202,17 @@ class ConsensusMechanism():
             # Neutral value is the expected NIS for the given dof
             # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
             return self.nis_to_score(float(dof), dof)
+
+        # Get historical mean NIS for the observer satellite
+        observer_id = obs_record.observer
+        step = obs_record.step
+        historical_nis = np.nan
+        if observer_id < len(mean_nis_per_satellite) and step < len(mean_nis_per_satellite[observer_id]):
+            historical_nis = mean_nis_per_satellite[observer_id][step]
+
+        # If historical NIS is available, combine it with the current NIS
+        if not math.isnan(historical_nis):
+            nis = (nis + historical_nis) / 2.0
 
         # Otherwise calculate correctness based on this measurement
         return self.nis_to_score(nis, dof)
@@ -288,7 +299,8 @@ class ConsensusMechanism():
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
-                                            transaction: Transaction) -> bool:
+                                            transaction: Transaction,
+                                            mean_nis_per_satellite: list) -> bool:
         """
         Returns a bool of it consensus has been reached
         NOTE: Assume one witnessed satellite per transaction
@@ -323,7 +335,7 @@ class ConsensusMechanism():
 
         # 4) Check if satellite has been witnessed before
         #4a if yes, does this data agree with other data/ is it correct?
-        correctness_score = self.get_correctness_score(dag, obs_record)
+        correctness_score = self.get_correctness_score(dag, obs_record, mean_nis_per_satellite)
 
         # 5) Reward measurements with higher DOF (more accurate, reduced comp. intensity)
         dof_score = self.calculate_dof_score(obs_record.dof)

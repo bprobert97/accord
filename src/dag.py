@@ -44,12 +44,14 @@ class DAG():
 
     def __init__(self,
                  consensus_mech: ConsensusMechanism,
-                 queue: asyncio.Queue) -> None:
+                 queue: asyncio.Queue,
+                 mean_nis_per_satellite: list) -> None:
         # Ledger structure is:
         # key: string hash of transaction, value: Transaction class
         self.ledger: dict = self.create_genesis_tx()
         self.consensus_mech = consensus_mech
         self.queue = queue
+        self.mean_nis_per_satellite = mean_nis_per_satellite
 
     async def listen(self) -> None:
         """
@@ -63,6 +65,7 @@ class DAG():
                 dag=self,
                 sat_node=satellite,
                 transaction=transaction,
+                mean_nis_per_satellite=self.mean_nis_per_satellite
             )
             future.set_result(consensus_result)
 
