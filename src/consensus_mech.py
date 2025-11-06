@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 import math
+from typing import Optional
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
@@ -144,37 +145,55 @@ class ConsensusMechanism():
 
         return True
 
-    def nis_to_score(self, nis: float, dof: int) -> float:
+    def nis_to_score(self, nis: float, dof: int, historical_nis: Optional[float] = None) -> float:
         """
         Convert NIS into a normalised [0,1] correctness score.
-        1 = high agreement, perfect fit
-        0 = low agreement, extreme outlier
+        The score is a blend of two metrics:
+        1. CDF-based score: Rewards lower NIS values, indicating a good fit.
+        2. Mean-based score: Rewards NIS values that are close to the expected mean (DOF),
+           promoting long-term statistical consistency.
 
         Args:
         - nis: Normalised Innovation Squared value (>=0).
         - dof: Degrees of freedom of the measurement.
+        - historical_nis: Optional historical mean NIS for the satellite.
 
         Returns:
         - Correctness score in [0,1].
         """
-        # TODO - nis average and latest score [-1]
         # Ensure valid inputs
         nis = max(0.0, float(nis))
         dof = max(1, int(dof))
 
-        # Compute CDF (probability measurement is <= observed NIS)
+        # Smooth the current NIS with the historical mean if available
+        if historical_nis is not None:
+            nis = (nis + historical_nis) / 2.0
+
+        # 1. CDF-based score (lower NIS is better)
         cdf = chi2.cdf(nis, df=dof)
+        score_cdf = 1.0 - cdf
 
-        # Flip it so high NIS → low score, low NIS → high score
-        score = 1.0 - cdf
-        return float(score)
+        # 2. Mean-based score (NIS close to DOF is better)
+        variance = 2 * dof
+        if variance == 0:
+            score_mean = 1.0 if nis == dof else 0.0
+        else:
+            score_mean = math.exp(-((nis - dof) ** 2) / (2 * variance))
 
-    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord, mean_nis_per_satellite: list) -> float:
+        # 3. Combine the scores (50/50 blend)
+        w_cdf = 0.5
+        w_mean = 0.5
+        combined_score = w_cdf * score_cdf + w_mean * score_mean
+
+        return float(combined_score)
+
+    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord, mean_nis_per_satellite: dict[int, float]) -> float:
         """
         Calculate correctness score based on NIS and past observations of the same target.
         Args:
         - dag: The current DAG containing past transactions.
         - obs_record: The observation record for the current measurement.
+        - mean_nis_per_satellite: A dictionary mapping satellite ID to its mean NIS.
 
         Returns:
         - Correctness score in [0,1]. 0 = low agreement, 1 = high agreement.
@@ -188,6 +207,8 @@ class ConsensusMechanism():
         # If we've never seen this target_id before -> neutral score
         for tx_list in dag.ledger.values():
             for tx in tx_list:
+                if tx.tx_data.startswith("Genesis"):
+                    continue
                 try:
                     past_data = json.loads(tx.tx_data)
                     if past_data.get("target") == target_id:
@@ -205,17 +226,9 @@ class ConsensusMechanism():
 
         # Get historical mean NIS for the observer satellite
         observer_id = obs_record.observer
-        step = obs_record.step
-        historical_nis = np.nan
-        if observer_id < len(mean_nis_per_satellite) and step < len(mean_nis_per_satellite[observer_id]):
-            historical_nis = mean_nis_per_satellite[observer_id][step]
+        historical_nis = mean_nis_per_satellite.get(observer_id)
 
-        # If historical NIS is available, combine it with the current NIS
-        if not math.isnan(historical_nis):
-            nis = (nis + historical_nis) / 2.0
-
-        # Otherwise calculate correctness based on this measurement
-        return self.nis_to_score(nis, dof)
+        return self.nis_to_score(nis, dof, historical_nis)
 
 
     def calculate_dof_score(self, dof: int) -> float:
@@ -236,7 +249,9 @@ class ConsensusMechanism():
         return min(1.0, dof / self.max_dof)
 
     def calculate_consensus_score(self, correctness: float,
-                                  dof_reward: float, reputation: float) -> float:
+                                  dof_reward: float, reputation: float,
+                                  gamma: float = 0.35,
+                                  alpha: float = 0.8) -> float:
         """
         Calculate overall consensus score from correctness, DOF reward, and node reputation.
         Weights can be adjusted to tune the influence of each factor.
@@ -257,50 +272,49 @@ class ConsensusMechanism():
         # Min DOF score = 0.33
         # Min reputation = 0
         # TODO - look at more tomorrow. Updates:
-        #- new ECI module (need to update docs, and code in new module_gcrf)
-        # - new consensus score mechanism with equation that ensures 'good enough'
-        # measurements are rewarded
         # Need to check that 0.5 correctness is right? May need to switch to PDF from CDF?
         # Because 0.4 correctness might actually be okay? shee chi2 plots
 
         # Relative to baselines (can go negative for correctness)
-        # c_rel = max(min((correctness - 0.5) / 0.5, 1.0), -1.0)      # [-1,1]
-        # d_rel = max(min((dof_reward - (1/3)) / (2/3), 1.0), 0.0)      # [0,1] with baseline at 0
-        # r_rel = rep_norm                                            # [0,1] with baseline at 0
+        c_rel = max(min((correctness - 0.5) / 0.5, 1.0), -1.0)      # [-1,1]
+        d_rel = max(min((dof_reward - (1/3)) / (2/3), 1.0), 0.0)      # [0,1] with baseline at 0
+        r_rel = rep_norm                                            # [0,1] with baseline at 0
 
-        # # Nonlinear emphasis on correctness (continuous across 0.5)
-        # # gamma < 1 makes correctness more influential above 0.5 and penalizes below 0.5
-        # c_scale = ( (abs(c_rel) ** gamma) * (1 if c_rel >= 0 else -1) + 1 ) / 2
+        # Nonlinear emphasis on correctness (continuous across 0.5)
+        # gamma < 1 makes correctness more influential above 0.5 and penalizes below 0.5
+        c_scale = ( (abs(c_rel) ** gamma) * (1 if c_rel >= 0 else -1) + 1 ) / 2
 
-        # # Cooperative DOF–reputation term (no weights, monotonic, bounded)
-        # dr_term = (1 - (1 - d_rel) * (1 - r_rel)) ** alpha
+        # Cooperative DOF–reputation term (no weights, monotonic, bounded)
+        dr_term = (1 - (1 - d_rel) * (1 - r_rel)) ** alpha
 
-        # # Combine and calibrate to the threshold anchor
-        # combined = c_scale * dr_term
+        # Combine and calibrate to the threshold anchor
+        combined = c_scale * dr_term
 
-        # consensus = self.consensus_threshold + (combined - 0.5) * \
-        # 2 * (1 - self.consensus_threshold)
+        consensus = self.consensus_threshold + (combined - 0.5) * \
+        2 * (1 - self.consensus_threshold)
 
-        # return min(max(consensus, 0.0), 1.0)
-
-        c = max(0.0, min(1.0, correctness))
-        r = max(0.0, min(1.0, rep_norm))
-        t = self.consensus_threshold
-
-        # Coefficients solving the four anchor equations
-        b  = t
-        c2 = 3*t - 1
-        d  = 2 - 4*t
-
-        s = b*c + c2*r + d*c*r  # bilinear surface S(c, r)
         logger.info("[FOR PLOT] correctness: %.6f, reputation: %.6f, dof_norm: %.6f, \
-                    consensus score: %.6f", correctness, reputation, dof_reward, s)
-        return max(0.0, min(1.0, s))  # clamp
+                    consensus score: %.6f", correctness, reputation, dof_reward, consensus)
+
+        return min(max(consensus, 0.0), 1.0)
+
+        # c = max(0.0, min(1.0, correctness))
+        # r = max(0.0, min(1.0, rep_norm))
+        # t = self.consensus_threshold
+
+        # # Coefficients solving the four anchor equations
+        # b  = t
+        # c2 = 3*t - 1
+        # d  = 2 - 4*t
+
+        # s = b*c + c2*r + d*c*r  # bilinear surface S(c, r)
+
+        # return max(0.0, min(1.0, s))  # clamp
 
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
                                             transaction: Transaction,
-                                            mean_nis_per_satellite: list) -> bool:
+                                            mean_nis_per_satellite: dict[int, float]) -> bool:
         """
         Returns a bool of it consensus has been reached
         NOTE: Assume one witnessed satellite per transaction

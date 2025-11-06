@@ -67,24 +67,9 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
         all_obs_records.extend(obs_records_step)
         x_hist[k] = ekf.ekf.x
 
-    logger.info("BCP123 %s", all_obs_records)
-
-    # Create a JointResult object
-    from src.filter import JointResult, extract_mean_nis_per_sat
-    joint_result = JointResult(
-        target_ids=[f"sat_{i+1}" for i in range(config.N)],
-        obs_records=all_obs_records,
-        x_hist=x_hist,
-        truth=truth,
-        z_hist=z_hist,
-    )
-
-    # Extract the mean NIS per satellite
-    mean_nis_per_satellite = extract_mean_nis_per_sat(joint_result)
-
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
-    dag = DAG(queue=queue, consensus_mech=poise, mean_nis_per_satellite=mean_nis_per_satellite)
+    dag = DAG(queue=queue, consensus_mech=poise)
 
     asyncio.create_task(dag.listen())
 

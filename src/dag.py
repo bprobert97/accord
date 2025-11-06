@@ -24,9 +24,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 from collections import OrderedDict
 from typing import TYPE_CHECKING
+import numpy as np
 from .logger import get_logger
 from .transaction import Transaction, TransactionMetadata
 
@@ -44,14 +46,13 @@ class DAG():
 
     def __init__(self,
                  consensus_mech: ConsensusMechanism,
-                 queue: asyncio.Queue,
-                 mean_nis_per_satellite: list) -> None:
+                 queue: asyncio.Queue) -> None:
         # Ledger structure is:
         # key: string hash of transaction, value: Transaction class
         self.ledger: dict = self.create_genesis_tx()
         self.consensus_mech = consensus_mech
         self.queue = queue
-        self.mean_nis_per_satellite = mean_nis_per_satellite
+        self.mean_nis_per_satellite = []
 
     async def listen(self) -> None:
         """
@@ -65,7 +66,7 @@ class DAG():
                 dag=self,
                 sat_node=satellite,
                 transaction=transaction,
-                mean_nis_per_satellite=self.mean_nis_per_satellite
+                mean_nis_per_satellite=self.calculate_mean_nis()
             )
             future.set_result(consensus_result)
 
@@ -150,3 +151,29 @@ class DAG():
         real_tx_count = max(0, len(self.ledger) - 2)  # exclude genesis
         # If f=1, we need 4 real tx (3*1+1)
         return real_tx_count >= 4
+
+    def calculate_mean_nis(self) -> dict[int, float]:
+        """
+        Calculate the mean NIS for each satellite from the transactions in the ledger.
+
+        Returns:
+        - A dictionary mapping satellite ID to its mean NIS.
+        """
+        nis_by_sat: dict[int, list[float]] = {}
+        for tx_list in self.ledger.values():
+            for tx in tx_list:
+                if tx.tx_data.startswith("Genesis"):
+                    continue
+                try:
+                    tx_data = json.loads(tx.tx_data)
+                    observer_id = tx_data.get("observer")
+                    nis = tx_data.get("nis")
+                    if observer_id is not None and nis is not None:
+                        nis_by_sat.setdefault(observer_id, []).append(nis)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        mean_nis_per_satellite: dict[int, float] = {
+            sat_id: np.mean(nis_values) for sat_id, nis_values in nis_by_sat.items()
+        }
+        return mean_nis_per_satellite
