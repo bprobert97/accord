@@ -37,20 +37,23 @@ class ReputationManager:
                  growth_rate: float = 0.6,
                  decay_rate: float = 0.002,
                  alpha: float = 0.12,
-                 drop_factor: float = 0.35) -> None:
+                 min_drop_factor: float = 0.35,
+                 max_drop_factor: float = 0.85) -> None:
         """
         max_rep: max possible reputation
         B, C: Gompertz curve parameters
         decay_rate: exponential decay per second (or tick)
         alpha: % of distance toward Gompertz target per positive event
-        drop_factor: multiplicative penalty for negative events
+        min_drop_factor: Multiplier for the worst-case negative event (low rep, bad data).
+        max_drop_factor: Multiplier for the mildest negative event (high rep, ok data).
         """
         self.max_rep = max_rep
         self.offset = offset
         self.growth_rate = growth_rate
         self.decay_rate = decay_rate
         self.alpha = alpha
-        self.drop_factor = drop_factor
+        self.min_drop_factor = min_drop_factor
+        self.max_drop_factor = max_drop_factor
         self._last_update = time.time()
 
     def decay(self, current_rep: float) -> float:
@@ -107,18 +110,37 @@ class ReputationManager:
         new_rep = current_rep + self.alpha * (target - current_rep)
         return float(min(self.max_rep, new_rep)), exp_pos + 1
 
-    def apply_negative(self, current_rep: float, exp_pos: int) -> tuple[float, int]:
+    def apply_negative(self, current_rep: float, exp_pos: int, correctness_score: float = 0.0) -> tuple[float, int]:
         """
         Apply reputation effect for a negative node interaction.
+
+        The penalty is scaled based on the node's current reputation and the
+        correctness of the data submitted. A higher reputation and a higher
+        correctness score lead to a larger reputation multiplier (a smaller penalty).
 
         Args:
         - current_rep: The node's reputation before a time decay is applied.
         - exp_pos: The number of positive experiences the node has had.
+        - correctness_score: The correctness score [0,1] of the submission.
+          Defaults to 0 for cases like invalid data where score is not applicable.
 
         Returns:
         - The updated reputation and updated number of positive experiences,
           that does not change.
         """
         current_rep = self.decay(current_rep)
-        new_rep = current_rep * self.drop_factor
+
+        # Calculate a dynamic reputation multiplier (drop factor).
+        # A higher factor means a smaller penalty.
+        # The factor is scaled between min_drop_factor and max_drop_factor.
+        bonus_range = self.max_drop_factor - self.min_drop_factor
+
+        # Merit is a weighted average of reputation and correctness (0 to 1)
+        rep_merit = current_rep / self.max_rep
+        # Using 50/50 weighting for reputation and correctness
+        combined_merit = 0.5 * rep_merit + 0.5 * correctness_score
+
+        dynamic_drop_factor = self.min_drop_factor + bonus_range * combined_merit
+
+        new_rep = current_rep * dynamic_drop_factor
         return float(max(0.0, new_rep)), exp_pos

@@ -148,10 +148,9 @@ class ConsensusMechanism():
     def nis_to_score(self, nis: float, dof: int, historical_nis: Optional[float] = None) -> float:
         """
         Convert NIS into a normalised [0,1] correctness score.
-        The score is a blend of two metrics:
-        1. CDF-based score: Rewards lower NIS values, indicating a good fit.
-        2. Mean-based score: Rewards NIS values that are close to the expected mean (DOF),
-           promoting long-term statistical consistency.
+        The score rewards NIS values that are close to the expected mean (DOF),
+        promoting long-term statistical consistency. Values that are too high or
+        too low are penalised.
 
         Args:
         - nis: Normalised Innovation Squared value (>=0).
@@ -168,24 +167,18 @@ class ConsensusMechanism():
         # Smooth the current NIS with the historical mean if available
         if historical_nis is not None:
             nis = (nis + historical_nis) / 2.0
+            logger.info("BCP123 Updated NIS %s", nis)
 
-        # 1. CDF-based score (lower NIS is better)
-        cdf = chi2.cdf(nis, df=dof)
-        score_cdf = 1.0 - cdf
-
-        # 2. Mean-based score (NIS close to DOF is better)
+        # The score is based on the chi-squared distribution. The expected value
+        # (mean) of the NIS is equal to the degrees of freedom (DOF), and the
+        # variance is 2 * DOF.
+        # This scoring function is a Gaussian centered on the mean (dof), which
+        # rewards NIS values close to the expected value and penalises values
+        # that are too high or too low ("too good to be true").
         variance = 2 * dof
-        if variance == 0:
-            score_mean = 1.0 if nis == dof else 0.0
-        else:
-            score_mean = math.exp(-((nis - dof) ** 2) / (2 * variance))
+        score = math.exp(-((nis - dof) ** 2) / (2 * variance))
 
-        # 3. Combine the scores (50/50 blend)
-        w_cdf = 0.5
-        w_mean = 0.5
-        combined_score = w_cdf * score_cdf + w_mean * score_mean
-
-        return float(combined_score)
+        return float(score)
 
     def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord, mean_nis_per_satellite: dict[int, float]) -> float:
         """
@@ -361,7 +354,6 @@ class ConsensusMechanism():
 
         # Store scores in metadata for later analysis
         transaction.metadata.consensus_score = consensus_score
-        transaction.metadata.cdf = 1- correctness_score
         transaction.metadata.nis = obs_record.nis
         transaction.metadata.dof = obs_record.dof
 
@@ -393,7 +385,7 @@ class ConsensusMechanism():
         # the transaction is rejected and the node's reputation is penalised.
         transaction.metadata.consensus_reached = False
         sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
-            sat_node.reputation, sat_node.exp_pos
+            sat_node.reputation, sat_node.exp_pos, correctness_score
         )
         transaction.metadata.is_rejected = True
         logger.info("Satellite reputation decreased to %.2f",
