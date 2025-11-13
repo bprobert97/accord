@@ -38,7 +38,7 @@ class TransactionMetadata:
     consensus_score: float = 0.0
     dof: int = 0
     nis: float = 0.0
-    cdf: float = 0.0
+    correctness_score: float = 0.0
 
 class Transaction:
     """
