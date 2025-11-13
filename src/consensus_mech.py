@@ -43,6 +43,7 @@ class ConsensusMechanism():
     """
     def __init__(self) -> None:
         self.consensus_threshold: float = 0.6
+        self.ema_alpha: float = 0.1  # Smoothing factor for EMA
         # Define a simple mapping: normalize by a maximum useful DOF
         # Theoretically, this could be up to 6 (full 3D position+velocity), but
         # in practice, most measurements will have fewer DOF - maximum of 3.
@@ -145,7 +146,7 @@ class ConsensusMechanism():
 
         return True
 
-    def nis_to_score(self, nis: float, dof: int, historical_nis: Optional[float] = None) -> float:
+    def nis_to_score(self, nis: float, dof: int) -> float:
         """
         Convert NIS into a normalised [0,1] correctness score.
         The score rewards NIS values that are close to the expected mean (DOF),
@@ -155,7 +156,6 @@ class ConsensusMechanism():
         Args:
         - nis: Normalised Innovation Squared value (>=0).
         - dof: Degrees of freedom of the measurement.
-        - historical_nis: Optional historical mean NIS for the satellite.
 
         Returns:
         - Correctness score in [0,1].
@@ -163,11 +163,6 @@ class ConsensusMechanism():
         # Ensure valid inputs
         nis = max(0.0, float(nis))
         dof = max(1, int(dof))
-
-        # Smooth the current NIS with the historical mean if available
-        if historical_nis is not None:
-            nis = (nis + historical_nis) / 2.0
-            logger.info("BCP123 Updated NIS %s", nis)
 
         # The score is based on the chi-squared distribution. The expected value
         # (mean) of the NIS is equal to the degrees of freedom (DOF), and the
@@ -180,16 +175,20 @@ class ConsensusMechanism():
 
         return float(score)
 
-    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord, mean_nis_per_satellite: dict[int, float]) -> float:
+    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord, mean_nis_per_satellite: dict[int, float]) -> tuple[float, float]:
         """
         Calculate correctness score based on NIS and past observations of the same target.
+        This function now calculates and returns the new EMA of the NIS.
+
         Args:
         - dag: The current DAG containing past transactions.
         - obs_record: The observation record for the current measurement.
-        - mean_nis_per_satellite: A dictionary mapping satellite ID to its mean NIS.
+        - mean_nis_per_satellite: A dictionary mapping satellite ID to its historical EMA NIS.
 
         Returns:
-        - Correctness score in [0,1]. 0 = low agreement, 1 = high agreement.
+        - A tuple containing:
+            - Correctness score in [0,1]. 0 = low agreement, 1 = high agreement.
+            - The new EMA NIS value for the observing satellite.
         """
 
         target_id = obs_record.target
@@ -215,13 +214,24 @@ class ConsensusMechanism():
         if not matches or math.isnan(nis):
             # Neutral value is the expected NIS for the given dof
             # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
-            return self.nis_to_score(float(dof), dof)
+            neutral_score = self.nis_to_score(float(dof), dof)
+            # The first NIS value is itself the start of the EMA
+            return neutral_score, nis
 
-        # Get historical mean NIS for the observer satellite
+        # Get historical EMA NIS for the observer satellite
         observer_id = obs_record.observer
-        historical_nis = mean_nis_per_satellite.get(observer_id)
+        historical_ema_nis = mean_nis_per_satellite.get(observer_id)
 
-        return self.nis_to_score(nis, dof, historical_nis)
+        # Calculate the new EMA for the NIS
+        if historical_ema_nis is None:
+            # This is the first observation from this satellite, start the EMA
+            smoothed_nis = nis
+        else:
+            # Update the EMA with the new NIS value
+            smoothed_nis = (nis * self.ema_alpha) + (historical_ema_nis * (1 - self.ema_alpha))
+
+        score = self.nis_to_score(smoothed_nis, dof)
+        return score, smoothed_nis
 
 
     def calculate_dof_score(self, dof: int) -> float:
@@ -307,19 +317,19 @@ class ConsensusMechanism():
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
                                             transaction: Transaction,
-                                            mean_nis_per_satellite: dict[int, float]) -> bool:
+                                            mean_nis_per_satellite: dict[int, float]) -> tuple[bool, Optional[float]]:
         """
-        Returns a bool of it consensus has been reached
+        Returns a bool of it consensus has been reached, and the new EMA NIS for the satellite.
         NOTE: Assume one witnessed satellite per transaction
         """
-
+        new_ema_nis: Optional[float] = None
         # 2) If the list is empty, there is no data that can be valid
         if not transaction.tx_data:
             # Reduce node reputation for providing no or invalid data
             sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
                 sat_node.reputation, sat_node.exp_pos
                 )
-            return False
+            return False, new_ema_nis
 
         # 1) Convert tx_data to dict
         transaction_data: dict = json.loads(transaction.tx_data)
@@ -335,14 +345,14 @@ class ConsensusMechanism():
         if not dag.has_bft_quorum():
             logger.info("Not enough transactions for BFT quorum.")
             logger.info("Satellite reputation unchanged at %.2f", sat_node.reputation)
-            return False
+            return False, new_ema_nis
 
         # If we have valid data, try to reach consensus on it
         # The data validation part is removed as the observation record is assumed to be valid
 
         # 4) Check if satellite has been witnessed before
         #4a if yes, does this data agree with other data/ is it correct?
-        correctness_score = self.get_correctness_score(dag, obs_record, mean_nis_per_satellite)
+        correctness_score, new_ema_nis = self.get_correctness_score(dag, obs_record, mean_nis_per_satellite)
 
         # 5) Reward measurements with higher DOF (more accurate, reduced comp. intensity)
         dof_score = self.calculate_dof_score(obs_record.dof)
@@ -354,6 +364,7 @@ class ConsensusMechanism():
 
         # Store scores in metadata for later analysis
         transaction.metadata.consensus_score = consensus_score
+        transaction.metadata.correctness_score = correctness_score
         transaction.metadata.nis = obs_record.nis
         transaction.metadata.dof = obs_record.dof
 
@@ -376,7 +387,7 @@ class ConsensusMechanism():
             transaction.metadata.is_confirmed = True
             logger.info("Satellite reputation increased to %.2f", sat_node.reputation)
             logger.info("Successful consensus score: %.2f", consensus_score)
-            return True
+            return True, new_ema_nis
 
         logger.info("Consensus threshold of %.2f does not met threshold.",
                     consensus_score)
@@ -391,4 +402,4 @@ class ConsensusMechanism():
         logger.info("Satellite reputation decreased to %.2f",
                     sat_node.reputation)
         # If data is invalid, or consensus sco
-        return False
+        return False, new_ema_nis
