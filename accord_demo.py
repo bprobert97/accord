@@ -311,8 +311,8 @@ def plot_reputation(rep_history: dict) -> None:
 
 def plot_consensus_cdf_dof(dag: DAG) -> None:
     """
-    Plot consensus score, CDF, and DOF for each satellite.
-    Consensus score on left y-axis, CDF on right y-axis.
+    Plot consensus score, Correctness Score, and DOF for each satellite.
+    Consensus score on left y-axis, Correctness Score on right y-axis.
     DOF shown as markers.
     """
     # Collect by satellite
@@ -325,13 +325,13 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
                 tx_data = json.loads(tx.tx_data)
             except Exception:
                 continue
-            sid = tx_data.get("observer_id")
+            sid = tx_data.get("observer") # Corrected: Use "observer" key
             if not sid:
                 continue
 
-            data_by_sat.setdefault(sid, []).append({
+            data_by_sat.setdefault(str(sid), []).append({ # Ensure sid is string for dict key
                 "consensus": tx.metadata.consensus_score,
-                "cdf": getattr(tx.metadata, "cdf", None),
+                "correctness": getattr(tx.metadata, "correctness_score", None),
                 "dof": getattr(tx.metadata, "dof", None),
                 "confirmed": getattr(tx.metadata, "is_confirmed", False),
                 "rejected": getattr(tx.metadata, "is_rejected", False),
@@ -340,7 +340,7 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
     # Filter out satellites with no data
     data_by_sat = {sid: vals for sid, vals in data_by_sat.items() if vals}
     if not data_by_sat:
-        logger.info("No consensus/CDF/DOF data available to plot.")
+        logger.info("No consensus/Correctness/DOF data available to plot.")
         return
 
     n_sats = len(data_by_sat)
@@ -351,7 +351,7 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
     for ax, (sid, records) in zip(axes, data_by_sat.items()):
         steps = range(len(records))
         consensus = [r["consensus"] for r in records]
-        cdf = [r["cdf"] for r in records]
+        correctness = [r["correctness"] for r in records] # Changed from cdf
         dof = [r["dof"] for r in records]
 
         # Scatter consensus
@@ -365,10 +365,10 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
         ax.set_title(f"Satellite {sid}")
         ax.grid(True, linestyle=":")
 
-        # Add CDF on secondary axis
+        # Add Correctness Score on secondary axis
         ax2 = ax.twinx()
-        ax2.plot(steps, cdf, "o-", color="orange", alpha=0.7, label="CDF")
-        ax2.set_ylabel("CDF Value", color="orange")
+        ax2.plot(steps, correctness, "o-", color="orange", alpha=0.7, label="Correctness Score") # Changed from cdf
+        ax2.set_ylabel("Correctness Score", color="orange") # Changed from CDF Value
         ax2.tick_params(axis="y", colors="orange")
 
         # Optional DOF display as text/markers
@@ -384,91 +384,6 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
     plt.tight_layout()
     plt.show()
 
-
-def plot_nis_consistency(dag: DAG, confidence: float = 0.95) -> None:
-    """
-    Plot Normalized Innovation Squared (NIS) values for each satellite,
-    comparing them to expected chi-squared consistency bounds.
-
-    Args:
-    - dag: The final DAG object containing transactions (with NIS + DOF metadata).
-    - confidence: Confidence level for chi-square bounds (default=0.95).
-
-    Returns:
-    - None. Displays NIS plots with statistical consistency regions.
-    """
-
-    # Gather NIS data per satellite
-    nis_by_sat: dict[str, dict[str, list]] = {}
-    for _, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            if not hasattr(tx.metadata, "nis") or not hasattr(tx.metadata, "dof"):
-                continue
-            try:
-                tx_data = json.loads(tx.tx_data)
-            except Exception:
-                continue
-
-            sid = tx_data.get("observer_id", "unknown")
-            dof = getattr(tx.metadata, "dof", None)
-            nis = getattr(tx.metadata, "nis", None)
-            if nis is None or dof is None:
-                continue
-
-            nis_by_sat.setdefault(sid, {"nis": [], "dof": []})
-            nis_by_sat[sid]["nis"].append(nis)
-            nis_by_sat[sid]["dof"].append(dof)
-
-    if not nis_by_sat:
-        logger.info("No NIS/DOF data found in DAG.")
-        return
-
-    n_sats = len(nis_by_sat)
-    _, axes = plt.subplots(n_sats, 1, figsize=(10, 5 * n_sats), sharex=True)
-    if n_sats == 1:
-        axes = [axes]
-
-    for ax, (sid, data) in zip(axes, nis_by_sat.items()):
-        nis_vals = np.array(data["nis"])
-        dof_vals = np.array(data["dof"])
-        mean_dof = np.mean(dof_vals)
-
-        # Compute chi-square confidence bounds
-        chi2_lower = chi2.ppf((1 - confidence) / 2, df=mean_dof)
-        chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
-        expected_mean = mean_dof
-
-        steps = np.arange(len(nis_vals))
-
-        # Plot NIS over time
-        ax.plot(steps, nis_vals, "o-", color="black", label="NIS")
-        ax.axhline(expected_mean, color="blue", linestyle="--",
-                   label=f"Expected mean (DOF={mean_dof:.1f})")
-        ax.fill_between(
-            steps,
-            chi2_lower,
-            chi2_upper,
-            color="green",
-            alpha=0.1,
-            label=f"{int(confidence*100)}% confidence region"
-        )
-
-        # Rolling mean NIS (smooth trend)
-        if len(nis_vals) > 5:
-            window = 5
-            rolling_mean = np.convolve(nis_vals, np.ones(window)
-                                       / window, mode="valid")
-            ax.plot(range(window-1, len(nis_vals)), rolling_mean,
-                    color="red", linewidth=2, label="Rolling mean (5)")
-
-        ax.set_ylabel("NIS Value")
-        ax.set_title(f"NIS Consistency — Satellite {sid}")
-        ax.grid(True, linestyle=":")
-        ax.legend(loc="upper right")
-
-    axes[-1].set_xlabel("Transaction Index")
-    plt.tight_layout()
-    plt.show()
 
 def plot_nis_consistency_overall(dag: DAG, confidence: float = 0.95) -> None:
     """
@@ -562,7 +477,6 @@ if __name__ == "__main__":
     if final_dag:
         #plot_transaction_dag(final_dag)
         plot_consensus_cdf_dof(final_dag)
-        plot_nis_consistency(final_dag)
         plot_nis_consistency_overall(final_dag)
     if rep_hist:
         plot_reputation(rep_hist)
