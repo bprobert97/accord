@@ -80,9 +80,32 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
     for obs in all_obs_records:
         obs_by_step[obs.step].append(obs)
 
+    # Define satellite IDs for special behavior
+    perfect_sat_id = 1
+    faulty_sat_id = 2
+    intermittent_sat_id = 3
+
     for k in range(config.steps):
         for obs in obs_by_step[k]:
             sid = obs.observer
+
+            # --- Inject special satellite behavior ---
+            if sid == perfect_sat_id:
+                # Perfect satellite: always has a very low NIS
+                obs.nis = 0.01
+            elif sid == faulty_sat_id:
+                # Faulty satellite: always has a very high NIS
+                obs.nis = 50.0
+            elif sid == intermittent_sat_id:
+                # Intermittently faulty satellite
+                if 200 <= k < 400:
+                    # Period of faulty behavior
+                    obs.nis = 50.0
+                elif 600 <= k < 800:
+                    # Period of exceptionally good behavior (recovery)
+                    # Demonstrates over long term recovery is possible
+                    obs.nis = 0.01
+
             sat = satellites[sid]
             sat.load_sensor_data(obs)
             logger.info("Satellite %s: submitting transaction.", sid)
