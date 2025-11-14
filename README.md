@@ -52,7 +52,6 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
-│   └── utils.py                   # Utility functions and global variables
 │
 ├── .codespellrc             # Codespell configuration file
 ├── .gitignore               # Files/folders to ignore in Git
