@@ -24,7 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import asyncio
 from typing import Optional
 import numpy as np
-from design.plotting import plot_consensus_cdf_dof, \
+from src.plotting import plot_consensus_cdf_dof, \
     plot_nis_consistency_overall, plot_reputation
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG

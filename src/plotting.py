@@ -1,3 +1,26 @@
+# pylint: disable=too-many-locals, too-many-statements, protected-access, broad-exception-caught
+"""
+The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
+Author: Beth Probert
+Email: beth.probert@strath.ac.uk
+
+Copyright (C) 2025 Applied Space Technology Laboratory
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+"""
+
 import json
 import re
 import pandas as pd
@@ -14,9 +37,9 @@ from src.reputation import MAX_REPUTATION, ReputationManager
 logger = get_logger()
 
 # === Configuration ===
-filename = "app.log"  # your log file path
-threshold = 0.6                # consensus threshold
-cmap = "viridis"               # color map for correctness
+FILENAME = "app.log"  # your log file path
+THRESHOLD = 0.6                # consensus threshold
+CMAP = "viridis"               # color map for correctness
 
 def plot_consensus_vs_reputation(df):
     """Plots consensus score vs reputation."""
@@ -25,11 +48,12 @@ def plot_consensus_vs_reputation(df):
         df["reputation"],
         df["consensus_score"],
         c=df["correctness"],
-        cmap=cmap,
+        cmap=CMAP,
         s=80,
         alpha=0.8,
     )
-    plt.axhline(threshold, color="red", linestyle="--", linewidth=1.5, label=f"Threshold = {threshold}")
+    plt.axhline(THRESHOLD, color="red", linestyle="--",
+                linewidth=1.5, label=f"Threshold = {THRESHOLD}")
     plt.colorbar(scatter, label="Correctness")
     plt.title("Consensus vs Reputation")
     plt.xlabel("Reputation")
@@ -45,7 +69,7 @@ def plot_nis_vs_correctness(df):
     plt.scatter(
         df["nis"],
         df["correctness"],
-        cmap=cmap,
+        cmap=CMAP,
         s=80,
         alpha=0.8,
     )
@@ -63,11 +87,12 @@ def plot_nis_vs_consensus(df):
         df["nis"],
         df["consensus_score"],
         c=df["correctness"],
-        cmap=cmap,
+        cmap=CMAP,
         s=80,
         alpha=0.8,
     )
-    plt.axhline(threshold, color="red", linestyle="--", linewidth=1.5, label=f"Threshold = {threshold}")
+    plt.axhline(THRESHOLD, color="red", linestyle="--",
+                linewidth=1.5, label=f"Threshold = {THRESHOLD}")
     plt.colorbar(scatter, label="Correctness")
     plt.title("NIS vs Consensus Score")
     plt.xlabel("NIS")
@@ -81,17 +106,19 @@ def main():
     """Main function to parse log and generate plots."""
     # === Step 1: Parse the log file ===
     pattern = re.compile(
-        r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), consensus_score=([0-9.]+),\s*reputation=([0-9.]+)"
+        r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), \
+            consensus_score=([0-9.]+),\s*reputation=([0-9.]+)"
     )
 
     data = []
     try:
-        with open(filename, "r") as f:
+        with open(FILENAME, "r", encoding="utf-8") as f:
             content = f.read()
             for match in pattern.finditer(content):
                 data.append(tuple(map(float, match.groups())))
     except FileNotFoundError:
-        print(f"Error: Log file not found at '{filename}'. Make sure the path is correct.")
+        print(f"Error: Log file not found at '{FILENAME}'. \
+              Make sure the path is correct.")
         return
 
     if not data:
@@ -99,7 +126,8 @@ def main():
         return
 
     # Convert to DataFrame
-    df = pd.DataFrame(data, columns=["nis", "dof", "correctness", "consensus_score", "reputation"])
+    df = pd.DataFrame(data, columns=["nis", "dof", "correctness",
+                                     "consensus_score", "reputation"])
 
     # === Step 2: Generate plots ===
     plot_consensus_vs_reputation(df)
