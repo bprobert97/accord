@@ -32,7 +32,6 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── od_class_diagram.txt       # PlantUML syntax for the OD class diagram
 │   └── od_flowchart.txt           # PlantUML syntax for the OD flowchart
 │   └── od_sequence_diagram.txt    # PlantUML syntax for the OD sequence diagram
-|   └── plotting.py                # Python script for plotting NIS, correctness, reputation and consensus scores
 │
 ├── 📁 images/                         # Image assets
 │   └── consensus_flowchart.png        # Flowchart of consensus mechanism
@@ -49,6 +48,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure
 │   └── filter.py                  # Code for the orbit determination calculations
 │   └── logger.py                  # Code for the app logger
+|   └── plotting.py                # Python script for plotting NIS, correctness, reputation and consensus scores
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
