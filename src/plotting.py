@@ -106,8 +106,7 @@ def main():
     """Main function to parse log and generate plots."""
     # === Step 1: Parse the log file ===
     pattern = re.compile(
-        r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), \
-            consensus_score=([0-9.]+),\s*reputation=([0-9.]+)"
+        r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), consensus_score=([0-9.]+),\s*reputation=([0-9.]+)" # pylint: disable=line-too-long
     )
 
     data = []
@@ -339,7 +338,7 @@ def plot_reputation(rep_history: dict) -> None:
     plt.axhline(neutral_level, color="gray", linestyle=":", label=f"Neutral ({neutral_level})")
 
     plt.ylim(0, MAX_REPUTATION)
-    plt.xlabel("Time step [minutes]")
+    plt.xlabel("Chronological Transaction Index [-]")
     plt.ylabel("Reputation Score [-]")
     plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.)
     plt.grid(True, linestyle=":")
