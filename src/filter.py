@@ -550,7 +550,8 @@ class JointEKF:
         """
         Performs the prediction step of the EKF.
         """
-        ekf_predict_joint(self.ekf, self.config.dt, self.config.N, self.config.q_acc_target, self.config.q_acc_obs)
+        ekf_predict_joint(self.ekf, self.config.dt, self.config.N,
+                          self.config.q_acc_target, self.config.q_acc_obs)
 
     def update(self, z_k: np.ndarray, k: int) -> List[ObservationRecord]:
         """
@@ -564,7 +565,8 @@ class JointEKF:
         - A list of ObservationRecord objects for the current step.
         """
         y = _ekf_update(self.ekf, z_k, self.config.N)
-        return _log_nis(y, self.ekf, self.config.N, k, self.config.dt, self.config.sig_r, self.config.sig_rdot)
+        return _log_nis(y, self.ekf, self.config.N, k, self.config.dt,
+                        self.config.sig_r, self.config.sig_rdot)
 
 # ----------------------- Plot Helpers --------------------
 def extract_mean_nis_per_sat(result: JointResult) -> list[list[float]]:
@@ -722,26 +724,3 @@ def run_joint_ekf_simulation(config: FilterConfig) -> JointResult:
         truth=truth,
         z_hist=z_hist,
     )
-
-# ----------------------- Demo -----------------------------
-if __name__ == "__main__":
-    default_config = FilterConfig(
-        N=10,
-        steps=3000,
-        dt=60.0,
-        sig_r=10.0,
-        sig_rdot=0.2,
-        q_acc_target=1e-5,
-        q_acc_obs=1e-5,   # kept for signature compatibility
-        seed=42,
-    )
-    end_result = run_joint_ekf_simulation(default_config)
-
-    print("Satellites:", end_result.target_ids)
-
-    end_nis_matrix = extract_mean_nis_per_sat(end_result)
-    for num, series in enumerate(end_nis_matrix):
-        print(f"  Sat {num}: last-step mean NIS = {series[-1]:.3f}")
-
-    plot_nis(end_result)
-    plot_nis_consistency(end_result, window=80)

@@ -33,7 +33,7 @@ from scipy.stats import chi2
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
-    simulate_truth_and_meas, JointEKF
+    simulate_truth_and_meas, JointEKF, ObservationRecord
 from src.logger import get_logger
 from src.reputation import MAX_REPUTATION, ReputationManager
 from src.satellite_node import SatelliteNode
@@ -81,7 +81,7 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
     rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
 
     # Group observations by step
-    obs_by_step = [[] for _ in range(config.steps)]
+    obs_by_step: list[list[ObservationRecord]] = [[] for _ in range(config.steps)]
     for obs in all_obs_records:
         obs_by_step[obs.step].append(obs)
 
@@ -367,7 +367,8 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
 
         # Add Correctness Score on secondary axis
         ax2 = ax.twinx()
-        ax2.plot(steps, correctness, "o-", color="orange", alpha=0.7, label="Correctness Score") # Changed from cdf
+        ax2.plot(steps, correctness, "o-", color="orange", alpha=0.7,
+                 label="Correctness Score") # Changed from cdf
         ax2.set_ylabel("Correctness Score", color="orange") # Changed from CDF Value
         ax2.tick_params(axis="y", colors="orange")
 

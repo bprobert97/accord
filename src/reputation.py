@@ -1,4 +1,4 @@
-# pylint: disable=too-many-arguments, too-many-positional-arguments
+# pylint: disable=too-many-arguments, too-many-positional-arguments, too-many-instance-attributes
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -110,7 +110,8 @@ class ReputationManager:
         new_rep = current_rep + self.alpha * (target - current_rep)
         return float(min(self.max_rep, new_rep)), exp_pos + 1
 
-    def apply_negative(self, current_rep: float, exp_pos: int, correctness_score: float = 0.0) -> tuple[float, int]:
+    def apply_negative(self, current_rep: float, exp_pos: int,
+                       correctness_score: float = 0.0) -> tuple[float, int]:
         """
         Apply reputation effect for a negative node interaction.
 

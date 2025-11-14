@@ -14,7 +14,6 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ## Related Publications
 
 * [B. Probert, R. A. Clark, E. Blasch, and M. Macdonald, “A Review of Distributed Ledger Technologies for Satellite Operations,” IEEE Access, vol. 13, pp. 123230–123258, 2025, doi: 10.1109/ACCESS.2025.3588688](https://ieeexplore.ieee.org/document/11079570)
-* [X. Zhou, D. Qiao, M. Malcolm, and X. Li, “Efficient Orbit Determination Using Measurement-Directional State Transition Tensor,” IEEE Transactions on Aerospace and Electronic Systems, vol. 61, no. 3, pp. 8014–8027, June 2025, doi: 10.1109/TAES.2025.3527410](https://ieeexplore.ieee.org/document/10852409)
 
 
 # Repository Layout
@@ -33,6 +32,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── od_class_diagram.txt       # PlantUML syntax for the OD class diagram
 │   └── od_flowchart.txt           # PlantUML syntax for the OD flowchart
 │   └── od_sequence_diagram.txt    # PlantUML syntax for the OD sequence diagram
+|   └── plotting.py                # Python script for plotting NIS, correctness, reputation and consensus scores
 │
 ├── 📁 images/                         # Image assets
 │   └── consensus_flowchart.png        # Flowchart of consensus mechanism
@@ -47,13 +47,10 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── __init__.py                # Empty file, for module creation
 │   └── consensus_mech.py          # Code for the PoISE consensus mechanism
 │   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure
+│   └── filter.py                  # Code for the orbit determination calculations
 │   └── logger.py                  # Code for the app logger
-│   └── module_crtbp.py            # Code for circular restricted 3 body problem dynamics *
-│   └── module_stt.py              # Code for state transition tensor calculations *
-│   └── od_filter.py               # Code for the orbit determination calculation work
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
-│   └── satellite_sim.mlx          # MATLAB Live Script performing satellite simulation work
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │   └── utils.py                   # Utility functions and global variables
 │
@@ -67,10 +64,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ├── README.md                # Project overview
 ├── requirements.txt         # List of python package dependencies
 └── requirements_linux.txt   # List of python package dependencies for linux and CI
-└── sim_output.json          # Orbit determination data for use in consensus generated from satellite_sim.mlx
 
-* - Adapted from ZHOUXINGYU-OASIS, ‘ZHOUXINGYU-OASIS/MDSTT: v1.0.0’. Zenodo, Jul. 29, 2024.
-doi: 10.5281/zenodo.13123587.
 </pre>
 
 # Installation
