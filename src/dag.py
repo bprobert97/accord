@@ -52,7 +52,7 @@ class DAG():
         self.ledger: dict = self.create_genesis_tx()
         self.consensus_mech = consensus_mech
         self.queue = queue
-        self.mean_nis_per_satellite = []
+        self.mean_nis_per_satellite: dict[int, float] = {}
 
     async def listen(self) -> None:
         """
@@ -174,6 +174,6 @@ class DAG():
                     continue
 
         mean_nis_per_satellite: dict[int, float] = {
-            sat_id: np.mean(nis_values) for sat_id, nis_values in nis_by_sat.items()
+            sat_id: float(np.mean(nis_values)) for sat_id, nis_values in nis_by_sat.items()
         }
         return mean_nis_per_satellite

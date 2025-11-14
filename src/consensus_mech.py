@@ -1,4 +1,4 @@
-# pylint: disable=too-many-return-statements too-many-branches
+# pylint: disable=too-many-return-statements too-many-branches too-many-arguments too-many-positional-arguments
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -25,7 +25,6 @@ import json
 import math
 from typing import Optional
 import numpy as np
-from scipy.stats import chi2
 from .dag import DAG
 from.filter import ObservationRecord
 from .logger import get_logger
@@ -175,7 +174,8 @@ class ConsensusMechanism():
 
         return float(score)
 
-    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord, mean_nis_per_satellite: dict[int, float]) -> tuple[float, float]:
+    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord,
+                              mean_nis_per_satellite: dict[int, float]) -> tuple[float, float]:
         """
         Calculate correctness score based on NIS and past observations of the same target.
         This function now calculates and returns the new EMA of the NIS.
@@ -219,8 +219,7 @@ class ConsensusMechanism():
             return neutral_score, nis
 
         # Get historical EMA NIS for the observer satellite
-        observer_id = obs_record.observer
-        historical_ema_nis = mean_nis_per_satellite.get(observer_id)
+        historical_ema_nis = mean_nis_per_satellite.get(obs_record.observer)
 
         # Calculate the new EMA for the NIS
         if historical_ema_nis is None:
@@ -274,9 +273,6 @@ class ConsensusMechanism():
         # Min acceptable correctness for consensus = 0.5
         # Min DOF score = 0.33
         # Min reputation = 0
-        # TODO - look at more tomorrow. Updates:
-        # Need to check that 0.5 correctness is right? May need to switch to PDF from CDF?
-        # Because 0.4 correctness might actually be okay? shee chi2 plots
 
         # Relative to baselines (can go negative for correctness)
         c_rel = max(min((correctness - 0.5) / 0.5, 1.0), -1.0)      # [-1,1]
@@ -301,23 +297,11 @@ class ConsensusMechanism():
 
         return min(max(consensus, 0.0), 1.0)
 
-        # c = max(0.0, min(1.0, correctness))
-        # r = max(0.0, min(1.0, rep_norm))
-        # t = self.consensus_threshold
-
-        # # Coefficients solving the four anchor equations
-        # b  = t
-        # c2 = 3*t - 1
-        # d  = 2 - 4*t
-
-        # s = b*c + c2*r + d*c*r  # bilinear surface S(c, r)
-
-        # return max(0.0, min(1.0, s))  # clamp
-
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
                                             transaction: Transaction,
-                                            mean_nis_per_satellite: dict[int, float]) -> tuple[bool, Optional[float]]:
+                                            mean_nis_per_satellite: dict[int, float]
+                                            ) -> tuple[bool, Optional[float]]:
         """
         Returns a bool of it consensus has been reached, and the new EMA NIS for the satellite.
         NOTE: Assume one witnessed satellite per transaction
@@ -352,7 +336,8 @@ class ConsensusMechanism():
 
         # 4) Check if satellite has been witnessed before
         #4a if yes, does this data agree with other data/ is it correct?
-        correctness_score, new_ema_nis = self.get_correctness_score(dag, obs_record, mean_nis_per_satellite)
+        correctness_score, new_ema_nis = self.get_correctness_score(dag, obs_record,
+                                                                    mean_nis_per_satellite)
 
         # 5) Reward measurements with higher DOF (more accurate, reduced comp. intensity)
         dof_score = self.calculate_dof_score(obs_record.dof)

@@ -37,8 +37,8 @@ class SatelliteNode():
     A class representing a node in the network, in this case a LEO satellite.
     This does NOT represent a node in the ledger - these are transactions
     """
-    def __init__(self, node_id: str, queue: asyncio.Queue) -> None:
-        self.id: str = node_id
+    def __init__(self, node_id: int, queue: asyncio.Queue) -> None:
+        self.id: int = node_id
         self.queue = queue
         self.exp_pos: int = 0
         # Reputation starts at a neutral level
