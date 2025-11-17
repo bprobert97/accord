@@ -25,7 +25,8 @@ import asyncio
 from typing import Optional
 import numpy as np
 from src.plotting import plot_consensus_cdf_dof, \
-    plot_nis_consistency_overall, plot_reputation
+    plot_nis_consistency_by_satellite, plot_reputation, \
+    check_consensus_outcomes
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
@@ -101,10 +102,6 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
                 if 200 <= k < 400:
                     # Period of faulty behavior
                     obs.nis = 50.0
-                elif 600 <= k < 800:
-                    # Period of exceptionally good behavior (recovery)
-                    # Demonstrates over long term recovery is possible
-                    obs.nis = 0.01
 
             sat = satellites[sid]
             sat.load_sensor_data(obs)
@@ -132,6 +129,7 @@ if __name__ == "__main__":
     if final_dag:
         #plot_transaction_dag(final_dag)
         plot_consensus_cdf_dof(final_dag)
-        plot_nis_consistency_overall(final_dag)
+        plot_nis_consistency_by_satellite(final_dag)
+        check_consensus_outcomes(final_dag)
     if rep_hist:
         plot_reputation(rep_hist)
