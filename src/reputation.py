@@ -37,8 +37,8 @@ class ReputationManager:
                  growth_rate: float = 0.6,
                  decay_rate: float = 0.002,
                  alpha: float = 0.12,
-                 min_drop_factor: float = 0.35,
-                 max_drop_factor: float = 0.85) -> None:
+                 min_drop_factor: float = 0.65,
+                 max_drop_factor: float = 0.95) -> None:
         """
         max_rep: max possible reputation
         B, C: Gompertz curve parameters
@@ -139,7 +139,7 @@ class ReputationManager:
         # Merit is a weighted average of reputation and correctness (0 to 1)
         rep_merit = current_rep / self.max_rep
         # Using 50/50 weighting for reputation and correctness
-        combined_merit = 0.5 * rep_merit + 0.5 * correctness_score
+        combined_merit = 0.8 * rep_merit + 0.2 * correctness_score
 
         dynamic_drop_factor = self.min_drop_factor + bonus_range * combined_merit
 
