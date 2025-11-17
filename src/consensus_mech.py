@@ -145,39 +145,69 @@ class ConsensusMechanism():
 
         return True
 
-    def nis_to_score(self, nis: float, dof: int) -> float:
+    def nis_to_score(self, nis: float, dof: int, historical_ema_nis: Optional[float] = None) -> float:
         """
-        Convert NIS into a normalised [0,1] correctness score.
-        The score rewards NIS values that are close to the expected mean (DOF),
-        promoting long-term statistical consistency. Values that are too high or
-        too low are penalised.
+        Convert NIS into a normalised [0,1] correctness score, considering historical performance.
+        The score is high if the new NIS brings the historical EMA closer to the expected value (dof).
+        The score is low if the new NIS pulls the EMA further away, or if the NIS is an outlier.
 
         Args:
         - nis: Normalised Innovation Squared value (>=0).
         - dof: Degrees of freedom of the measurement.
+        - historical_ema_nis: The historical Exponential Moving Average of NIS for the satellite.
 
         Returns:
         - Correctness score in [0,1].
         """
-        # Ensure valid inputs
         nis = max(0.0, float(nis))
         dof = max(1, int(dof))
-
-        # The score is based on the chi-squared distribution. The expected value
-        # (mean) of the NIS is equal to the degrees of freedom (DOF), and the
-        # variance is 2 * DOF.
-        # This scoring function is a Gaussian centered on the mean (dof), which
-        # rewards NIS values close to the expected value and penalises values
-        # that are too high or too low ("too good to be true").
         variance = 2 * dof
-        score = math.exp(-((nis - dof) ** 2) / (2 * variance))
 
-        return float(score)
+        def _calculate_gaussian_score(current_nis: float, current_dof: int) -> float:
+            """Calculates a simple score based on a Gaussian function centered on dof."""
+            return math.exp(-((current_nis - current_dof) ** 2) / (2 * variance))
+
+        if historical_ema_nis is None:
+            # First observation. Score is based on how close the first NIS is to dof.
+            return _calculate_gaussian_score(nis, dof)
+
+        # Hard penalty for very large NIS values, indicating an outlier
+        # TODO - might be too heavily influencing reputation on NIS at the moment.Need
+        # to remember to look at reputation and consensus differently
+        if nis > 5 * dof:
+            return 0
+
+        # Calculate new EMA
+        new_ema_nis = (nis * self.ema_alpha) + (historical_ema_nis * (1 - self.ema_alpha))
+        logger.info("BCP999 old %s, new %s", historical_ema_nis, new_ema_nis)
+
+        # Score based on whether the new NIS brings the EMA closer to the expected value (dof)
+        dist_before = abs(historical_ema_nis - dof)
+        dist_after = abs(new_ema_nis - dof)
+
+        improvement = dist_before - dist_after
+
+        # The base score is determined by how close the current NIS is to the ideal value (dof).
+        # This provides an instantaneous measure of the measurement's quality.
+        base_score = _calculate_gaussian_score(nis, dof)
+        logger.info("BCP002 base score: %.6f", base_score)
+
+        # The improvement factor modulates the score based on historical performance.
+        # A positive improvement (moving closer to dof) increases the score.
+        # A negative improvement (moving away) decreases it.
+        improvement_factor = np.tanh(improvement)
+        logger.info("BCP001 improvement factor: %.6f", improvement_factor)
+
+        # Combine instantaneous score with historical improvement.
+        # A good current NIS can receive a high score even with a poor history,
+        # especially if it shows improvement.
+        final_score = base_score * (1 + improvement_factor * 0.5)
+        return max(0.0, min(1.0, final_score))
 
     def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord,
                               mean_nis_per_satellite: dict[int, float]) -> tuple[float, float]:
         """
-        Calculate correctness score based on NIS and past observations of the same target.
+        Calculate correctness score based on NIS and historical performance.
         This function now calculates and returns the new EMA of the NIS.
 
         Args:
@@ -190,47 +220,19 @@ class ConsensusMechanism():
             - Correctness score in [0,1]. 0 = low agreement, 1 = high agreement.
             - The new EMA NIS value for the observing satellite.
         """
-
-        target_id = obs_record.target
         nis = obs_record.nis
         dof = obs_record.dof
-        matches = []
 
-        # If we've never seen this target_id before -> neutral score
-        for tx_list in dag.ledger.values():
-            for tx in tx_list:
-                if tx.tx_data.startswith("Genesis"):
-                    continue
-                try:
-                    past_data = json.loads(tx.tx_data)
-                    if past_data.get("target") == target_id:
-                        matches.append(past_data)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-
-        # If this satellite has not been seen before, give it a neutral score
-        # Also, if the filter has been initialised for the first time, return a
-        # neutral score
-        if not matches or math.isnan(nis):
-            # Neutral value is the expected NIS for the given dof
-            # Expected[NIS] = dof, so neutral score = nis_to_score(dof, dof)
-            neutral_score = self.nis_to_score(float(dof), dof)
-            # The first NIS value is itself the start of the EMA
-            return neutral_score, nis
-
-        # Get historical EMA NIS for the observer satellite
         historical_ema_nis = mean_nis_per_satellite.get(obs_record.observer)
 
-        # Calculate the new EMA for the NIS
-        if historical_ema_nis is None:
-            # This is the first observation from this satellite, start the EMA
-            smoothed_nis = nis
-        else:
-            # Update the EMA with the new NIS value
-            smoothed_nis = (nis * self.ema_alpha) + (historical_ema_nis * (1 - self.ema_alpha))
+        score = self.nis_to_score(nis, dof, historical_ema_nis)
 
-        score = self.nis_to_score(smoothed_nis, dof)
-        return score, smoothed_nis
+        if historical_ema_nis is None:
+            new_ema_nis = nis
+        else:
+            new_ema_nis = (nis * self.ema_alpha) + (historical_ema_nis * (1 - self.ema_alpha))
+
+        return score, new_ema_nis
 
 
     def calculate_dof_score(self, dof: int) -> float:
