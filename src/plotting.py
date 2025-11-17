@@ -30,11 +30,7 @@ from matplotlib.lines import Line2D
 import networkx as nx
 import numpy as np
 from scipy.stats import chi2
-from src.dag import DAG
-from src.logger import get_logger
 from src.reputation import MAX_REPUTATION, ReputationManager
-
-logger = get_logger()
 
 # === Configuration ===
 FILENAME = "app.log"  # your log file path
@@ -134,7 +130,7 @@ def main():
     plot_nis_vs_consensus(df)
 
 
-def plot_transaction_dag(dag: DAG) -> None:
+def plot_transaction_dag(dag) -> None:
     """
     Plot the transaction DAG.
 
@@ -345,7 +341,7 @@ def plot_reputation(rep_history: dict) -> None:
     plt.tight_layout()
     plt.show()
 
-def plot_consensus_cdf_dof(dag: DAG) -> None:
+def plot_consensus_cdf_dof(dag) -> None:
     """
     Plot consensus score, Correctness Score, and DOF for each satellite.
     Consensus score on left y-axis, Correctness Score on right y-axis.
@@ -376,7 +372,7 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
     # Filter out satellites with no data
     data_by_sat = {sid: vals for sid, vals in data_by_sat.items() if vals}
     if not data_by_sat:
-        logger.info("No consensus/Correctness/DOF data available to plot.")
+        print("No consensus/Correctness/DOF data available to plot.")
         return
 
     n_sats = len(data_by_sat)
@@ -422,9 +418,9 @@ def plot_consensus_cdf_dof(dag: DAG) -> None:
     plt.show()
 
 
-def plot_nis_consistency_overall(dag: DAG, confidence: float = 0.95) -> None:
+def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
     """
-    Plot overall Normalized Innovation Squared (NIS) values (aggregated across all satellites),
+    Plots Normalized Innovation Squared (NIS) values for each satellite individually,
     comparing them to expected chi-squared consistency bounds.
 
     Args:
@@ -432,69 +428,164 @@ def plot_nis_consistency_overall(dag: DAG, confidence: float = 0.95) -> None:
     - confidence: Confidence level for chi-square bounds (default=0.95).
 
     Returns:
-    - None. Displays NIS plot with statistical consistency region.
+    - None. Displays NIS plots with statistical consistency regions for each satellite.
     """
-
-    # Gather all NIS and DOF data
-    all_nis = []
-    all_dof = []
-
+    # Collect data by satellite
+    data_by_sat: dict[str, list] = {}
     for _, tx_list in dag.ledger.items():
         for tx in tx_list:
             if not hasattr(tx.metadata, "nis") or not hasattr(tx.metadata, "dof"):
                 continue
+
+            try:
+                tx_data = json.loads(tx.tx_data)
+            except Exception:
+                continue
+
+            sid = tx_data.get("observer")
+            if sid is None:
+                continue
+
             nis = getattr(tx.metadata, "nis", None)
             dof = getattr(tx.metadata, "dof", None)
             if nis is None or dof is None:
                 continue
-            all_nis.append(nis)
-            all_dof.append(dof)
 
-    if not all_nis:
-        logger.info("No NIS/DOF data found in DAG.")
+            data_by_sat.setdefault(str(sid), []).append({
+                "nis": nis,
+                "dof": dof,
+            })
+
+    # Filter out satellites with no data
+    data_by_sat = {sid: vals for sid, vals in data_by_sat.items() if vals}
+    if not data_by_sat:
+        print("No NIS/DOF data available to plot.")
         return
 
-    # Convert to numpy arrays
-    nis_vals = np.array(all_nis)
-    dof_vals = np.array(all_dof)
-    mean_dof = np.mean(dof_vals)
+    n_sats = len(data_by_sat)
+    _, axes = plt.subplots(n_sats, 1, figsize=(12, 5 * n_sats), sharex=True)
+    if n_sats == 1:
+        axes = [axes]
 
-    # Compute chi-square confidence bounds
-    chi2_lower = chi2.ppf((1 - confidence) / 2, df=mean_dof)
-    chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
-    expected_mean = mean_dof
+    # Sort by satellite ID for consistent plot order
+    sorted_sats = sorted(data_by_sat.items(), key=lambda item: int(item[0]))
 
-    # Plot overall NIS sequence
-    steps = np.arange(len(nis_vals))
-    plt.figure(figsize=(10, 6))
-    plt.plot(steps, nis_vals, "o-", color="black", label="NIS")
+    for ax, (sid, records) in zip(axes, sorted_sats):
+        nis_vals = np.array([r["nis"] for r in records])
+        dof_vals = np.array([r["dof"] for r in records])
 
-    # Expected mean and confidence region
-    plt.axhline(expected_mean, color="blue", linestyle="--",
-                label=f"Expected mean (DOF={mean_dof:.1f})")
-    plt.fill_between(
-        steps,
-        chi2_lower,
-        chi2_upper,
-        color="green",
-        alpha=0.1,
-        label=f"{int(confidence*100)}% confidence region"
-    )
+        if len(nis_vals) == 0:
+            continue
 
-    # Rolling mean for trend visualization
-    if len(nis_vals) > 5:
-        window = 5
-        rolling_mean = np.convolve(nis_vals, np.ones(window) / window, mode="valid")
-        plt.plot(range(window-1, len(nis_vals)), rolling_mean,
-                 color="red", linewidth=2, label="Rolling mean (5)")
+        mean_dof = np.mean(dof_vals)
 
-    plt.title("Overall NIS Consistency (All Satellites Combined)")
-    plt.xlabel("Transaction Index")
-    plt.ylabel("NIS Value")
-    plt.grid(True, linestyle=":")
-    plt.legend(loc="upper right")
+        # Compute chi-square confidence bounds
+        chi2_lower = chi2.ppf((1 - confidence) / 2, df=mean_dof)
+        chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
+        expected_mean = mean_dof
+
+        # Plot NIS sequence
+        steps = np.arange(len(nis_vals))
+        ax.plot(steps, nis_vals, "o-", color="black", label="NIS")
+
+        # Expected mean and confidence region
+        ax.axhline(expected_mean, color="blue", linestyle="--",
+                    label=f"Expected mean (DOF={mean_dof:.1f})")
+        ax.fill_between(
+            steps,
+            chi2_lower,
+            chi2_upper,
+            color="green",
+            alpha=0.1,
+            label=f"{int(confidence*100)}% confidence region"
+        )
+
+        # Rolling mean for trend visualization
+        if len(nis_vals) > 5:
+            window = 5
+            rolling_mean = np.convolve(nis_vals, np.ones(window) / window, mode="valid")
+            ax.plot(range(window-1, len(nis_vals)), rolling_mean,
+                     color="red", linewidth=2, label="Rolling mean (5)")
+
+        ax.set_title(f"NIS Consistency for Satellite {sid}")
+        ax.set_ylabel("NIS Value")
+        ax.grid(True, linestyle=":")
+        ax.legend(loc="upper right")
+
+    axes[-1].set_xlabel("Transaction Index")
     plt.tight_layout()
     plt.show()
+
+
+def check_consensus_outcomes(dag, consensus_threshold: float = 0.6) -> bool:
+    """
+    Checks if transaction consensus outcomes (confirmed/rejected) are consistent
+    with their consensus scores and reports any discrepancies.
+
+    This function iterates through all transactions in the DAG that have a consensus
+    score and verifies that:
+    1. Transactions with a score >= threshold are marked as 'confirmed'.
+    2. Transactions with a score < threshold are marked as 'rejected'.
+
+    Args:
+    - dag: The DAG containing transaction data.
+    - consensus_threshold: The consensus threshold used in the simulation.
+
+    Returns:
+    - True if all outcomes are consistent, False otherwise.
+    """
+    inconsistencies = []
+    counter = 0
+    for tx_hash, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            # Skip genesis transactions or transactions without a score
+            if not hasattr(tx.metadata, "consensus_score"):
+                continue
+
+            score = tx.metadata.consensus_score
+            is_confirmed = getattr(tx.metadata, "is_confirmed", False)
+            is_rejected = getattr(tx.metadata, "is_rejected", False)
+
+            # Expected outcome based on the score
+            should_be_confirmed = score >= consensus_threshold
+
+            # Check for inconsistencies
+            if should_be_confirmed:
+                # Skip first 2 genesis transactions
+                if not is_confirmed and "Genesis" in tx_hash:
+                    inconsistencies.append(
+                        f"TX {tx_hash[:8]}: score {score:.3f} >= {consensus_threshold} "
+                        f"but was NOT confirmed."
+                    )
+                if is_rejected:
+                    inconsistencies.append(
+                        f"TX {tx_hash[:8]}: score {score:.3f} >= {consensus_threshold} "
+                        f"but was REJECTED."
+                    )
+            else:  # Should be rejected
+                if is_confirmed:
+                    inconsistencies.append(
+                        f"TX {tx_hash[:8]}: score {score:.3f} < {consensus_threshold} "
+                        f"but was CONFIRMED."
+                    )
+                    # Skip 2 genesis transactions and 3 real transactions
+                    # needed for BFT quorum
+                elif not is_rejected and counter >= 5:
+                    inconsistencies.append(
+                        f"TX {tx_hash[:8]}: score {score:.3f} < {consensus_threshold} "
+                        f"but was NOT rejected."
+                    )
+            counter += 1
+
+    if not inconsistencies:
+        print("✅ Consensus outcomes are consistent with scores.")
+        return True
+
+    print("❌ Found inconsistencies in consensus outcomes:")
+    for issue in inconsistencies:
+        print("- %s" % issue)
+    return False
+
 
 if __name__ == "__main__":
     main()
