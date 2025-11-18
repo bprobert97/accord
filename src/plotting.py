@@ -583,7 +583,7 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.6) -> bool:
 
     print("❌ Found inconsistencies in consensus outcomes:")
     for issue in inconsistencies:
-        print("- %s" % issue)
+        print("- %s", issue)
     return False
 
 
