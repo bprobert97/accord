@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import asyncio
+import os
 from typing import Optional
 import numpy as np
 from src.plotting import plot_consensus_cdf_dof, \
@@ -36,6 +37,16 @@ from src.satellite_node import SatelliteNode
 
 logger = get_logger()
 
+def clear_log() -> None:
+    """
+    Clear the application log file at the start of the demo.
+    """
+    log_file_path = "app.log"
+    if os.path.exists(log_file_path):
+        with open(log_file_path, 'w', encoding='utf-8') as f:
+            f.truncate(0)
+        logger.info("Cleared app.log at the start of accord_demo.py")
+
 async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optional[dict]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
@@ -47,7 +58,7 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
     Returns:
     - The final DAG object after all transactions have been processed.
     """
-
+    clear_log()
     truth, z_hist = simulate_truth_and_meas(
         config.N, config.steps, config.dt, config.sig_r, config.sig_rdot
     )
