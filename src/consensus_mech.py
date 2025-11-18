@@ -22,7 +22,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import json
-import math
 from typing import Optional
 import numpy as np
 from scipy.stats import chi2
@@ -82,8 +81,6 @@ class ConsensusMechanism():
             return _calculate_twosided_chi2_score(nis, dof)
 
         # Hard penalty for very large NIS values, indicating an outlier
-        # TODO - might be too heavily influencing reputation on NIS at the moment.Need
-        # to remember to look at reputation and consensus differently
         if nis > 5 * dof:
             return 0
 
@@ -231,23 +228,15 @@ class ConsensusMechanism():
         dag.add_tx(transaction)
 
         # 3) Check we have enough data to be bft (3f + 1)
-        # If not, consensus cannot be reached.
-        # Length of DAG is 2 by default with genesis transactions. These are dummy data,
-        # so we must have at least 4 real transactions on top to be BFT (2 + 4 =  total)
         if not dag.has_bft_quorum():
             logger.info("Not enough transactions for BFT quorum.")
             logger.info("Satellite reputation unchanged at %.2f", sat_node.reputation)
             return False, new_ema_nis
 
-        # 4) Check if satellite has been witnessed before
-        #4a if yes, does this data agree with other data/ is it correct?
+        # 4) Calculate correctness and consensus scores
         correctness_score, new_ema_nis = self.get_correctness_score(obs_record,
                                                                     mean_nis_per_satellite)
-
-        # 5) Reward measurements with higher DOF (more accurate, reduced comp. intensity)
         dof_score = self.calculate_dof_score(obs_record.dof)
-
-        # 6) Calculate consensus score
         consensus_score = self.calculate_consensus_score(correctness_score,
                                                          dof_score,
                                                          sat_node.reputation)
@@ -263,34 +252,39 @@ class ConsensusMechanism():
         obs_record.nis, obs_record.dof,
         correctness_score, consensus_score, sat_node.reputation)
 
-        sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
-        logger.info("Satellite reputation decayed to %.3f.",
-                    sat_node.reputation)
+        # 5) Update reputation based on statistical confidence of NIS
+        lower_bound = chi2.ppf(0.025, obs_record.dof)
+        upper_bound = chi2.ppf(0.975, obs_record.dof)
+        is_within_bounds = lower_bound <= obs_record.nis <= upper_bound
 
-        # 7) Check if consensus reached
-        if consensus_score >= self.consensus_threshold:
-            transaction.metadata.consensus_reached = True
+        sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
+        logger.info("Satellite reputation decayed to %.3f.", sat_node.reputation)
+
+        if is_within_bounds:
+            # If NIS is within 95% confidence, reputation grows slowly
             sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
                 sat_node.rep_manager.apply_positive(
                     sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
             )
+            logger.info("NIS within bounds. Reputation slowly increased to %.2f",
+                        sat_node.reputation)
+        else:
+            # If NIS is outside 95% confidence, penalise reputation
+            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                sat_node.rep_manager.apply_negative(
+                    sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
+            )
+            logger.info("NIS outside bounds. Reputation decreased to %.2f", sat_node.reputation)
+
+        # 6) Check if consensus is reached for transaction confirmation
+        if consensus_score >= self.consensus_threshold:
+            transaction.metadata.consensus_reached = True
             transaction.metadata.is_confirmed = True
-            logger.info("Satellite reputation increased to %.2f", sat_node.reputation)
             logger.info("Successful consensus score: %.2f", consensus_score)
             return True, new_ema_nis
 
         logger.info("Consensus threshold of %.2f does not met threshold.",
                     consensus_score)
-
-        # If data is invalid, or consensus score is below threshold
-        # the transaction is rejected and the node's reputation is penalised.
         transaction.metadata.consensus_reached = False
-        sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
-            sat_node.rep_manager.apply_negative(
-                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
-        )
         transaction.metadata.is_rejected = True
-        logger.info("Satellite reputation decreased to %.2f",
-                    sat_node.reputation)
-
         return False, new_ema_nis
