@@ -266,8 +266,9 @@ class ConsensusMechanism():
         # 7) Check if consensus reached
         if consensus_score >= self.consensus_threshold:
             transaction.metadata.consensus_reached = True
-            sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
-                sat_node.reputation, sat_node.exp_pos
+            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                sat_node.rep_manager.apply_positive(
+                    sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
             )
             transaction.metadata.is_confirmed = True
             logger.info("Satellite reputation increased to %.2f", sat_node.reputation)
@@ -280,8 +281,9 @@ class ConsensusMechanism():
         # If data is invalid, or consensus score is below threshold
         # the transaction is rejected and the node's reputation is penalised.
         transaction.metadata.consensus_reached = False
-        sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
-            sat_node.reputation, sat_node.exp_pos
+        sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+            sat_node.rep_manager.apply_negative(
+                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
         )
         transaction.metadata.is_rejected = True
         logger.info("Satellite reputation decreased to %.2f",

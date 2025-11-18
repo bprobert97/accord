@@ -43,6 +43,7 @@ class SatelliteNode():
         self.exp_pos: int = 0
         # Reputation starts at a neutral level
         self.reputation: float = MAX_REPUTATION / 2
+        self.performance_ema: float = 0.5  # For tracking recent performance
         self.rep_manager = ReputationManager()
         self.local_dag: Optional[DAG] = None
 

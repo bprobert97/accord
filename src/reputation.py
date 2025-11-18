@@ -37,19 +37,25 @@ class ReputationManager:
                  growth_rate: float = 0.6,
                  decay_rate: float = 0.002,
                  alpha: float = 0.12,
-                 max_drop_factor: float = 0.9) -> None:
+                 performance_ema_alpha: float = 0.05,
+                 min_drop_factor: float = 0.65,
+                 max_drop_factor: float = 0.95) -> None:
         """
         max_rep: max possible reputation
         B, C: Gompertz curve parameters
         decay_rate: exponential decay per second (or tick)
         alpha: % of distance toward Gompertz target per positive event
-        max_drop_factor: Multiplier for the mildest negative event (high rep, ok data).
+        performance_ema_alpha: Smoothing factor for the performance EMA.
+        min_drop_factor: Multiplier for the worst-case negative event.
+        max_drop_factor: Multiplier for the mildest negative event.
         """
         self.max_rep = max_rep
         self.offset = offset
         self.growth_rate = growth_rate
         self.decay_rate = decay_rate
         self.alpha = alpha
+        self.performance_ema_alpha = performance_ema_alpha
+        self.min_drop_factor = min_drop_factor
         self.max_drop_factor = max_drop_factor
         self._last_update = time.time()
 
@@ -90,45 +96,56 @@ class ReputationManager:
         """
         return self.max_rep * np.exp(-self.offset * np.exp(-self.growth_rate * exp_pos))
 
-    def apply_positive(self, current_rep: float, exp_pos: int) -> tuple[float, int]:
+    def apply_positive(self, current_rep: float, exp_pos: int,
+                       current_performance_ema: float) -> tuple[float, int, float]:
         """
         Apply reputation effect for a positive node interaction.
 
         Args:
         - current_rep: The node's reputation before a time decay is applied.
         - exp_pos: The number of positive experiences the node has had.
+        - current_performance_ema: The node's current performance EMA score.
 
         Returns:
-        - The updated reputation and updated number of positive experiences,
-          increased by one.
+        - The updated reputation, updated number of positive experiences,
+          and the new performance EMA.
         """
         current_rep = self.decay(current_rep)
         target = self._gompertz_target(exp_pos)
         new_rep = current_rep + self.alpha * (target - current_rep)
-        return float(min(self.max_rep, new_rep)), exp_pos + 1
 
-    def apply_negative(self, current_rep: float,
-                       exp_pos: int) -> tuple[float, int]:
+        # Update performance EMA towards 1 for a positive outcome
+        new_performance_ema = (self.performance_ema_alpha * 1.0) + \
+                              (1 - self.performance_ema_alpha) * current_performance_ema
+
+        return float(min(self.max_rep, new_rep)), exp_pos + 1, new_performance_ema
+
+    def apply_negative(self, current_rep: float, exp_pos: int,
+                       current_performance_ema: float) -> tuple[float, int, float]:
         """
         Apply reputation effect for a negative node interaction.
 
-        The penalty is a fixed percentage for any rejected transaction,
-        decoupled from the correctness score to reduce volatility.
+        The penalty is scaled based on the node's recent performance (EMA).
 
         Args:
         - current_rep: The node's reputation before a time decay is applied.
         - exp_pos: The number of positive experiences the node has had.
+        - current_performance_ema: The node's current performance EMA score.
 
         Returns:
-        - The updated reputation and updated number of positive experiences,
-          that does not change.
+        - The updated reputation, unchanged number of positive experiences,
+          and the new performance EMA.
         """
         current_rep = self.decay(current_rep)
 
-        # Apply a fixed penalty for any rejected transaction.
-        # Using max_drop_factor ensures a milder, consistent penalty,
-        # making reputation less volatile.
-        fixed_drop_factor = self.max_drop_factor
+        # Update performance EMA towards 0 for a negative outcome
+        new_performance_ema = (1 - self.performance_ema_alpha) * current_performance_ema
 
-        new_rep = current_rep * fixed_drop_factor
-        return float(max(0.0, new_rep)), exp_pos
+        # Calculate a dynamic drop factor based on the stable performance EMA.
+        # A high performance EMA results in a milder penalty (drop factor closer to max_drop_factor).
+        bonus_range = self.max_drop_factor - self.min_drop_factor
+        dynamic_drop_factor = self.min_drop_factor + bonus_range * current_performance_ema
+
+        new_rep = current_rep * dynamic_drop_factor
+
+        return float(max(0.0, new_rep)), exp_pos, new_performance_ema
