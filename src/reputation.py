@@ -142,7 +142,8 @@ class ReputationManager:
         new_performance_ema = (1 - self.performance_ema_alpha) * current_performance_ema
 
         # Calculate a dynamic drop factor based on the stable performance EMA.
-        # A high performance EMA results in a milder penalty (drop factor closer to max_drop_factor).
+        # A high performance EMA results in a milder penalty
+        # (drop factor closer to max_drop_factor).
         bonus_range = self.max_drop_factor - self.min_drop_factor
         dynamic_drop_factor = self.min_drop_factor + bonus_range * current_performance_ema
 

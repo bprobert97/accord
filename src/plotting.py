@@ -552,7 +552,7 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.6) -> bool:
             # Check for inconsistencies
             if should_be_confirmed:
                 # Skip first 2 genesis transactions
-                if not is_confirmed and "Genesis" in tx_hash:
+                if not is_confirmed:
                     inconsistencies.append(
                         f"TX {tx_hash[:8]}: score {score:.3f} >= {consensus_threshold} "
                         f"but was NOT confirmed."
@@ -563,7 +563,7 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.6) -> bool:
                         f"but was REJECTED."
                     )
             else:  # Should be rejected
-                if is_confirmed:
+                if is_confirmed and "Genesis" not in tx_hash:
                     inconsistencies.append(
                         f"TX {tx_hash[:8]}: score {score:.3f} < {consensus_threshold} "
                         f"but was CONFIRMED."

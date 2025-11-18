@@ -214,8 +214,9 @@ class ConsensusMechanism():
         # 1) If the list is empty, there is no data that can be valid
         if not transaction.tx_data:
             # Reduce node reputation for providing no or invalid data
-            sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
-                sat_node.reputation, sat_node.exp_pos
+            sat_node.reputation, sat_node.exp_pos, \
+                sat_node.performance_ema = sat_node.rep_manager.apply_negative(
+                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
                 )
             return False, new_ema_nis
 
