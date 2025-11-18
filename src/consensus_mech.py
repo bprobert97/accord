@@ -32,8 +32,6 @@ from .reputation import MAX_REPUTATION
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
 
-R_EARTH = 6371e3  # metres
-
 logger = get_logger()
 
 class ConsensusMechanism():
@@ -43,112 +41,17 @@ class ConsensusMechanism():
     def __init__(self) -> None:
         self.consensus_threshold: float = 0.6
         self.ema_alpha: float = 0.1  # Smoothing factor for EMA
-        # Define a simple mapping: normalize by a maximum useful DOF
+        # Define a simple mapping: normalise by a maximum useful DOF
         # Theoretically, this could be up to 6 (full 3D position+velocity), but
         # in practice, most measurements will have fewer DOF - maximum of 3.
         self.max_dof: int = 3
 
-    def data_is_valid(self, obs: dict) -> bool:
-        """
-        Validate observation data for physical and logical consistency.
-        Works with a CRTBP-based model.
-
-        Args:
-        - obs: Observation data dictionary.
-
-        Returns:
-        - True if data is valid, False otherwise.
-        """
-
-        sat_pos = None
-
-        # Check observer position
-        r_obs = np.array(obs.get("observer_state_eci", {}).get("r_m", []), dtype=float)
-        if r_obs.shape != (3,) or not np.isfinite(r_obs).all():
-            logger.info("Observer position invalid or missing.")
-            return False
-
-        # Ensure at least one measurement exists
-        has_measurement = any(key in obs for key in ["range_m",
-                                                     "az_el_rad",
-                                                     "ra_dec_rad",
-                                                     "los_eci"])
-        if not has_measurement:
-            logger.info("No valid measurement data present.")
-            return False
-
-        # Check range
-        if "range_m" in obs:
-            rng = obs["range_m"]
-            if not (isinstance(rng, (int, float)) and np.isfinite(rng)):
-                logger.info("Range measurement invalid.")
-                return False
-            if rng < 1e5 or rng > 5e7:  # 100 km to 50,000 km
-                logger.info("Range measurement out of bounds: %.1f m", rng)
-                return False
-
-        # Check LOS vector
-        if "los_eci" in obs:
-            los = np.array(obs["los_eci"], dtype=float)
-            if los.shape != (3,) or not np.isfinite(los).all():
-                logger.info("LOS vector invalid.")
-                return False
-            norm = np.linalg.norm(los)
-            if not np.isclose(norm, 1.0, atol=1e-3):
-                logger.info("LOS vector not unit length: norm=%.6f", norm)
-                return False
-            if "range_m" in obs:  # can form satellite position
-                sat_pos = r_obs + rng * los
-
-        # Check az/el
-        if "az_el_rad" in obs:
-            az, el = obs["az_el_rad"]
-            if not (0 <= az < 2*np.pi and -np.pi/2 <= el <= np.pi/2):
-                logger.info("Azimuth/Elevation out of bounds: az=%.3f, el=%.3f", az, el)
-                return False
-
-        # Check RA/Dec
-        if "ra_dec_rad" in obs:
-            ra, dec = obs["ra_dec_rad"]
-            if not (0 <= ra < 2*np.pi and -np.pi/2 <= dec <= np.pi/2):
-                logger.info("RA/Dec out of bounds: ra=%.3f, dec=%.3f", ra, dec)
-                return False
-
-        # Check covariance matrix
-        if "R_meas" in obs:
-            r = np.array(obs["R_meas"], dtype=float)
-            # Account for issues converting from MATLAB to json to Python
-            if r.ndim == 0:  # scalar
-                r = np.array([[float(r)]])
-            elif r.ndim == 1:  # vector
-                r = np.diag(r)
-
-            if r.ndim != 2 or r.shape[0] != r.shape[1]:
-                logger.info("Covariance matrix R_meas invalid shape.")
-                return False
-            # Must be symmetric and positive semidefinite
-            if not np.allclose(r, r.T, atol=1e-8):
-                logger.info("Covariance matrix R_meas not symmetric.")
-                return False
-            eigvals = np.linalg.eigvalsh(r)
-            if np.any(eigvals < -1e-12):
-                logger.info("Covariance matrix R_meas not positive semidefinite.")
-                return False
-
-        # LEO altitude bound check (200 to 2000km)
-        # only possible with range + LOS
-        if sat_pos is not None:
-            h = np.linalg.norm(sat_pos) - R_EARTH
-            if not 200e3 <= h <= 2000e3:
-                logger.info("Inferred satellite altitude out of LEO bounds: %.1f m", h)
-                return False
-
-        return True
-
-    def nis_to_score(self, nis: float, dof: int, historical_ema_nis: Optional[float] = None) -> float:
+    def nis_to_score(self, nis: float, dof: int,
+                     historical_ema_nis: Optional[float] = None) -> float:
         """
         Convert NIS into a normalised [0,1] correctness score, considering historical performance.
-        The score is high if the new NIS brings the historical EMA closer to the expected value (dof).
+        The score is high if the new NIS brings the historical EMA
+        closer to the expected value (dof).
         The score is low if the new NIS pulls the EMA further away, or if the NIS is an outlier.
 
         Args:
@@ -204,14 +107,13 @@ class ConsensusMechanism():
         final_score = base_score * (1 + improvement_factor * 0.5)
         return max(0.0, min(1.0, final_score))
 
-    def get_correctness_score(self, dag: DAG, obs_record: ObservationRecord,
+    def get_correctness_score(self, obs_record: ObservationRecord,
                               mean_nis_per_satellite: dict[int, float]) -> tuple[float, float]:
         """
         Calculate correctness score based on NIS and historical performance.
         This function now calculates and returns the new EMA of the NIS.
 
         Args:
-        - dag: The current DAG containing past transactions.
         - obs_record: The observation record for the current measurement.
         - mean_nis_per_satellite: A dictionary mapping satellite ID to its historical EMA NIS.
 
@@ -309,7 +211,7 @@ class ConsensusMechanism():
         NOTE: Assume one witnessed satellite per transaction
         """
         new_ema_nis: Optional[float] = None
-        # 2) If the list is empty, there is no data that can be valid
+        # 1) If the list is empty, there is no data that can be valid
         if not transaction.tx_data:
             # Reduce node reputation for providing no or invalid data
             sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
@@ -317,7 +219,7 @@ class ConsensusMechanism():
                 )
             return False, new_ema_nis
 
-        # 1) Convert tx_data to dict
+        # 2) Convert tx_data to dict
         transaction_data: dict = json.loads(transaction.tx_data)
         obs_record = ObservationRecord(**transaction_data)
 
@@ -332,9 +234,6 @@ class ConsensusMechanism():
             logger.info("Not enough transactions for BFT quorum.")
             logger.info("Satellite reputation unchanged at %.2f", sat_node.reputation)
             return False, new_ema_nis
-
-        # If we have valid data, try to reach consensus on it
-        # The data validation part is removed as the observation record is assumed to be valid
 
         # 4) Check if satellite has been witnessed before
         #4a if yes, does this data agree with other data/ is it correct?
@@ -364,8 +263,7 @@ class ConsensusMechanism():
         logger.info("Satellite reputation decayed to %.3f.",
                     sat_node.reputation)
 
-        # 7) if consensus reached - strong node (maybe affects node reputation?),
-        # else weak node (like IOTA)
+        # 7) Check if consensus reached
         if consensus_score >= self.consensus_threshold:
             transaction.metadata.consensus_reached = True
             sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_positive(
@@ -388,5 +286,5 @@ class ConsensusMechanism():
         transaction.metadata.is_rejected = True
         logger.info("Satellite reputation decreased to %.2f",
                     sat_node.reputation)
-        # If data is invalid, or consensus sco
+
         return False, new_ema_nis
