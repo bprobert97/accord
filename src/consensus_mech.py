@@ -237,7 +237,7 @@ class ConsensusMechanism():
 
         # 4) Check if satellite has been witnessed before
         #4a if yes, does this data agree with other data/ is it correct?
-        correctness_score, new_ema_nis = self.get_correctness_score(dag, obs_record,
+        correctness_score, new_ema_nis = self.get_correctness_score(obs_record,
                                                                     mean_nis_per_satellite)
 
         # 5) Reward measurements with higher DOF (more accurate, reduced comp. intensity)
@@ -281,7 +281,7 @@ class ConsensusMechanism():
         # the transaction is rejected and the node's reputation is penalised.
         transaction.metadata.consensus_reached = False
         sat_node.reputation, sat_node.exp_pos = sat_node.rep_manager.apply_negative(
-            sat_node.reputation, sat_node.exp_pos, correctness_score
+            sat_node.reputation, sat_node.exp_pos
         )
         transaction.metadata.is_rejected = True
         logger.info("Satellite reputation decreased to %.2f",
