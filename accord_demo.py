@@ -105,10 +105,12 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
             if sid == perfect_sat_id:
                 # Perfect satellite: always has a very low NIS
                 obs.nis = 0.01
-            elif sid == faulty_sat_id:
+            # Can have 2 faulty satellites if N >= 7
+            elif sid == faulty_sat_id and config.N >= 7:
                 # Faulty satellite: always has a very high NIS
                 obs.nis = 50.0
-            elif sid == intermittent_sat_id:
+            # Can have 3 faulty satellites if N >= 10
+            elif sid == intermittent_sat_id and config.N >= 10:
                 # Intermittently faulty satellite
                 if 200 <= k < 400:
                     # Period of faulty behavior

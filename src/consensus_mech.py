@@ -25,6 +25,7 @@ import json
 import math
 from typing import Optional
 import numpy as np
+from scipy.stats import chi2
 from .dag import DAG
 from.filter import ObservationRecord
 from .logger import get_logger
@@ -64,15 +65,21 @@ class ConsensusMechanism():
         """
         nis = max(0.0, float(nis))
         dof = max(1, int(dof))
-        variance = 2 * dof
 
-        def _calculate_gaussian_score(current_nis: float, current_dof: int) -> float:
-            """Calculates a simple score based on a Gaussian function centered on dof."""
-            return math.exp(-((current_nis - current_dof) ** 2) / (2 * variance))
+        def _calculate_twosided_chi2_score(current_nis: float, current_dof: int) -> float:
+            """
+            Calculates a score based on how far the NIS is from the median of the
+            chi-squared distribution. It penalizes values that are too high (in the
+            right tail) and too low (in the left tail, i.e., "too perfect").
+            """
+            cdf_val = chi2.cdf(current_nis, current_dof)
+            # The score is 1.0 at the median (cdf=0.5) and drops towards 0.0 at the extremes.
+            # Median is about 1.386 for dof=2.
+            return 1.0 - abs(cdf_val - 0.5) * 2
 
         if historical_ema_nis is None:
             # First observation. Score is based on how close the first NIS is to dof.
-            return _calculate_gaussian_score(nis, dof)
+            return _calculate_twosided_chi2_score(nis, dof)
 
         # Hard penalty for very large NIS values, indicating an outlier
         # TODO - might be too heavily influencing reputation on NIS at the moment.Need
@@ -82,7 +89,6 @@ class ConsensusMechanism():
 
         # Calculate new EMA
         new_ema_nis = (nis * self.ema_alpha) + (historical_ema_nis * (1 - self.ema_alpha))
-        logger.info("BCP999 old %s, new %s", historical_ema_nis, new_ema_nis)
 
         # Score based on whether the new NIS brings the EMA closer to the expected value (dof)
         dist_before = abs(historical_ema_nis - dof)
@@ -90,16 +96,13 @@ class ConsensusMechanism():
 
         improvement = dist_before - dist_after
 
-        # The base score is determined by how close the current NIS is to the ideal value (dof).
-        # This provides an instantaneous measure of the measurement's quality.
-        base_score = _calculate_gaussian_score(nis, dof)
-        logger.info("BCP002 base score: %.6f", base_score)
+        # The base score is now a two-sided check on the instantaneous NIS value.
+        base_score = _calculate_twosided_chi2_score(nis, dof)
 
         # The improvement factor modulates the score based on historical performance.
         # A positive improvement (moving closer to dof) increases the score.
         # A negative improvement (moving away) decreases it.
         improvement_factor = np.tanh(improvement)
-        logger.info("BCP001 improvement factor: %.6f", improvement_factor)
 
         # Combine instantaneous score with historical improvement.
         # A good current NIS can receive a high score even with a poor history,
