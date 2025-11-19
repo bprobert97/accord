@@ -42,7 +42,7 @@ class ReputationManager:
                  max_drop_factor: float = 0.95) -> None:
         """
         max_rep: max possible reputation
-        B, C: Gompertz curve parameters
+        offset, growth_rate: Gompertz curve parameters
         decay_rate: exponential decay per second (or tick)
         alpha: % of distance toward Gompertz target per positive event
         performance_ema_alpha: Smoothing factor for the performance EMA.

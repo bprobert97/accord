@@ -26,8 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from collections import OrderedDict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, OrderedDict
 import numpy as np
 from .logger import get_logger
 from .transaction import Transaction, TransactionMetadata
@@ -48,8 +47,8 @@ class DAG():
                  consensus_mech: ConsensusMechanism,
                  queue: asyncio.Queue) -> None:
         # Ledger structure is:
-        # key: string hash of transaction, value: Transaction class
-        self.ledger: dict = self.create_genesis_tx()
+        # key: string hash of transaction, value: list[Transaction]
+        self.ledger: dict[str, list[Transaction]] = self.create_genesis_tx()
         self.consensus_mech = consensus_mech
         self.queue = queue
         self.mean_nis_per_satellite: dict[int, float] = {}
@@ -90,7 +89,7 @@ class DAG():
                                                       "Genesis Transaction 2",
                                                       metadata=genesis_metadata)]}
 
-    def get_parents(self) -> tuple[str, str]:
+    def get_parents(self) -> tuple[str, ...]:
         """
         Randomly select 2 parents for the transaction.
         Weighted towards choosing newer parents in the DAG

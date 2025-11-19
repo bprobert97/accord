@@ -81,7 +81,7 @@ class Transaction:
         the transaction's unique information, so that ANY change to a transaction results in a new 
         hash, making tampering easier to identify.
 
-        Returns: The has as a string.
+        Returns: The hash as a string.
         """
         return hashlib.sha256(str(self.sender_address).encode() +
                               str(self.metadata.timestamp).encode() +
