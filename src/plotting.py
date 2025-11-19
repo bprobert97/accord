@@ -326,8 +326,8 @@ def plot_reputation(rep_history: dict) -> None:
         byz_curve = np.clip(byz_curve, 0, target_curve)
 
         # Shade the band BETWEEN byz_curve and target_curve
-        plt.fill_between(steps, 50, byz_curve,
-                        color="grey", alpha=0.1, label="Byzantine region")
+        plt.fill_between(steps, byz_curve, target_curve,
+                        color="grey", alpha=0.1, label="At-risk region")
 
 
     # Neutral line
@@ -341,7 +341,7 @@ def plot_reputation(rep_history: dict) -> None:
     plt.tight_layout()
     plt.show()
 
-def plot_consensus_cdf_dof(dag) -> None:
+def plot_consensus_correctness_dof(dag) -> None:
     """
     Plot consensus score, Correctness Score, and DOF for each satellite.
     Consensus score on left y-axis, Correctness Score on right y-axis.
@@ -420,7 +420,7 @@ def plot_consensus_cdf_dof(dag) -> None:
 
 def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
     """
-    Plots Normalized Innovation Squared (NIS) values for each satellite individually,
+    Plots Normalised Innovation Squared (NIS) values for each satellite individually,
     comparing them to expected chi-squared consistency bounds.
 
     Args:

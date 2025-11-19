@@ -25,7 +25,7 @@ import asyncio
 import os
 from typing import Optional
 import numpy as np
-from src.plotting import plot_consensus_cdf_dof, \
+from src.plotting import plot_consensus_correctness_dof, \
     plot_nis_consistency_by_satellite, plot_reputation, \
     check_consensus_outcomes
 from src.consensus_mech import ConsensusMechanism
@@ -53,10 +53,12 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
     submitting transactions to the DAG.
 
     Args:
-    - Optional filter config for running.
+    - config: FilterConfig object with simulation parameters.
 
     Returns:
-    - The final DAG object after all transactions have been processed.
+    - A tuple containing:
+        - The final DAG object after all transactions have been processed.
+        - A dictionary containing the reputation history for each satellite.
     """
     clear_log()
     truth, z_hist = simulate_truth_and_meas(
@@ -102,14 +104,17 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
             sid = obs.observer
 
             # --- Inject special satellite behavior ---
+            # The following satellites are designated for special behavior, but only
+            # if the constellation is large enough (N) to tolerate this many
+            # faulty nodes (f), where N >= 3f + 1.
             if sid == perfect_sat_id:
                 # Perfect satellite: always has a very low NIS
                 obs.nis = 0.01
-            # Can have 2 faulty satellites if N >= 7
+            # e.g., if f=2, we need N >= 7
             elif sid == faulty_sat_id and config.N >= 7:
                 # Faulty satellite: always has a very high NIS
                 obs.nis = 50.0
-            # Can have 3 faulty satellites if N >= 10
+            # e.g., if f=3, we need N >= 10
             elif sid == intermittent_sat_id and config.N >= 10:
                 # Intermittently faulty satellite
                 if 200 <= k < 400:
@@ -140,8 +145,8 @@ if __name__ == "__main__":
 
     final_dag, rep_hist = asyncio.run(run_consensus_demo(default_config))
     if final_dag:
-        #plot_transaction_dag(final_dag)
-        plot_consensus_cdf_dof(final_dag)
+        # plot_transaction_dag(final_dag)
+        plot_consensus_correctness_dof(final_dag)
         plot_nis_consistency_by_satellite(final_dag)
         check_consensus_outcomes(final_dag)
     if rep_hist:

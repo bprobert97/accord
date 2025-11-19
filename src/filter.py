@@ -26,7 +26,6 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
 from numpy.typing import NDArray
-import matplotlib.pyplot as plt
 from scipy.stats import chi2
 from scipy.linalg import expm
 from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
@@ -48,7 +47,7 @@ class ObservationRecord:
     - time: The time of the observation.
     - observer: The ID of the observing satellite.
     - target: The ID of the target satellite.
-    - nis: The Normalized Innovation Squared value for this observation.
+    - nis: The Normalised Innovation Squared value for this observation.
     - dof: The degrees of freedom for the NIS calculation.
     """
     step: int
@@ -134,7 +133,7 @@ def van_loan_discretization(F: NDArray[np.float64],
                             Qc: NDArray[np.float64],
                             dt: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """
-    Discretizes continuous-time system and noise matrices using the Van Loan method.
+    Discretises continuous-time system and noise matrices using the Van Loan method.
 
     Args:
     - F: Continuous-time state dynamics matrix.
@@ -403,9 +402,9 @@ def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64],
     Pn = A @ P @ A.T + K @ R @ K.T
     return 0.5 * (Pn + Pn.T)
 
-def _initialize_state_and_cov(N: int, truth: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _initialise_state_and_cov(N: int, truth: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Initializes the estimated state vector and its covariance matrix.
+    initialises the estimated state vector and its covariance matrix.
 
     Args:
     - N: The number of satellites.
@@ -454,7 +453,7 @@ def _ekf_update(ekf: ExtendedKalmanFilter, z_k: np.ndarray, N: int) -> np.ndarra
 def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
              dt: float, sig_r: float, sig_rdot: float) -> List[ObservationRecord]:
     """
-    Calculates and logs the Normalized Innovation Squared (NIS) for each observation.
+    Calculates and logs the Normalised Innovation Squared (NIS) for each observation.
 
     Args:
     - y: The innovation vector (measurement residual).
@@ -529,7 +528,7 @@ class JointEKF:
     """
     def __init__(self, config: FilterConfig, initial_truth: np.ndarray):
         """
-        Initializes the JointEKF.
+        initialises the JointEKF.
 
         Args:
         - config: The configuration for the filter.
@@ -543,7 +542,7 @@ class JointEKF:
         R = np.diag([config.sig_r**2, config.sig_rdot**2] * M)
         self.ekf = ExtendedKalmanFilter(dim_x=dim_x, dim_z=dim_z)
 
-        x0_est, P0 = _initialize_state_and_cov(config.N, initial_truth[np.newaxis, :])
+        x0_est, P0 = _initialise_state_and_cov(config.N, initial_truth[np.newaxis, :])
         self.ekf.x, self.ekf.P, self.ekf.R = x0_est, P0, R
 
     def predict(self) -> None:
@@ -583,7 +582,7 @@ def extract_mean_nis_per_sat(result: JointResult) -> list[list[float]]:
     N = len(result.target_ids)
     steps = result.x_hist.shape[0]
 
-    # Initialize storage
+    # initialise storage
     nis_matrix: List[List[List[float]]] = [[[] for _ in range(steps)] for _ in range(N)]
 
     # Fill list for each observer,step
@@ -618,109 +617,3 @@ def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
     lo = chi2.ppf((1 - alpha) / 2.0, dof)
     hi = chi2.ppf(1 - (1 - alpha) / 2.0, dof)
     return float(lo), float(hi)
-
-def plot_nis(result: JointResult) -> None:
-    """
-    Plots the mean Normalized Innovation Squared (NIS) for each satellite over time.
-    Includes chi-squared bounds for consistency checking.
-
-    Args:
-    - result: The result object containing NIS data.
-    """
-    nis_per_sat = extract_mean_nis_per_sat(result)
-    N = len(result.target_ids)
-    dof = 2
-    lo, hi = chi2_bounds(dof, 0.95)
-
-    plt.figure(figsize=(11, 4))
-    for i in range(N):
-        plt.plot(nis_per_sat[i], label=f"Sat {i}")
-
-    plt.axhline(lo, ls=':', label=f"χ² 95% lo={lo:.2f}")
-    plt.axhline(hi, ls=':', label=f"χ² 95% hi={hi:.2f}")
-    plt.axhline(dof, color='r', ls='--', label=f"DoF = {dof}")
-
-    plt.xlabel("Step")
-    plt.ylabel("Mean NIS per sat (over N-1 links)")
-    plt.title("Per-Satellite Mean NIS (All-to-All Measurements)")
-    plt.legend(ncol=3)
-    plt.tight_layout()
-    plt.show()
-
-def plot_nis_consistency(result: JointResult, dof: int = 2, window: int = 50) -> None:
-    """
-    Plots the NIS consistency check for each satellite, including
-    rolling mean and chi-squared bounds.
-
-    Args:
-    - result: The result object containing NIS data.
-    - dof: Degrees of freedom for the chi-squared distribution.
-    - window: Window size for the rolling mean calculation.
-    """
-    nis_per_sat = extract_mean_nis_per_sat(result)
-    N = len(result.target_ids)
-
-    lower = chi2.ppf(0.025, dof)
-    upper = chi2.ppf(0.975, dof)
-
-    steps = len(nis_per_sat[0])
-    t = np.arange(steps)
-
-    plt.figure(figsize=(13,4))
-    for i in range(N):
-        x = np.array(nis_per_sat[i])
-        roll = np.convolve(x, np.ones(window)/window, mode='same')
-        plt.plot(t, x, alpha=0.35, label=f"Sat {i}")
-        plt.plot(t, roll, linewidth=2)
-
-        frac = np.mean((x < lower) | (x > upper))
-        status = "⚠️" if frac > 0.10 else "✅"
-        print(f"{status} Sat {i}: {frac*100:.1f}% outside limits, mean={np.nanmean(x):.2f}")
-
-    plt.axhline(lower, ls='--', color='gray')
-    plt.axhline(upper, ls='--', color='gray')
-    plt.axhline(dof, ls='-', color='red', label="DoF")
-
-    plt.title(f"NIS Consistency Check (window={window}, DoF={dof})")
-    plt.xlabel("Step")
-    plt.ylabel("Mean NIS per sat")
-    plt.legend(ncol=3)
-    plt.grid()
-    plt.tight_layout()
-    plt.show()
-
-def run_joint_ekf_simulation(config: FilterConfig) -> JointResult:
-    """
-    Runs a full joint EKF simulation and returns the results.
-
-    Args:
-    - config: The configuration for the simulation.
-
-    Returns:
-    - A JointResult object containing the simulation results.
-    """
-    if config.seed is not None:
-        np.random.seed(config.seed)
-
-    truth, z_hist = simulate_truth_and_meas(
-        config.N, config.steps, config.dt, config.sig_r, config.sig_rdot
-    )
-
-    ekf = JointEKF(config, truth[0])
-
-    x_hist = np.zeros((config.steps, STATE_DIM * config.N))
-    obs_records: List[ObservationRecord] = []
-
-    for k in range(config.steps):
-        ekf.predict()
-        obs_records_step = ekf.update(z_hist[k], k)
-        obs_records.extend(obs_records_step)
-        x_hist[k] = ekf.ekf.x
-
-    return JointResult(
-        target_ids=[f"sat_{i+1}" for i in range(config.N)],
-        obs_records=obs_records,
-        x_hist=x_hist,
-        truth=truth,
-        z_hist=z_hist,
-    )

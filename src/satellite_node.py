@@ -54,7 +54,7 @@ class SatelliteNode():
         Attach one observation record (from JSON) to this satellite.
 
         Args:
-        - observation: a dict containing one observation record
+        - observation: An ObservationRecord object.
 
         Returns:
         None. Updates self.sensor_data.
@@ -62,15 +62,15 @@ class SatelliteNode():
         self.sensor_data = observation
 
     async def submit_transaction(self,
-                                 recipient_address: int) -> bool:
+                                 recipient_address: int) -> tuple[bool, Optional[float]]:
         """
         Builds a transaction from observed satellite data and submits it to the DAG.
 
         Args:
-        - recipient_address: Crypographic address of the recipient
+        - recipient_address: Cryptographic address of the recipient
 
         Returns:
-        A transaction that is submitted to the ledger
+        - A tuple containing the consensus result (bool) and the new EMA NIS (float or None).
         """
         if self.sensor_data is None:
             raise ValueError(f"Satellite {self.id} has no sensor data loaded.")
