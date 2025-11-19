@@ -42,6 +42,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │
 ├── 📁 tests/                     # Unit tests, written with pytest
+|
 ├── .codespellrc             # Codespell configuration file
 ├── .coveragerc              # Pytest coverage configuration file
 ├── .gitignore               # Files/folders to ignore in Git
