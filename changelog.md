@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v1.0] - 2025-11
+
+### Summary
+This is the first full release of the PoISE consensus mechanism. This has been released to accompany a presentation at the 2026 SciTech Forum.
+
+### Added
+- Pytest unit tests for all code.
+- Moved plotting into its own file.
+- Correctness score now accounts for average NIS, following chi-squared statistics
+- Reputation is now based on chi-squared statistics for bounds, and previous behaviour
+- Simulates faulty and malicious nodes in accord_demo.py
+- Uses a simpler EKF implementation with Filterpy
+---
+
 ## [v0.2.1] - 2025-10
 
 ### Summary
