@@ -1,4 +1,4 @@
-name: Run Pylint and Mypy
+name: Run Pylint, Mypy and Pytest
 
 on: [push]
 
@@ -18,9 +18,13 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements_linux.txt
+        pip install pytest-cov # Ensure pytest-cov is installed for coverage reporting
     - name: Analyse the code with pylint
       run: |
-        pylint src/ accord_demo.py
+        pylint src/ tests/ accord_demo.py
     - name: Run mypy static type checker
       run: |
         mypy .
+    - name: Run pytest with coverage
+      run: |
+        pytest --cov=src tests/

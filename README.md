@@ -24,23 +24,11 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ├── 📁 .github/workflows/              # GitHub Workflow files
 │   └── main.yml                       # CI configuration for github: Pylint and Mypy
 │
-├── 📁 design/                      # Design documents
-│   └── chi2_plot.py               # Plots of chi2 distributions and CDF distributions
-│   └── consensus_design.ipynb     # Initial consensus mechanism design
-│   └── dlt_design_mpl.ipynb       # Initial DAG design using matplotlib
-│   └── dlt_design_plotly.ipynb    # Initial DAG design using plotly
-│   └── od_class_diagram.txt       # PlantUML syntax for the OD class diagram
-│   └── od_flowchart.txt           # PlantUML syntax for the OD flowchart
-│   └── od_sequence_diagram.txt    # PlantUML syntax for the OD sequence diagram
+├── 📁 design/                      # Design documents, Jupyter notebooks and PlantUML diagrams
 │
 ├── 📁 images/                         # Image assets
-│   └── consensus_flowchart.png        # Flowchart of consensus mechanism
-│   └── od_class_diagram.txt           # PlantUML syntax for the OD class diagram
-│   └── od_flowchart.png               # Flowchart of orbit determination calculations
-│   └── od_sequence_diagram.png        # Sequence diagram of orbit determination calculations
 │
-├── 📁 references/                    # References
-│   └── references.ipynb              # List of project references
+├── 📁 references/                    # Project references
 │
 ├── 📁 src/                        # Main source code
 │   └── __init__.py                # Empty file, for module creation
@@ -53,7 +41,9 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── satellite_node.py          # Code representing a satellite in the network
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │
+├── 📁 tests/                     # Unit tests, written with pytest
 ├── .codespellrc             # Codespell configuration file
+├── .coveragerc              # Pytest coverage configuration file
 ├── .gitignore               # Files/folders to ignore in Git
 ├── .pylintrc                # Pylint configuration file
 ├── accord_demo.py           # Demonstration of ACCORD
@@ -62,7 +52,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ├── mypy.ini                 # Mypy configuration
 ├── README.md                # Project overview
 ├── requirements.txt         # List of python package dependencies
-└── requirements_linux.txt   # List of python package dependencies for linux and CI
+└── requirements_linux.txt   # List of python package dependencies for Linux and CI
 
 </pre>
 

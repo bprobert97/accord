@@ -13,3 +13,5 @@ app.log
 /venv
 src/satellite_sim.asv
 GEMINI.md
+/tests/__pycache__
+.coverage
