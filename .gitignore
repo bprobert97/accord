@@ -15,3 +15,4 @@ src/satellite_sim.asv
 GEMINI.md
 /tests/__pycache__
 .coverage
+sat1_nis_data.json

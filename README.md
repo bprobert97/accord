@@ -28,8 +28,6 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │
 ├── 📁 images/                         # Image assets
 │
-├── 📁 references/                    # Project references
-│
 ├── 📁 src/                        # Main source code
 │   └── __init__.py                # Empty file, for module creation
 │   └── consensus_mech.py          # Code for the PoISE consensus mechanism

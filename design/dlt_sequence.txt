@@ -1,0 +1,14 @@
+@startuml
+participant "Satellite A" as sata
+participant "Satellite Network" as network
+participant "Distributed Ledger" as ledger
+
+sata -> network: Satellite A observes another object via onboard sensors.
+sata -> ledger: Submit observation data and orbit determination to Distributed Ledger.
+network -> ledger: Other satellites submit their observation data.
+ledger -> ledger: Check Satellite A's reputation and observational accuracy. Set transaction credibility.
+ledger -> ledger: Calculate consensus score. 
+ledger -> ledger: Compare consensus score against threshold. Confirm or reject transaction.
+ledger -> sata: Update Satellite A's reputation.
+ledger -> network: Synchronise ledger.
+@enduml
