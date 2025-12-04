@@ -1,4 +1,4 @@
-# pylint: disable=too-many-locals, too-many-statements, protected-access, broad-exception-caught
+# pylint: disable=too-many-locals, too-many-statements, protected-access, broad-exception-caught, too-many-branches
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -34,7 +34,7 @@ from src.reputation import MAX_REPUTATION, ReputationManager
 
 # === Configuration ===
 FILENAME = "app.log"  # your log file path
-THRESHOLD = 0.6                # consensus threshold
+THRESHOLD = 0.5                # consensus threshold
 CMAP = "viridis"               # color map for correctness
 
 def plot_consensus_vs_reputation(df):
@@ -51,7 +51,7 @@ def plot_consensus_vs_reputation(df):
     plt.axhline(THRESHOLD, color="red", linestyle="--",
                 linewidth=1.5, label=f"Threshold = {THRESHOLD}")
     plt.colorbar(scatter, label="Correctness")
-    plt.title("Consensus vs Reputation")
+
     plt.xlabel("Reputation")
     plt.ylabel("Consensus Score")
     plt.legend()
@@ -69,7 +69,7 @@ def plot_nis_vs_correctness(df):
         s=80,
         alpha=0.8,
     )
-    plt.title("NIS vs Correctness")
+
     plt.xlabel("NIS")
     plt.ylabel("Correctness")
     plt.grid(True, linestyle=":")
@@ -77,9 +77,11 @@ def plot_nis_vs_correctness(df):
     plt.show()
 
 def plot_nis_vs_consensus(df):
-    """Plots NIS vs consensus score."""
-    plt.figure(figsize=(10, 7))
-    scatter = plt.scatter(
+    """Plots NIS vs consensus score with a zoomed-in subplot for NIS values 0-10."""
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Main plot
+    scatter = ax.scatter(
         df["nis"],
         df["consensus_score"],
         c=df["correctness"],
@@ -87,15 +89,20 @@ def plot_nis_vs_consensus(df):
         s=80,
         alpha=0.8,
     )
-    plt.axhline(THRESHOLD, color="red", linestyle="--",
+    ax.axhline(THRESHOLD, color="red", linestyle="--",
                 linewidth=1.5, label=f"Threshold = {THRESHOLD}")
-    plt.colorbar(scatter, label="Correctness")
-    plt.title("NIS vs Consensus Score")
-    plt.xlabel("NIS")
-    plt.ylabel("Consensus Score")
-    plt.legend()
-    plt.grid(True, linestyle=":")
-    plt.tight_layout()
+    cbar = fig.colorbar(scatter, ax=ax)
+    cbar.set_label("Correctness", fontsize=16)
+
+    ax.set_xlabel("NIS", fontsize=16)
+    ax.set_ylabel("Consensus Score", fontsize=16)
+    ax.set_xscale('symlog')
+    plt.tick_params(axis='x', labelsize=16)
+    plt.tick_params(axis='y', labelsize=16)
+    ax.legend(fontsize=16)
+    ax.grid(True, linestyle=":")
+
+    fig.tight_layout()
     plt.show()
 
 def main():
@@ -130,12 +137,17 @@ def main():
     plot_nis_vs_consensus(df)
 
 
-def plot_transaction_dag(dag) -> None:
+def plot_transaction_dag(dag, max_nodes: int | None = 100, start_index: int = 0) -> None:
     """
-    Plot the transaction DAG.
+    Plot a customizable slice of the transaction DAG.
 
     Args:
     - dag: The DAG object containing the transaction data.
+    - max_nodes: The maximum number of nodes (transactions) to display.
+                 If None, all transactions from start_index are shown.
+                 Defaults to 100.
+    - start_index: The starting index of the sorted transactions to plot.
+                   Negative indices count from the end. Defaults to 0.
 
     Returns:
     - None. Displays a plot of the transaction DAG.
@@ -156,32 +168,43 @@ def plot_transaction_dag(dag) -> None:
                 graph.add_edge(key, parent_hash)
 
     sorted_keys = sorted(tx_timestamps, key=lambda k: tx_timestamps[k])
-    pos = {k: (i, (hash(k) % 100) / 100.0 - 0.5) for i, k in enumerate(sorted_keys)}
+
+    # --- New slicing logic ---
+    if start_index < 0:
+        start_index = max(0, len(sorted_keys) + start_index)
+
+    end_index = len(sorted_keys)
+    if max_nodes is not None:
+        end_index = min(start_index + max_nodes, len(sorted_keys))
+
+    plot_keys = sorted_keys[start_index:end_index]
+    subgraph = graph.subgraph(plot_keys)
+    # ---
+
+    pos = {k: (i, (hash(k) % 100) / 100.0 - 0.5) for i, k in enumerate(plot_keys)}
 
     plt.figure(figsize=(16, 6))
 
-    plt.axvline(x=2,
-                color="#000000",
-                linestyle="--",
-                linewidth=1.5,
-                label="Real Data Added",
-                zorder=1)
+    # --- Adjust axvline positions relative to the slice ---
+    real_data_line = 2 - start_index
+    bft_line = 5 - start_index
 
-    plt.axvline(x=5,
-                color="#000000",
-                linestyle="--",
-                linewidth=1.5,
-                label="BFT Quorum Reached",
-                zorder=1)
+    if 0 <= real_data_line < len(plot_keys):
+        plt.axvline(x=real_data_line, color="#000000", linestyle="--", linewidth=1.5,
+                    label="Real Data Added", zorder=1)
 
-    for node in graph.nodes():
+    if 0 <= bft_line < len(plot_keys):
+        plt.axvline(x=bft_line, color="#000000", linestyle="--", linewidth=1.5,
+                    label="BFT Quorum Reached", zorder=1)
+
+    for node in subgraph.nodes():
         outline_color = "black"
         if tx_status[node]["is_confirmed"]:
             outline_color = "green"
         elif tx_status[node]["is_rejected"]:
             outline_color = "red"
         nx.draw_networkx_nodes(
-            graph, pos,
+            subgraph, pos,
             nodelist=[node],
             node_color="lightblue",
             node_size=300,
@@ -190,15 +213,19 @@ def plot_transaction_dag(dag) -> None:
         )
 
     edge_colors = []
-    for _, parent_node in graph.edges():
-        if tx_status[parent_node]["is_confirmed"]:
-            edge_colors.append("green")
-        elif tx_status[parent_node]["is_rejected"]:
-            edge_colors.append("red")
+    # Only draw edges that are fully within the subgraph
+    for _, v in subgraph.edges():
+        if v in tx_status:
+            if tx_status[v]["is_confirmed"]:
+                edge_colors.append("green")
+            elif tx_status[v]["is_rejected"]:
+                edge_colors.append("red")
+            else:
+                edge_colors.append("gray")
         else:
-            edge_colors.append("gray")
+            edge_colors.append("gray") # Should not happen with subgraph
 
-    nx.draw_networkx_edges(graph, pos,
+    nx.draw_networkx_edges(subgraph, pos,
                            edge_color=edge_colors, arrowsize=15) # type: ignore [arg-type]
 
     # Add legend
@@ -208,12 +235,10 @@ def plot_transaction_dag(dag) -> None:
                                      label="Confirmed Transaction", linewidth=1)
     rejected_patch = mpatches.Patch(edgecolor="red", facecolor="lightblue",
                                     label="Rejected Transaction", linewidth=1)
-    # Use Line2D for edge legend entries to look like lines
     edge_confirmed = Line2D([0], [0], color="green", linewidth=1, label="Strong Edge")
     edge_rejected = Line2D([0], [0], color="red", linewidth=1, label="Weak Edge")
     edge_default = Line2D([0], [0], color="grey", linewidth=1, label="Default Edge")
 
-    # Place legend outside the plot area (top right)
     plt.legend(
         handles=[node_patch, confirmed_patch, rejected_patch, edge_confirmed,
                  edge_rejected, edge_default],
@@ -225,33 +250,36 @@ def plot_transaction_dag(dag) -> None:
         fontsize=18
     )
 
-    plt.title("Transaction DAG", fontsize=12, color='black')
-    plt.xlabel("Time Step", color='black', fontsize=12)
-    n = len(sorted_keys)
-    step = 10
+
+    plt.xlabel("Transaction Index", color='black', fontsize=12)
+    n = len(plot_keys)
+    step = max(1, n // 10)
+
+    tick_positions = range(0, n, step)
+    tick_labels = [str(i + start_index) for i in tick_positions]
+
     plt.xticks(
-        range(0, n, step),  # positions at every 10 timesteps
-        [str(i) for i in range(0, n, step)],  # labels
+        tick_positions,
+        tick_labels,
         color="black",
         fontsize=12
     )
 
     ax = plt.gca()
-
     ymin, _ = ax.get_ylim()
 
-    # Add rotated text along the vertical lines
-    ax.text(2 - 0.1, ymin + 0.05, "Real Data Added", color="#000000",
-        rotation=90, rotation_mode="anchor",
-        va="bottom", ha="left", fontsize=10,
-        zorder=10,
-        bbox={"facecolor": "none", "edgecolor": "none", "alpha": 0.7, "pad": 2})
+    if 0 <= real_data_line < len(plot_keys):
+        ax.text(real_data_line - 0.1, ymin + 0.05, "Real Data Added", color="#000000",
+                rotation=90, rotation_mode="anchor",
+                va="bottom", ha="left", fontsize=10, zorder=10,
+                bbox={"facecolor": "none", "edgecolor": "none", "alpha": 0.7, "pad": 2})
 
-    ax.text(5 - 0.1, ymin + 0.05, "BFT Quorum Reached", color="#000000",
-            rotation=90, rotation_mode="anchor",
-            va="bottom", ha="left", fontsize=10,
-            zorder=10,
-            bbox={"facecolor": "none", "edgecolor": "none", "alpha": 0.7, "pad": 2})
+    if 0 <= bft_line < len(plot_keys):
+        ax.text(bft_line - 0.1, ymin + 0.05, "BFT Quorum Reached", color="#000000",
+                rotation=90, rotation_mode="anchor",
+                va="bottom", ha="left", fontsize=10, zorder=10,
+                bbox={"facecolor": "none", "edgecolor": "none", "alpha": 0.7, "pad": 2})
+
 
     ax.get_yaxis().set_visible(False)
     ax.spines['bottom'].set_visible(True)
@@ -261,12 +289,9 @@ def plot_transaction_dag(dag) -> None:
     ax.xaxis.set_ticks_position('bottom')
     ax.xaxis.set_label_position('bottom')
 
-    # Set axis and tick colors to black
     ax.spines['bottom'].set_color('black')
     ax.tick_params(axis='x', colors='black', labelsize=12)
     ax.xaxis.label.set_color('black')
-
-    # Set transparent background
     ax.set_facecolor('none')
     plt.gcf().patch.set_alpha(0.0)
 
@@ -294,7 +319,8 @@ def plot_reputation(rep_history: dict) -> None:
 
     # Plot reputation histories
     for node_id, history in rep_history.items():
-        plt.plot(range(len(history)), history, marker="o", label=f"{node_id} Reputation")
+        plt.plot(range(len(history)), history, marker="o", \
+                 markersize=2, label=f"Sat_{node_id} Reputation")
 
     # Plot target curve ONCE (using max length)
     if max_len > 0:
@@ -313,30 +339,16 @@ def plot_reputation(rep_history: dict) -> None:
         plt.plot(steps, target_curve, linestyle="--",
                  color="orange", linewidth=2, label="Target curve")
 
-        # Byzantine region as offset below
-        lag = 5       # number of timesteps delay
-        margin = 0.0  # vertical buffer
-
-        # Build lagged version of target curve
-        byz_curve = np.zeros_like(target_curve)
-        byz_curve[lag:] = target_curve[:-lag] - margin # type: ignore [operator]
-        byz_curve[:lag] = target_curve[0] - margin
-
-        # Ensure it's always below the target
-        byz_curve = np.clip(byz_curve, 0, target_curve)
-
-        # Shade the band BETWEEN byz_curve and target_curve
-        plt.fill_between(steps, byz_curve, target_curve,
-                        color="grey", alpha=0.1, label="At-risk region")
-
-
     # Neutral line
     plt.axhline(neutral_level, color="gray", linestyle=":", label=f"Neutral ({neutral_level})")
 
-    plt.ylim(0, MAX_REPUTATION)
-    plt.xlabel("Chronological Transaction Index [-]")
-    plt.ylabel("Reputation Score [-]")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.)
+    plt.xlabel("Chronological Transaction Index [-]", fontsize=14)
+    plt.ylabel("Reputation Score [-]", fontsize=14)
+    plt.tick_params(axis='x', labelsize=14)
+    plt.tick_params(axis='y', labelsize=14)
+    # plt.yscale("log") TODO: consider log scale if wide range
+    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.,
+               fontsize=14)
     plt.grid(True, linestyle=":")
     plt.tight_layout()
     plt.show()
@@ -391,10 +403,10 @@ def plot_consensus_correctness_dof(dag) -> None:
                   for r in records]
         ax.scatter(steps, consensus, c=colors, s=60, label="Consensus Score")
         ax.plot(steps, consensus, linestyle="--", alpha=0.5, color="black")
-        ax.axhline(0.6, color="blue", linestyle=":", label="Threshold (0.6)")
+        ax.axhline(0.5, color="blue", linestyle=":", label="Threshold (0.5)")
         ax.set_ylabel("Consensus Score")
         ax.set_ylim(0, 1)
-        ax.set_title(f"Satellite {sid}")
+
         ax.grid(True, linestyle=":")
 
         # Add Correctness Score on secondary axis
@@ -421,7 +433,8 @@ def plot_consensus_correctness_dof(dag) -> None:
 def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
     """
     Plots Normalised Innovation Squared (NIS) values for each satellite individually,
-    comparing them to expected chi-squared consistency bounds.
+    comparing them to expected chi-squared consistency bounds. Each satellite
+    is displayed in a separate plot window.
 
     Args:
     - dag: The final DAG object containing transactions (with NIS + DOF metadata).
@@ -462,15 +475,14 @@ def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
         print("No NIS/DOF data available to plot.")
         return
 
-    n_sats = len(data_by_sat)
-    _, axes = plt.subplots(n_sats, 1, figsize=(12, 5 * n_sats), sharex=True)
-    if n_sats == 1:
-        axes = [axes]
-
     # Sort by satellite ID for consistent plot order
     sorted_sats = sorted(data_by_sat.items(), key=lambda item: int(item[0]))
 
-    for ax, (sid, records) in zip(axes, sorted_sats):
+    for sid, records in sorted_sats:
+        # Create a new figure for each satellite
+        plt.figure(figsize=(12, 6))
+        ax = plt.gca()
+
         nis_vals = np.array([r["nis"] for r in records])
         dof_vals = np.array([r["dof"] for r in records])
 
@@ -486,7 +498,7 @@ def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
 
         # Plot NIS sequence
         steps = np.arange(len(nis_vals))
-        ax.plot(steps, nis_vals, "o-", color="black", label="NIS")
+        ax.plot(steps, nis_vals, "o", color="black", label=f"NIS (Sat_{sid})")
 
         # Expected mean and confidence region
         ax.axhline(expected_mean, color="blue", linestyle="--",
@@ -500,24 +512,125 @@ def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
             label=f"{int(confidence*100)}% confidence region"
         )
 
-        # Rolling mean for trend visualization
-        if len(nis_vals) > 5:
-            window = 5
-            rolling_mean = np.convolve(nis_vals, np.ones(window) / window, mode="valid")
-            ax.plot(range(window-1, len(nis_vals)), rolling_mean,
-                     color="red", linewidth=2, label="Rolling mean (5)")
-
-        ax.set_title(f"NIS Consistency for Satellite {sid}")
-        ax.set_ylabel("NIS Value")
+        ax.set_ylabel("NIS Value (symlog scale)", fontsize=16)
+        ax.set_yscale("symlog")
         ax.grid(True, linestyle=":")
-        ax.legend(loc="upper right")
+        ax.legend(loc="upper right", fontsize=16)
+        ax.set_xlabel("Transaction Index", fontsize=16)
+        ax.tick_params(axis='x', labelsize=16)
+        ax.tick_params(axis='y', labelsize=16)
+        plt.tight_layout()
 
-    axes[-1].set_xlabel("Transaction Index")
-    plt.tight_layout()
     plt.show()
 
 
-def check_consensus_outcomes(dag, consensus_threshold: float = 0.6) -> bool:
+def plot_nis_boxplot(dag) -> None:
+    """
+    Generates box plots visualizing the distribution of Normalised Innovation Squared (NIS)
+    values for each simulated satellite.
+
+    This function collects NIS data from the DAG for honest and intermittently faulty
+    satellites and loads pre-recorded malicious satellite NIS data from
+    'sat1_nis_data.json'. The box plots illustrate the spread of NIS values,
+    with different satellite types (honest, faulty, malicious) clearly labeled.
+
+    The plot includes horizontal lines indicating:
+    - The 95% chi-squared confidence interval (for DOF=2), providing statistical bounds
+      for expected NIS values.
+    - The expected median of the chi-squared distribution (for DOF=2).
+
+    The y-axis uses a symmetrical log scale to better visualize a wide range of NIS values.
+
+    Args:
+    - dag: The DAG object containing transaction data, including NIS metadata
+           for honest and intermittently faulty satellites.
+
+    Returns:
+    - None. Displays a matplotlib box plot figure.
+    """
+    # Collect data by satellite
+    nis_data_by_sat: dict[str, list[float]] = {}
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "nis"):
+                continue
+
+            try:
+                tx_data = json.loads(tx.tx_data)
+            except Exception:
+                continue
+
+            sid = tx_data.get("observer")
+            if sid is None:
+                continue
+
+            nis = getattr(tx.metadata, "nis", None)
+            if nis is None:
+                continue
+
+            nis_data_by_sat.setdefault(str(sid), []).append(nis)
+
+    # Filter out satellites with no data
+    nis_data_by_sat = {sid: vals for sid, vals in nis_data_by_sat.items() if vals}
+
+    # Load data for the malicious satellite from file and slice it
+    malicious_nis_data = None
+    try:
+        with open('sat1_nis_data.json', 'r', encoding='utf-8') as f:
+            malicious_nis_data = json.load(f)
+            if malicious_nis_data:
+                malicious_nis_data = malicious_nis_data[100:]
+    except FileNotFoundError:
+        print("Warning: sat1_nis_data.json not found. Cannot plot malicious data.")
+    except json.JSONDecodeError:
+        print("Warning: Could not decode sat1_nis_data.json. Cannot plot malicious data.")
+
+    # Sort satellites by ID, then move sat 1 to the end of the DAG-based data.
+    sorted_sids = sorted(nis_data_by_sat.keys(), key=int)
+    if '1' in sorted_sids:
+        sorted_sids.remove('1')
+        sorted_sids.append('1')
+
+    nis_values_for_plot = [nis_data_by_sat[sid] for sid in sorted_sids]
+    labels = [f"Honest Satellite (ID: Sat_{sid})" if sid != "1" else \
+              "Satellite with Intermittent Fault (ID: Sat_1)" for sid in sorted_sids]
+
+    # Add malicious data if loaded and it has points left
+    if malicious_nis_data:
+        nis_values_for_plot.append(malicious_nis_data)
+        labels.append("Malicious Satellite (ID: Sat_1)")
+
+    if not nis_values_for_plot:
+        print("No NIS data available to create a box plot.")
+        return
+
+    plt.figure(figsize=(10, 6))
+    bp = plt.boxplot(nis_values_for_plot,
+                     labels=labels) # type: ignore [call-arg]
+    for median in bp['medians']:
+        median.set_color('blue')
+
+    # Add chi-squared bounds
+    dof = 2
+    confidence = 0.95
+    expected_median = 1.298
+    chi2_lower = chi2.ppf((1 - confidence) / 2, df=dof)
+    chi2_upper = chi2.ppf((1 + confidence) / 2, df=dof)
+    plt.axhline(chi2_lower, color='r', linestyle='--',
+                label='95% Chi-squared Confidence Interval (DOF=2)')
+    plt.axhline(chi2_upper, color='r', linestyle='--')
+    plt.axhline(expected_median, color='black', linestyle=':', label='Expected Median (DOF=2)')
+
+    plt.ylabel("NIS Value", fontsize=14)
+    plt.yscale("symlog")
+    plt.tick_params(axis='x', labelsize=10)
+    plt.tick_params(axis='y', labelsize=14)
+    plt.legend(fontsize=14)
+    plt.grid(True, linestyle=":", alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
+def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
     """
     Checks if transaction consensus outcomes (confirmed/rejected) are consistent
     with their consensus scores and reports any discrepancies.
