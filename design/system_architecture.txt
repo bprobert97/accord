@@ -1,0 +1,54 @@
+@startuml
+
+!theme plain
+skinparam rectangle {
+    StereotypeFontColor #333333
+    FontColor #333333
+    BackgroundColor<<Layer>> #F3F3F3
+    BorderColor #A9A9A9
+}
+skinparam component {
+    BackgroundColor #FFFFFF
+    BorderColor #A9A9A9
+}
+skinparam arrow {
+    Color #666666
+}
+
+' Define the upper layers
+rectangle "<b>Simulation & Orchestration Layer</b>" as L1 <<Layer>> {
+    [accord_demo.py] as Demo
+    [plotting.py] as Plotting
+    [logger.py] as Logger
+}
+
+rectangle "<b>Application Layer</b>" as L2 <<Layer>> {
+    [satellite_node.py] as SatNode
+}
+
+rectangle "<b>Data Processing Layer</b>" as L3 <<Layer>> {
+    [filter.py] as Filter
+    [transaction.py] as Transaction
+}
+
+rectangle "<b>Consensus & Validation Layer</b>" as L4 <<Layer>> {
+    [consensus_mech.py] as Consensus
+    [reputation.py] as Reputation
+    [dag.py] as DAG
+}
+
+
+' --- Define Relationships (Excluding connections to the DAG layer) ---
+
+L1 -d-> L2: Drives simulation
+Demo -l-> Plotting : Visualizes results
+Demo -r-> Logger: Execution reporting
+
+L2 -d-> L3: Processes observation and creates transaction
+
+Filter .r.> Transaction : Provides ODResult for
+
+Consensus -l-> Reputation : Uses score for validation
+DAG <-l- Consensus: Uses score to update transaction status
+L4 .u.> L3: Reads statistical data from
+@enduml
