@@ -25,7 +25,7 @@ import time
 import numpy as np
 
 # Global Variables for consensus
-MAX_REPUTATION: float = 100.0
+MAX_REPUTATION: float = 1
 
 class ReputationManager:
     """

@@ -39,7 +39,7 @@ class ConsensusMechanism():
     The Proof of Inter-Satellite Evaluation (PoISE) consensus mechanism.
     """
     def __init__(self) -> None:
-        self.consensus_threshold: float = 0.6
+        self.consensus_threshold: float = 0.5
         self.ema_alpha: float = 0.1  # Smoothing factor for EMA
         # Define a simple mapping: normalise by a maximum useful DOF
         # Theoretically, this could be up to 6 (full 3D position+velocity), but
@@ -105,7 +105,7 @@ class ConsensusMechanism():
         # Combine instantaneous score with historical improvement.
         # A good current NIS can receive a high score even with a poor history,
         # especially if it shows improvement.
-        final_score = base_score * (1 + improvement_factor * 0.5)
+        final_score = base_score * ((1 + improvement_factor) * 0.5)
         return max(0.0, min(1.0, final_score))
 
     def get_correctness_score(self, obs_record: ObservationRecord,
@@ -157,7 +157,6 @@ class ConsensusMechanism():
 
     def calculate_consensus_score(self, correctness: float,
                                   dof_reward: float, reputation: float,
-                                  gamma: float = 0.35,
                                   alpha: float = 0.8) -> float:
         """
         Calculate overall consensus score from correctness, DOF reward, and node reputation.
@@ -166,7 +165,8 @@ class ConsensusMechanism():
         Args:
         - correctness: Correctness score in [0,1].
         - dof_reward: DOF-based reward score in [0,1].
-        - reputation: Node reputation in the range [0, 100].
+        - reputation: Node reputation in the range [0, 1].
+        - alpha: Non-linear scaling factor for the combined DOF and reputation term.
 
         Returns:
         - Consensus score in [0,1]. Higher is better.
@@ -179,23 +179,15 @@ class ConsensusMechanism():
         # Min DOF score = 0.33
         # Min reputation = 0
 
-        # Relative to baselines (can go negative for correctness)
-        c_rel = max(min((correctness - 0.5) / 0.5, 1.0), -1.0)      # [-1,1]
+        # Relative to baselines
         d_rel = max(min((dof_reward - (1/3)) / (2/3), 1.0), 0.0)      # [0,1] with baseline at 0
         r_rel = rep_norm                                            # [0,1] with baseline at 0
-
-        # Nonlinear emphasis on correctness (continuous across 0.5)
-        # gamma < 1 makes correctness more influential above 0.5 and penalises below 0.5
-        c_scale = ( (abs(c_rel) ** gamma) * (1 if c_rel >= 0 else -1) + 1 ) / 2
 
         # Cooperative DOF–reputation term (no weights, monotonic, bounded)
         dr_term = (1 - (1 - d_rel) * (1 - r_rel)) ** alpha
 
-        # Combine and calibrate to the threshold anchor
-        combined = c_scale * dr_term
-
-        consensus = self.consensus_threshold + (combined - 0.5) * \
-        2 * (1 - self.consensus_threshold)
+        # Combine terms
+        consensus = correctness * dr_term
 
         logger.info("[FOR PLOT] correctness: %.6f, reputation: %.6f, dof_norm: %.6f, \
                     consensus score: %.6f", correctness, reputation, dof_reward, consensus)

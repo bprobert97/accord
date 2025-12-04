@@ -28,7 +28,7 @@ def mock_sat_node():
 
     # Add the rep_manager attribute to the mock
     node.rep_manager = MagicMock()
-    node.rep_manager.apply_positive.return_value = (node.reputation + 10, 1, 0.6)
+    node.rep_manager.apply_positive.return_value = (node.reputation + 10, 1, 0.5)
     node.rep_manager.apply_negative.return_value = (node.reputation - 10, 0, 0.4)
     node.rep_manager.decay.side_effect = lambda rep: rep # No decay in tests
     return node
@@ -107,7 +107,7 @@ def test_calculate_consensus_score(consensus_mech):
     score3 = consensus_mech.calculate_consensus_score(
         correctness=0.9,
         dof_reward=0.8,
-        reputation=1.0 # Very low reputation
+        reputation=0.1 # Very low reputation
     )
     assert score3 < score1
 

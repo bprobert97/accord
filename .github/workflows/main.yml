@@ -25,6 +25,14 @@ jobs:
     - name: Run mypy static type checker
       run: |
         mypy .
-    - name: Run pytest with coverage
+    - name: Run pytest with coverage and generate XML report
       run: |
-        pytest --cov=src tests/
+        pytest --cov=src --cov-report=xml tests/
+    - name: Publish Code Coverage Summary
+      uses: irongut/CodeCoverageSummary@v1.3.0
+      with:
+        # Use the file generated in the previous step
+        filename: coverage.xml
+        # Optional: Display a badge and format the output as markdown
+        badge: true
+        format: markdown

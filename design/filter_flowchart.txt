@@ -1,0 +1,67 @@
+@startuml
+
+start
+:Measurement update step of EKF completed;
+note right
+  Outputs:
+  - y (innovation vector)
+  - ekf.P (posterior covariance matrix)
+  - ekf.x (posterior state vector)
+  - Current simulation step (k)
+  - Time step (dt)
+  - Measurement noise std. dev. (sig_r, sig_rdot)
+end note
+
+repeat
+  :Loop through each possible observer satellite (i);
+  repeat
+    :Loop through each possible target satellite (j);
+    if (i == j?) then (yes)
+      :Skip (satellite cannot observe itself);
+    else (no)
+      :Extract innovation sub-vector y_ij;
+      note right
+        Corresponds to the specific measurement
+        between observer i and target j.
+      end note
+
+      :Build H_ij (measurement Jacobian for observer i and target j);
+      note right
+        Uses H_blocks_target_obs(target_state, observer_state)
+        to get partials w.r.t. target and observer states,
+        then places them in the correct blocks of the
+        full state vector dimension.
+      end note
+
+      :Calculate S_ij (innovation covariance for observer i and target j);
+      note right
+        S_ij = H_ij * ekf.P * H_ij.T + R_ij
+        where R_ij is the measurement noise covariance
+        for this specific observation (diag([sig_r^2, sig_rdot^2]))
+      end note
+
+      :Calculate NIS (Normalised Innovation Squared);
+      note right
+        NIS = y_ij.T * S_ij_inv * y_ij
+      end note
+
+      :Create ObservationRecord object;
+      note right
+        Attributes populated:
+        - step (current simulation step k)
+        - observer (satellite i)
+        - target (satellite j)
+        - nis (calculated NIS value)
+        - dof (degrees of freedom, i.e., len(y_ij))
+        - time (k * dt)
+      end note
+
+      :Add ObservationRecord to list of records for current step;
+    endif
+  repeat while (more targets?)
+repeat while (more observers?)
+
+:Return list of ObservationRecord objects;
+stop
+
+@enduml
