@@ -593,13 +593,13 @@ def plot_nis_boxplot(dag) -> None:
         sorted_sids.append('1')
 
     nis_values_for_plot = [nis_data_by_sat[sid] for sid in sorted_sids]
-    labels = [f"Honest Satellite (ID: Sat_{sid})" if sid != "1" else \
-              "Satellite with Intermittent Fault (ID: Sat_1)" for sid in sorted_sids]
+    labels = [f"Honest Satellite\n(ID: Sat_{sid})" if sid != "1" else \
+              "Satellite with \nIntermittent Fault\n(ID: Sat_1)" for sid in sorted_sids]
 
     # Add malicious data if loaded and it has points left
     if malicious_nis_data:
         nis_values_for_plot.append(malicious_nis_data)
-        labels.append("Malicious Satellite (ID: Sat_1)")
+        labels.append("Malicious Satellite\n(ID: Sat_1)")
 
     if not nis_values_for_plot:
         print("No NIS data available to create a box plot.")
@@ -622,11 +622,11 @@ def plot_nis_boxplot(dag) -> None:
     plt.axhline(chi2_upper, color='r', linestyle='--')
     plt.axhline(expected_median, color='black', linestyle=':', label='Expected Median (DOF=2)')
 
-    plt.ylabel("Normalised Innovation Squared", fontsize=14)
+    plt.ylabel("Normalised Innovation Squared", fontsize=18)
     plt.yscale("symlog")
-    plt.tick_params(axis='x', labelsize=10)
-    plt.tick_params(axis='y', labelsize=14)
-    plt.legend(fontsize=14)
+    plt.tick_params(axis='x', labelsize=18)
+    plt.tick_params(axis='y', labelsize=18)
+    plt.legend(fontsize=18)
     plt.grid(True, linestyle=":", alpha=0.7)
     plt.tight_layout()
     plt.show()
