@@ -70,7 +70,7 @@ def plot_nis_vs_correctness(df):
         alpha=0.8,
     )
 
-    plt.xlabel("NIS")
+    plt.xlabel("Normalised Innovation Squared")
     plt.ylabel("Correctness")
     plt.grid(True, linestyle=":")
     plt.tight_layout()
@@ -94,7 +94,7 @@ def plot_nis_vs_consensus(df):
     cbar = fig.colorbar(scatter, ax=ax)
     cbar.set_label("Correctness", fontsize=16)
 
-    ax.set_xlabel("NIS", fontsize=16)
+    ax.set_xlabel("Normalised Innovation Squared", fontsize=16)
     ax.set_ylabel("Consensus Score", fontsize=16)
     ax.set_xscale('symlog')
     plt.tick_params(axis='x', labelsize=16)
@@ -498,7 +498,8 @@ def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
 
         # Plot NIS sequence
         steps = np.arange(len(nis_vals))
-        ax.plot(steps, nis_vals, "o", color="black", label=f"NIS (Sat_{sid})")
+        ax.plot(steps, nis_vals, "o", color="black",
+                label=f"NIS (Sat_{sid})")
 
         # Expected mean and confidence region
         ax.axhline(expected_mean, color="blue", linestyle="--",
@@ -512,13 +513,13 @@ def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
             label=f"{int(confidence*100)}% confidence region"
         )
 
-        ax.set_ylabel("NIS Value (symlog scale)", fontsize=16)
+        ax.set_ylabel("Normalised Innovation Squared", fontsize=24)
         ax.set_yscale("symlog")
         ax.grid(True, linestyle=":")
-        ax.legend(loc="upper right", fontsize=16)
-        ax.set_xlabel("Transaction Index", fontsize=16)
-        ax.tick_params(axis='x', labelsize=16)
-        ax.tick_params(axis='y', labelsize=16)
+        ax.legend(loc="upper right", fontsize=20)
+        ax.set_xlabel("Transaction Index", fontsize=24)
+        ax.tick_params(axis='x', labelsize=24)
+        ax.tick_params(axis='y', labelsize=24)
         plt.tight_layout()
 
     plt.show()
@@ -621,7 +622,7 @@ def plot_nis_boxplot(dag) -> None:
     plt.axhline(chi2_upper, color='r', linestyle='--')
     plt.axhline(expected_median, color='black', linestyle=':', label='Expected Median (DOF=2)')
 
-    plt.ylabel("NIS Value", fontsize=14)
+    plt.ylabel("Normalised Innovation Squared", fontsize=14)
     plt.yscale("symlog")
     plt.tick_params(axis='x', labelsize=10)
     plt.tick_params(axis='y', labelsize=14)
