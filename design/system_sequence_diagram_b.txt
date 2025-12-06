@@ -1,0 +1,34 @@
+@startuml
+
+queue "Transaction Queue" as Queue
+participant "dag.py" as DAG
+participant "consensus_mech.py" as Consensus
+participant "reputation.py" as Rep
+
+activate DAG
+
+' In a separate process, the DAG pulls from the queue
+DAG -> Queue: Dequeue(new_transaction)
+
+DAG -> Consensus: PoISE(new_transaction)
+activate Consensus
+
+
+note right of Consensus: The PoISE algorithm uses the NIS value \nfrom the transaction and the submitting \nsatellite's reputation score.
+Consensus -->> DAG: validation_result (e.g., approved)
+deactivate Consensus
+DAG -> DAG: add_transaction_to_DAG(new_transaction)
+
+alt validation_result is approved
+    DAG -> DAG: approve_transaction(new_transaction)
+    DAG -> Rep: update_reputation_positive(SatA.id, validation_result)
+    Rep -> Rep: Adjust score for SatA
+else validation_result is rejected
+    DAG -> DAG: reject_transaction(new_transaction)
+    DAG -> Rep: update_reputation_negative(SatA.id, validation_result)
+    Rep -> Rep: Adjust score for SatA
+end
+
+deactivate DAG
+
+@enduml
