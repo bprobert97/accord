@@ -1,38 +1,71 @@
 @startuml
-participant "Application and Data Processing Layers" as ADPL
-queue "Transaction Listener and Queue" as Queue
-participant "Consensus and Validation Layer" as DLT
 
-activate DLT
-activate ADPL
+participant "SatelliteNode A" as SatA
+participant "filter.py" as Filter
+participant "transaction.py" as Tx
+participant "Listener" as Listener
+queue "Transaction Queue" as Queue
+participant "dag.py" as DAG
+participant "consensus_mech.py" as Consensus
+participant "reputation.py" as Rep
 
-ADPL-> ADPL: process_measurement(observation_data)
+activate DAG
+activate SatA
 
-ADPL-->> ADPL: Create new transaction
+SatA -> Filter: process_measurement(observation_data)
+activate Filter
+Filter -> Filter: Perform EKF predict & update steps
+Filter -> Filter: _log_nis() to calculate NIS
+Filter -->> SatA: ODProcessingResult (with ObservationRecord)
+deactivate Filter
+
+note right of SatA: A new transaction is created to hold the result
+
+SatA -> Tx: create(observation_data, ODResult)
+activate Tx
+Tx -->> SatA: new_transaction
+deactivate Tx
 
 ' Submission is now asynchronous via Listener and Queue
-ADPL-> Queue: submit_transaction(new_transaction)
-Queue-> Queue: Enqueue(new_transaction)
-Queue-->> ADPL: submission_received
-deactivate ADPL
+SatA -> Listener: submit_transaction(new_transaction)
+activate Listener
+Listener -> Queue: Enqueue(new_transaction)
+Listener -->> SatA: submission_received
+deactivate Listener
+deactivate SatA
 
-' In a separate process, the DLT core pulls from the queue
-DLT -> Queue: Dequeue()
-Queue -> DLT: process_transaction
+' In a separate process, the DAG pulls from the queue
+DAG -> Queue: Dequeue()
+Queue -> DAG: new_transaction
 
-note left of DLT: This layer processes transactions from the queue,\nvalidates them using the PoISE consensus mechanism,\nadds them to the DLT, and updates reputation scores.
+note left of DAG: The DAG processes transactions from the queue\nand runs the consensus mechanism.
 
-DLT -> DLT: Validate transaction using PoISE
+DAG -> Consensus: validate_transaction(new_transaction)
+activate Consensus
+
+
+note right of Consensus: The PoISE algorithm uses the NIS value from the transaction\n and the submitting satellite's reputation score.
+Consensus -> Consensus: Run PoISE algorithm
+Consensus -->> DAG: validation_result (e.g., approved)
+deactivate Consensus
 
 alt validation_result is approved
-    DLT -> DLT: Confirm transaction
-    DLT -> DLT: update_reputation_positive()
+    DAG -> DAG: add_transaction_to_graph()
+
+    DAG -> Rep: update_reputation_positive(SatA.id, validation_result)
+    activate Rep
+    Rep -> Rep: Adjust score for SatA
+    deactivate Rep
 else validation_result is rejected
-    DLT -> DLT: Reject transaction
-    DLT -> DLT: update_reputation_negative()
+    note right of DAG: Transaction is not added to the graph.
+
+    DAG -> Rep: update_reputation_negative(SatA.id, validation_result)
+    activate Rep
+    Rep -> Rep: Adjust score for SatA
+    deactivate Rep
 end
 
-DLT -->> ADPL: Update submission_status
-DLT -->> ADPL: Synchronise DLT
-deactivate DLT
+DAG -->> SatA: submission_status
+deactivate DAG
+
 @enduml
