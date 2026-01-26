@@ -299,6 +299,59 @@ def plot_transaction_dag(dag, max_nodes: int | None = 100, start_index: int = 0)
     plt.show()
 
 
+
+def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Constellation") -> None:
+    """
+    Plots the 3D orbits of a satellite constellation around the Earth.
+
+    Args:
+    - truth: The history of true stacked state vectors, with shape (steps, 6*N).
+    - n: The number of satellites.
+    - title: The title of the plot.
+    """
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Plot Earth
+    r_e = 6378e3  # Earth radius in meters
+    u = np.linspace(0, 2 * np.pi, 100)
+    v = np.linspace(0, np.pi, 100)
+    x_earth = r_e * np.outer(np.cos(u), np.sin(v))
+    y_earth = r_e * np.outer(np.sin(u), np.sin(v))
+    z_earth = r_e * np.outer(np.ones(np.size(u)), np.cos(v))
+    ax.plot_surface(x_earth, y_earth, z_earth, color='blue', alpha=0.3, rstride=4, cstride=4)  # type: ignore [attr-defined]
+
+    # Plot satellite orbits
+    for i in range(n):
+        # Extract position history for satellite i
+        pos_hist = truth[:, i*6:i*6+3]
+
+        # Plot orbit path
+        ax.plot(pos_hist[:, 0], pos_hist[:, 1], pos_hist[:, 2], label=f'Sat {i}')
+
+        # Plot final position
+        ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2], s=30) # type: ignore [misc]
+
+    # Set plot labels and title
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_zlabel("Z (m)") # type: ignore [attr-defined]
+    ax.set_title(title)
+
+    # Make axes equal to avoid distortion
+    max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(), ax.get_zlim()])
+    max_range = np.ptp(max_range_temp).max() / 2.0
+    mid_x = np.mean(ax.get_xlim())
+    mid_y = np.mean(ax.get_ylim())
+    mid_z = np.mean(ax.get_zlim()) # type: ignore [attr-defined]
+    ax.set_xlim(mid_x - max_range, mid_x + max_range)
+    ax.set_ylim(mid_y - max_range, mid_y + max_range)
+    ax.set_zlim(mid_z - max_range, mid_z + max_range) # type: ignore [attr-defined]
+
+    ax.legend()
+    plt.show()
+
+
 REP_MGR = ReputationManager()
 
 def plot_reputation(rep_history: dict) -> None:
