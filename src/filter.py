@@ -528,7 +528,7 @@ class JointEKF:
     """
     def __init__(self, config: FilterConfig, initial_truth: np.ndarray):
         """
-        initialises the JointEKF.
+        Initialises the JointEKF.
 
         Args:
         - config: The configuration for the filter.

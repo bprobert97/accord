@@ -25,7 +25,8 @@ import asyncio
 import os
 from typing import Optional
 import numpy as np
-from src.plotting import plot_nis_consistency_by_satellite, \
+from src.plotting import plot_constellation, \
+    plot_nis_consistency_by_satellite, \
     plot_reputation, check_consensus_outcomes, \
         plot_transaction_dag, plot_nis_boxplot
 from src.consensus_mech import ConsensusMechanism
@@ -47,7 +48,9 @@ def clear_log() -> None:
             f.truncate(0)
         logger.info("Cleared app.log at the start of accord_demo.py")
 
-async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optional[dict]]:
+async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
+                                                            Optional[dict],
+                                                            Optional[np.ndarray]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
@@ -59,6 +62,7 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
     - A tuple containing:
         - The final DAG object after all transactions have been processed.
         - A dictionary containing the reputation history for each satellite.
+        - The ground truth trajectory history.
     """
     clear_log()
     truth, z_hist = simulate_truth_and_meas(
@@ -130,7 +134,7 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG], Optio
             await sat.submit_transaction(recipient_address=123)
             rep_history[str(sid)].append(sat.reputation)
 
-    return dag, rep_history
+    return dag, rep_history, truth
 
 
 # Run demo
@@ -146,7 +150,7 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    final_dag, rep_hist = asyncio.run(run_consensus_demo(default_config))
+    final_dag, rep_hist, truth_history = asyncio.run(run_consensus_demo(default_config))
     if final_dag:
         plot_transaction_dag(final_dag)
         plot_nis_consistency_by_satellite(final_dag)
@@ -154,3 +158,5 @@ if __name__ == "__main__":
         check_consensus_outcomes(final_dag)
     if rep_hist:
         plot_reputation(rep_hist)
+    if truth_history is not None:
+        plot_constellation(truth_history, default_config.N)
