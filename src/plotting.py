@@ -319,7 +319,7 @@ def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Conste
     x_earth = r_e * np.outer(np.cos(u), np.sin(v))
     y_earth = r_e * np.outer(np.sin(u), np.sin(v))
     z_earth = r_e * np.outer(np.ones(np.size(u)), np.cos(v))
-    ax.plot_surface(x_earth, y_earth, z_earth, color='blue', alpha=0.3,
+    ax.plot_surface(x_earth, y_earth, z_earth, color='blue', alpha=0.3, # type: ignore [attr-defined]
                     rstride=4, cstride=4)  # type: ignore [attr-defined]
 
     # Plot satellite orbits
