@@ -319,7 +319,8 @@ def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Conste
     x_earth = r_e * np.outer(np.cos(u), np.sin(v))
     y_earth = r_e * np.outer(np.sin(u), np.sin(v))
     z_earth = r_e * np.outer(np.ones(np.size(u)), np.cos(v))
-    ax.plot_surface(x_earth, y_earth, z_earth, color='blue', alpha=0.3, rstride=4, cstride=4)  # type: ignore [attr-defined]
+    ax.plot_surface(x_earth, y_earth, z_earth, color='blue', alpha=0.3,
+                    rstride=4, cstride=4)  # type: ignore [attr-defined]
 
     # Plot satellite orbits
     for i in range(n):
@@ -339,7 +340,8 @@ def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Conste
     ax.set_title(title)
 
     # Make axes equal to avoid distortion
-    max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(), ax.get_zlim()]) # type: ignore [attr-defined]
+    max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(),
+                               ax.get_zlim()]) # type: ignore [attr-defined]
     max_range = np.ptp(max_range_temp).max() / 2.0
     mid_x = np.mean(ax.get_xlim())
     mid_y = np.mean(ax.get_ylim())
