@@ -339,7 +339,7 @@ def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Conste
     ax.set_title(title)
 
     # Make axes equal to avoid distortion
-    max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(), ax.get_zlim()])
+    max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(), ax.get_zlim()]) # type: ignore [attr-defined]
     max_range = np.ptp(max_range_temp).max() / 2.0
     mid_x = np.mean(ax.get_xlim())
     mid_y = np.mean(ax.get_ylim())
