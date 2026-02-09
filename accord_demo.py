@@ -28,7 +28,7 @@ import numpy as np
 from src.plotting import plot_constellation, \
     plot_nis_consistency_by_satellite, \
     plot_reputation, check_consensus_outcomes, \
-        plot_transaction_dag, plot_nis_boxplot
+        plot_nis_boxplot
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
@@ -67,7 +67,8 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
     clear_log()
     logger.info("Simulating satellite constellation to get truth")
     truth, z_hist = simulate_truth_and_meas(
-        config.N, config.steps, config.dt, config.sig_r, config.sig_rdot
+        config.N, config.steps, config.dt, config.sig_r,
+        config.sig_rdot, config.seed
     )
 
     logger.info("Initializing Joint EKF")
@@ -159,7 +160,6 @@ if __name__ == "__main__":
 
     final_dag, rep_hist, truth_history = asyncio.run(run_consensus_demo(default_config))
     if final_dag:
-        plot_transaction_dag(final_dag)
         plot_nis_consistency_by_satellite(final_dag)
         plot_nis_boxplot(final_dag)
         check_consensus_outcomes(final_dag)

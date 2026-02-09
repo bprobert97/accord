@@ -20,7 +20,7 @@ def filter_config():
     return FilterConfig(N=3, steps=2, dt=1.0, seed=42)
 
 @pytest.fixture
-def ekf(filter_config):
+def ekf(filter_config: FilterConfig):
     """Provides a JointEKF instance for tests."""
     # To initialise the EKF, we need an initial truth state.
     initial_truth, _ = simulate_truth_and_meas(
@@ -28,7 +28,8 @@ def ekf(filter_config):
         steps=1,
         dt=filter_config.dt,
         sig_r=filter_config.sig_r,
-        sig_rdot=filter_config.sig_rdot
+        sig_rdot=filter_config.sig_rdot,
+        seed=filter_config.seed
     )
     return JointEKF(config=filter_config, initial_truth=initial_truth[0])
 
