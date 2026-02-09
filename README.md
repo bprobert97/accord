@@ -37,6 +37,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 |   └── plotting.py                # Python script for plotting NIS, correctness, reputation and consensus scores
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
+│   └── simualtion.py              # Code for simulating a satellite network
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │
 ├── 📁 tests/                     # Unit tests, written with pytest

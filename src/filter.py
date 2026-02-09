@@ -29,6 +29,10 @@ from numpy.typing import NDArray
 from scipy.stats import chi2
 from scipy.linalg import expm
 from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
+from src.logger import get_logger
+from src.simulation import generate_random_keplerian_elements, keplerian_to_cartesian
+
+logger = get_logger()
 
 # ----------------------- Constants -----------------------
 MU_EARTH = 3.986004418e14  # m^3/s^2
@@ -356,15 +360,20 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
         - truth: The history of true stacked state vectors.
         - z_hist: The history of noisy stacked measurements.
     """
-    base = np.array([Re+500e3, 0,0, 0,7600,0])
+
     x0 = []
-    for i in range(N):
-        off = np.array([(i-(N-1)/2)*15e3, 0,0, 0,(i-(N-1)/2)*3,0])
-        x0.append(base+off)
+    logger.info("Generating random satellite constellation with %s satellites", N)
+
+    for _ in range(N):
+        a, e, i, raan, argp, ta = generate_random_keplerian_elements()
+        state = keplerian_to_cartesian(a, e, i, raan, argp, ta)
+        x0.append(state)
     x0_stack = np.concatenate(x0)
 
+    logger.info("Propagating truth states")
     truth = propagate_truth_kepler(x0_stack, steps, dt)
 
+    logger.info("Generating noisy inter-satellite measurements")
     M = N*(N-1)
     z_hist = np.zeros((steps, 2*M))
     for k in range(steps):
