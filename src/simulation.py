@@ -1,3 +1,4 @@
+# pylint: disable=protected-access, too-many-locals, too-many-positional-arguments, too-many-arguments
 """
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -18,7 +19,7 @@ logger = get_logger()
 
 # ----------------------- Constants -----------------------
 MU_EARTH = 3.986004418e14  # m^3/s^2
-Re = 6378e3
+RE = 6378e3
 # ---------------------------------------------------------
 
 def generate_random_keplerian_elements() -> tuple[float, float, float, float, float, float]:
@@ -28,7 +29,7 @@ def generate_random_keplerian_elements() -> tuple[float, float, float, float, fl
     - A tuple containing (a, e, i, raan, argp, ta)
     """
     altitude = np.random.uniform(180e3, 2000e3)
-    a = Re + altitude
+    a = RE + altitude
     e = np.random.uniform(0, 0.05)
     i = np.random.uniform(0, np.pi) # inclination in radians
     raan = np.random.uniform(0, 2 * np.pi)
@@ -36,7 +37,8 @@ def generate_random_keplerian_elements() -> tuple[float, float, float, float, fl
     ta = np.random.uniform(0, 2 * np.pi)
     return a, e, i, raan, argp, ta
 
-def keplerian_to_cartesian(a: float, e: float, i: float, raan: float, argp: float, ta: float) -> NDArray[np.float64]:
+def keplerian_to_cartesian(a: float, e: float, i: float, raan: float,
+                           argp: float, ta: float) -> NDArray[np.float64]:
     """
     Converts Keplerian elements to a Cartesian state vector (position and velocity).
     Args:
@@ -56,8 +58,7 @@ def keplerian_to_cartesian(a: float, e: float, i: float, raan: float, argp: floa
 
     # Check for division by zero or invalid values
     sqrt_val = MU_EARTH * a * (1 - e**2)
-    if sqrt_val < 0:
-        sqrt_val = 0
+    sqrt_val = max(sqrt_val, 0)
 
     v_pqw_mag = np.sqrt(sqrt_val) / r
     v_pqw = v_pqw_mag * np.array([-np.sin(ta), e + np.cos(ta), 0])
