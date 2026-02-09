@@ -22,7 +22,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 📁 accord/
 │
 ├── 📁 .github/workflows/              # GitHub Workflow files
-│   └── main.yml                       # CI configuration for github: Pylint and Mypy
+│   └── main.yml                       # CI configuration for github: Pylint, Mypy and Pytest
 │
 ├── 📁 design/                      # Design documents, Jupyter notebooks and PlantUML diagrams
 │
