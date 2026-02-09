@@ -65,20 +65,27 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
         - The ground truth trajectory history.
     """
     clear_log()
+    logger.info("Simulating satellite constellation to get truth")
     truth, z_hist = simulate_truth_and_meas(
         config.N, config.steps, config.dt, config.sig_r, config.sig_rdot
     )
 
+    logger.info("Initializing Joint EKF")
     ekf = JointEKF(config, truth[0])
 
+    logger.info("Collecting observation records")
     # First, run the EKF simulation and collect all observation records
     all_obs_records = []
     x_hist = np.zeros((config.steps, config.N * 6))
     for k in range(config.steps):
+        logger.info("Starting prediction")
         ekf.predict()
+        logger.info("Starting update")
         obs_records_step = ekf.update(z_hist[k], k)
+        logger.info("Adding new record")
         all_obs_records.extend(obs_records_step)
         x_hist[k] = ekf.ekf.x
+        logger.info("Completed EKF step %d/%d", k + 1, config.steps)
 
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
