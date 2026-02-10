@@ -22,19 +22,27 @@ MU_EARTH = 3.986004418e14  # m^3/s^2
 RE = 6378e3
 # ---------------------------------------------------------
 
-def generate_random_keplerian_elements() -> tuple[float, float, float, float, float, float]:
+def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
+                                                           float, float, float]:
     """
     Generates a set of random but valid Keplerian elements for a LEO satellite.
+
+    Arguments:
+    - seed: An integer seed for reproducibility.
     Returns:
     - A tuple containing (a, e, i, raan, argp, ta)
     """
-    altitude = np.random.uniform(180e3, 2000e3)
+    # Use a seed for reproducibility in tests and demos
+    rng = np.random.default_rng(seed)
+
+    altitude = rng.uniform(180e3, 2000e3)
     a = RE + altitude
-    e = np.random.uniform(0, 0.05)
-    i = np.random.uniform(0, np.pi) # inclination in radians
-    raan = np.random.uniform(0, 2 * np.pi)
-    argp = np.random.uniform(0, 2 * np.pi)
-    ta = np.random.uniform(0, 2 * np.pi)
+
+    e = rng.uniform(0, 0.05)
+    i = rng.uniform(0, np.pi) # inclination in radians
+    raan = rng.uniform(0, 2 * np.pi)
+    argp = rng.uniform(0, 2 * np.pi)
+    ta = rng.uniform(0, 2 * np.pi)
     return a, e, i, raan, argp, ta
 
 def keplerian_to_cartesian(a: float, e: float, i: float, raan: float,

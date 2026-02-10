@@ -342,8 +342,9 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
 
 # ----------------------- Truth + measurement sim ----------
 def simulate_truth_and_meas(N: int, steps: int, dt: float,
-                            sig_r: float, sig_rdot: float) -> tuple[NDArray[np.float64],
-                                                                    NDArray[np.float64]]:
+                            sig_r: float, sig_rdot: float,
+                            seed: int) -> tuple[NDArray[np.float64],
+                                                NDArray[np.float64]]:
     """
     Simulates the true satellite trajectories and generates noisy
     inter-satellite measurements.
@@ -354,6 +355,7 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
     - dt: The time step size.
     - sig_r: Standard deviation of range measurement noise.
     - sig_rdot: Standard deviation of range-rate measurement noise.
+    - seed: An integer seed for reproducibility.
 
     Returns:
     - A tuple containing:
@@ -364,8 +366,8 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
     x0 = []
     logger.info("Generating random satellite constellation with %s satellites", N)
 
-    for _ in range(N):
-        a, e, i, raan, argp, ta = generate_random_keplerian_elements()
+    for n in range(N):
+        a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=seed + n)
         state = keplerian_to_cartesian(a, e, i, raan, argp, ta)
         x0.append(state)
     x0_stack = np.concatenate(x0)
@@ -528,7 +530,7 @@ class FilterConfig:
     sig_rdot: float = 0.02
     q_acc_target: float = 1e-6
     q_acc_obs: float = 1e-6
-    seed: int | None = 42
+    seed: int = 42
 
 
 class JointEKF:

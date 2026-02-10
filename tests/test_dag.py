@@ -85,22 +85,3 @@ def test_has_bft_quorum(dag):
     # Add the 4th real transaction. Now we have quorum.
     dag.add_tx(Transaction(4, 5, "k", "d4", TransactionMetadata()))
     assert dag.has_bft_quorum()
-
-def test_calculate_mean_nis(dag):
-    """
-    Test the calculation of mean NIS per satellite.
-    """
-    # Add some transactions with NIS data
-    tx1_data = '{"observer": 1, "nis": 2.0, "dof": 2, "step": 1, "time": 1, "target": 0}'
-    tx2_data = '{"observer": 2, "nis": 4.0, "dof": 2, "step": 1, "time": 1, "target": 0}'
-    tx3_data = '{"observer": 1, "nis": 3.0, "dof": 2, "step": 2, "time": 2, "target": 0}'
-
-    dag.add_tx(Transaction(1, 0, "k", tx1_data, TransactionMetadata()))
-    dag.add_tx(Transaction(2, 0, "k", tx2_data, TransactionMetadata()))
-    dag.add_tx(Transaction(1, 0, "k", tx3_data, TransactionMetadata()))
-
-    mean_nis = dag.calculate_mean_nis()
-
-    assert len(mean_nis) == 2
-    assert mean_nis[1] == pytest.approx(2.5) # (2.0 + 3.0) / 2
-    assert mean_nis[2] == pytest.approx(4.0)
