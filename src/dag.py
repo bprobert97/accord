@@ -52,6 +52,8 @@ class DAG():
         self.consensus_mech = consensus_mech
         self.queue = queue
         self.mean_nis_per_satellite: dict[int, float] = {}
+        self.nis_sums: dict[int, float] = {}
+        self.nis_counts: dict[int, int] = {}
 
     async def listen(self) -> None:
         """
@@ -61,13 +63,34 @@ class DAG():
         while True:
             transaction, satellite, future = await self.queue.get()
             logger.info("DAG received transaction %s", transaction.hash)
-            consensus_result = self.consensus_mech.proof_of_inter_satellite_evaluation(
+            consensus_result, mean_ema_nis = self.consensus_mech.proof_of_inter_satellite_evaluation(
                 dag=self,
                 sat_node=satellite,
                 transaction=transaction,
-                mean_nis_per_satellite=self.calculate_mean_nis()
+                mean_nis_per_satellite=self.mean_nis_per_satellite
             )
-            future.set_result(consensus_result)
+            future.set_result((consensus_result, mean_ema_nis))
+
+            # If the transaction was successfully processed and returned a new_ema_nis,
+            # update the DAG's internal running sums/counts and its cached mean_nis_per_satellite.
+            if consensus_result and mean_ema_nis is not None:
+                try:
+                    tx_data = json.loads(transaction.tx_data) # Extract observer ID from the transaction data
+                    observer_id = tx_data.get("observer")
+                    if observer_id is not None:
+                        # Initialise if observer_id is new
+                        self.nis_sums.setdefault(observer_id, 0.0)
+                        self.nis_counts.setdefault(observer_id, 0)
+
+                        # Update running sums and counts
+                        self.nis_sums[observer_id] += mean_ema_nis
+                        self.nis_counts[observer_id] += 1
+
+                        # Update the cached mean_nis_per_satellite for this observer
+                        self.mean_nis_per_satellite[observer_id] = \
+                            self.nis_sums[observer_id] / self.nis_counts[observer_id]
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("Could not parse transaction data for NIS update in DAG.listen().")
 
     def create_genesis_tx(self) -> dict[str, list[Transaction]]:
         """
@@ -150,29 +173,3 @@ class DAG():
         real_tx_count = max(0, len(self.ledger) - 2)  # exclude genesis
         # If f=1, we need 4 real tx (3*1+1)
         return real_tx_count >= 4
-
-    def calculate_mean_nis(self) -> dict[int, float]:
-        """
-        Calculate the mean NIS for each satellite from the transactions in the ledger.
-
-        Returns:
-        - A dictionary mapping satellite ID to its mean NIS.
-        """
-        nis_by_sat: dict[int, list[float]] = {}
-        for tx_list in self.ledger.values():
-            for tx in tx_list:
-                if tx.tx_data.startswith("Genesis"):
-                    continue
-                try:
-                    tx_data = json.loads(tx.tx_data)
-                    observer_id = tx_data.get("observer")
-                    nis = tx_data.get("nis")
-                    if observer_id is not None and nis is not None:
-                        nis_by_sat.setdefault(observer_id, []).append(nis)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-
-        mean_nis_per_satellite: dict[int, float] = {
-            sat_id: float(np.mean(nis_values)) for sat_id, nis_values in nis_by_sat.items()
-        }
-        return mean_nis_per_satellite
