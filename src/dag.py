@@ -26,7 +26,9 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from typing import TYPE_CHECKING, OrderedDict
+import bisect
+from datetime import datetime
+from typing import TYPE_CHECKING
 from .logger import get_logger
 from .transaction import Transaction, TransactionMetadata
 
@@ -48,6 +50,13 @@ class DAG():
         # Ledger structure is:
         # key: string hash of transaction, value: list[Transaction]
         self.ledger: dict[str, list[Transaction]] = self.create_genesis_tx()
+
+        # New: Maintain a separate list for chronological order
+        self._chronological_txs: list[tuple[datetime, str]] = []
+        for tx_hash, tx_list in self.ledger.items():
+            self._chronological_txs.append((tx_list[0].metadata.timestamp, tx_hash))
+        self._chronological_txs.sort() # Ensure initial sort of genesis transactions
+
         self.consensus_mech = consensus_mech
         self.queue = queue
         self.mean_nis_per_satellite: dict[int, float] = {}
@@ -122,7 +131,8 @@ class DAG():
         Returns:
         - The hashes of two parent transactions
         """
-        keys = list(self.ledger.keys())
+        # Retrieve keys in chronological order from the dedicated list
+        keys = [item[1] for item in self._chronological_txs]
 
         # This error should not happen because of genesis transactions,
         # but just in case
@@ -158,10 +168,12 @@ class DAG():
         # There is guaranteed to be two parents - the genesis transactions in the DAG.
         transaction.metadata.parent_hashes.extend([parent1, parent2])
 
-        # Add transaction to ledger in timestamp order
+        # Add transaction to the main ledger dictionary
         self.ledger[transaction.hash] = [transaction]
-        self.ledger = OrderedDict(
-        sorted(self.ledger.items(), key=lambda item: item[1][0].metadata.timestamp))
+
+        # Insert into the chronological list to maintain order
+        new_item = (transaction.metadata.timestamp, transaction.hash)
+        bisect.insort_left(self._chronological_txs, new_item)
 
     def has_bft_quorum(self) -> bool:
         """
