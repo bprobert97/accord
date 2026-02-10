@@ -27,7 +27,6 @@ import asyncio
 import json
 import random
 from typing import TYPE_CHECKING, OrderedDict
-import numpy as np
 from .logger import get_logger
 from .transaction import Transaction, TransactionMetadata
 
@@ -63,19 +62,20 @@ class DAG():
         while True:
             transaction, satellite, future = await self.queue.get()
             logger.info("DAG received transaction %s", transaction.hash)
-            consensus_result, mean_ema_nis = self.consensus_mech.proof_of_inter_satellite_evaluation(
-                dag=self,
-                sat_node=satellite,
-                transaction=transaction,
-                mean_nis_per_satellite=self.mean_nis_per_satellite
-            )
+            consensus_result, mean_ema_nis = \
+                self.consensus_mech.proof_of_inter_satellite_evaluation(
+                    dag=self,
+                    sat_node=satellite,
+                    transaction=transaction,
+                    mean_nis_per_satellite=self.mean_nis_per_satellite)
             future.set_result((consensus_result, mean_ema_nis))
 
             # If the transaction was successfully processed and returned a new_ema_nis,
             # update the DAG's internal running sums/counts and its cached mean_nis_per_satellite.
             if consensus_result and mean_ema_nis is not None:
                 try:
-                    tx_data = json.loads(transaction.tx_data) # Extract observer ID from the transaction data
+                    # Extract observer ID from the transaction data
+                    tx_data = json.loads(transaction.tx_data)
                     observer_id = tx_data.get("observer")
                     if observer_id is not None:
                         # Initialise if observer_id is new
@@ -90,7 +90,8 @@ class DAG():
                         self.mean_nis_per_satellite[observer_id] = \
                             self.nis_sums[observer_id] / self.nis_counts[observer_id]
                 except (json.JSONDecodeError, TypeError):
-                    logger.warning("Could not parse transaction data for NIS update in DAG.listen().")
+                    logger.warning("Could not parse transaction data \
+                                   for NIS update in DAG.listen().")
 
     def create_genesis_tx(self) -> dict[str, list[Transaction]]:
         """
