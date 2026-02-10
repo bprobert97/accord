@@ -77,9 +77,13 @@ class ReputationManager:
         delta_t: float = now - self._last_update
         self._last_update = now
 
-        # Exponential decay towards neutral reputation
-        decayed_rep = \
-            neutral_rep + ((current_rep - neutral_rep) * np.exp(-self.decay_rate * delta_t))
+        if current_rep > neutral_rep:
+            # Exponential decay towards neutral reputation
+            decayed_rep = \
+              neutral_rep + ((current_rep - neutral_rep) * np.exp(-self.decay_rate * delta_t))
+        else:
+            # No decay if at or below neutral
+            decayed_rep = current_rep
 
         return min(max(decayed_rep, 0.0), MAX_REPUTATION)
 
