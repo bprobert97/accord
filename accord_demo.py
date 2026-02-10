@@ -124,6 +124,10 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
     }
     rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
 
+    # Initialise rep_history with the starting reputation for all satellites
+    for sid in unique_ids:
+        rep_history[str(sid)].append(satellites[sid].reputation)
+
     # Group observations by step
     obs_by_step: dict[int, list[ObservationRecord]] = {i: [] for i in range(config.steps)}
     for obs in all_obs_records:
@@ -139,6 +143,8 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
         for sid, sat in satellites.items():
             state_vector = truth[k, sid*6:(sid+1)*6]
             sat.update_position(state_vector)
+
+        transactions_submitted_this_step = {sid: False for sid in unique_ids}
 
         # Iterate through satellites to check for ISL opportunities
         for sid, sat in satellites.items():
@@ -171,9 +177,18 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
                         logger.info("Satellite %s: submitting transaction \
                                     for witness of %s.", sid, other_sid)
                         await sat.submit_transaction(recipient_address=other_sid)
-                        rep_history[str(sid)].append(sat.reputation)
-    return dag, rep_history, truth
+                        transactions_submitted_this_step[sid] = True
 
+            # If no transaction submitted, reputation decays towards neutral
+            if not transactions_submitted_this_step[sid]:
+                sat.reputation = sat.rep_manager.decay(sat.reputation)
+
+        # Record reputation for all satellites at the end of the step
+        for sid in unique_ids:
+            sat = satellites[sid]
+            rep_history[str(sid)].append(sat.reputation)
+
+    return dag, rep_history, truth
 
 # Run demo
 if __name__ == "__main__":
