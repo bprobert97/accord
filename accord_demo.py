@@ -148,7 +148,7 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
 # Run demo
 if __name__ == "__main__":
     default_config = FilterConfig(
-        N=4,
+        N=10,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
