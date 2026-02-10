@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught
+# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import asyncio
+import math
 import os
 from typing import Optional
 import numpy as np
@@ -38,6 +39,9 @@ from src.satellite_node import SatelliteNode
 
 logger = get_logger()
 
+# Maximum range for Inter-Satellite Links (ISL) in meters
+ISL_RANGE_METERS = 4000e3  # 4000 km
+
 def clear_log() -> None:
     """
     Clear the application log file at the start of the demo.
@@ -47,6 +51,25 @@ def clear_log() -> None:
         with open(log_file_path, 'w', encoding='utf-8') as f:
             f.truncate(0)
         logger.info("Cleared app.log at the start of accord_demo.py")
+
+
+def is_in_isl_range(sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
+    """
+    Checks if two satellites are within ISL range of each other.
+
+    Args:
+    - sat1: The first SatelliteNode.
+    - sat2: The second SatelliteNode.
+
+    Returns:
+    - True if the satellites are within range, False otherwise.
+    """
+    distance = math.sqrt(
+        (sat1.x - sat2.x)**2 +
+        (sat1.y - sat2.y)**2 +
+        (sat1.z - sat2.z)**2
+    )
+    return distance <= ISL_RANGE_METERS
 
 async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
                                                             Optional[dict],
@@ -102,7 +125,7 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
     rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
 
     # Group observations by step
-    obs_by_step: list[list[ObservationRecord]] = [[] for _ in range(config.steps)]
+    obs_by_step: dict[int, list[ObservationRecord]] = {i: [] for i in range(config.steps)}
     for obs in all_obs_records:
         obs_by_step[obs.step].append(obs)
 
@@ -112,36 +135,43 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
     intermittent_sat_id = 3
 
     for k in range(config.steps):
-        for obs in obs_by_step[k]:
-            sid = obs.observer
+        # Update satellite positions at each step
+        for sid, sat in satellites.items():
+            state_vector = truth[k, sid*6:(sid+1)*6]
+            sat.update_position(state_vector)
 
-            # --- Inject special satellite behavior ---
-            # The following satellites are designated for special behavior, but only
-            # if the constellation is large enough (N) to tolerate this many
-            # faulty nodes (f), where N >= 3f + 1.
-            if sid == perfect_sat_id:
-                # Perfect satellite: always has a very low NIS
-                obs.nis = 0.01
-            # e.g., if f=2, we need N >= 7
-            elif sid == faulty_sat_id and config.N >= 7:
-                # Faulty satellite: always has a very high NIS
-                obs.nis = 50.0
-            # e.g., if f=3, we need N >= 10
-            elif sid == intermittent_sat_id and config.N >= 10:
-                # Intermittently faulty satellite
-                if 200 <= k < 400:
-                    # Period of faulty behavior
-                    if obs.nis > 2.0:
-                        obs.nis = obs.nis * 10
-                    else:
-                        obs.nis = obs.nis / 10
+        # Iterate through satellites to check for ISL opportunities
+        for sid, sat in satellites.items():
+            for other_sid, other_sat in satellites.items():
+                if sid == other_sid:
+                    continue
 
-            sat = satellites[sid]
-            sat.load_sensor_data(obs)
-            logger.info("Satellite %s: submitting transaction.", sid)
-            await sat.submit_transaction(recipient_address=123)
-            rep_history[str(sid)].append(sat.reputation)
+                if is_in_isl_range(sat, other_sat):
+                    # Find the corresponding observation record
+                    obs_to_submit = None
+                    for obs in obs_by_step.get(k, []):
+                        if obs.observer == sid and obs.target == other_sid:
+                            obs_to_submit = obs
+                            break
 
+                    if obs_to_submit:
+                        # --- Inject special satellite behavior ---
+                        if sid == perfect_sat_id:
+                            obs_to_submit.nis = 0.01
+                        elif sid == faulty_sat_id and config.N >= 7:
+                            obs_to_submit.nis = 50.0
+                        elif sid == intermittent_sat_id and config.N >= 10:
+                            if 200 <= k < 400:
+                                if obs_to_submit.nis > 2.0:
+                                    obs_to_submit.nis = obs_to_submit.nis * 10
+                                else:
+                                    obs_to_submit.nis = obs_to_submit.nis / 10
+
+                        sat.load_sensor_data(obs_to_submit)
+                        logger.info("Satellite %s: submitting transaction \
+                                    for witness of %s.", sid, other_sid)
+                        await sat.submit_transaction(recipient_address=other_sid)
+                        rep_history[str(sid)].append(sat.reputation)
     return dag, rep_history, truth
 
 

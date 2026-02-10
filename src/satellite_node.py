@@ -26,6 +26,7 @@ import copy
 import json
 import dataclasses
 from typing import Optional
+import numpy as np
 from .dag import DAG
 from .reputation import ReputationManager, MAX_REPUTATION
 from .transaction import Transaction, TransactionMetadata
@@ -48,6 +49,21 @@ class SatelliteNode():
         self.local_dag: Optional[DAG] = None
 
         self.sensor_data: Optional[ObservationRecord] = None
+
+        # Position attributes
+        self.x: float = 0.0
+        self.y: float = 0.0
+        self.z: float = 0.0
+
+    def update_position(self, state_vector: np.ndarray) -> None:
+        """
+        Updates the satellite's position from a state vector.
+
+        Args:
+        - state_vector: A NumPy array containing the satellite's state
+                        (at least [px, py, pz, ...]).
+        """
+        self.x, self.y, self.z = state_vector[0], state_vector[1], state_vector[2]
 
     def load_sensor_data(self, observation: ObservationRecord) -> None:
         """
