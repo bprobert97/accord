@@ -266,7 +266,7 @@ async def run_consensus_demo(config: FilterConfig,
 # Run demo
 if __name__ == "__main__":
     default_config = FilterConfig(
-        N=10,
+        N=50,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
