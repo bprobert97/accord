@@ -16,5 +16,4 @@ GEMINI.md
 /tests/__pycache__
 .coverage
 sat1_nis_data.json
-/josh_code
-/agathe_code
+/sim_data
