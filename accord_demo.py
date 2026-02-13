@@ -71,15 +71,24 @@ def is_in_isl_range(sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
     )
     return distance <= ISL_RANGE_METERS
 
-async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
-                                                            Optional[dict],
-                                                            Optional[np.ndarray]]:
+async def run_consensus_demo(config: FilterConfig,
+                             save_ekf_results: bool = True,
+                             load_ekf_results: bool = False,
+                             ekf_results_path: str = \
+                                "sim_data/ekf_simulation_results.npz") -> \
+                                    tuple[Optional[DAG],
+                                          Optional[dict],
+                                          Optional[np.ndarray]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
 
     Args:
     - config: FilterConfig object with simulation parameters.
+    - save_ekf_results: If True, saves the EKF simulation results to ekf_results_path.
+    - load_ekf_results: If True, attempts to load EKF simulation results from ekf_results_path.
+                        If successful, skips the EKF simulation phase.
+    - ekf_results_path: Path to the .npz file for saving/loading EKF results.
 
     Returns:
     - A tuple containing:
@@ -88,28 +97,92 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
         - The ground truth trajectory history.
     """
     clear_log()
-    logger.info("Simulating satellite constellation to get truth")
-    truth, z_hist = simulate_truth_and_meas(
-        config.N, config.steps, config.dt, config.sig_r,
-        config.sig_rdot, config.seed
-    )
 
-    logger.info("Initializing Joint EKF")
-    ekf = JointEKF(config, truth[0])
+    truth = None
+    z_hist = None
+    all_obs_records: Optional[list[ObservationRecord]] = None
+    x_hist = None
 
-    logger.info("Collecting observation records")
-    # First, run the EKF simulation and collect all observation records
-    all_obs_records = []
-    x_hist = np.zeros((config.steps, config.N * 6))
-    for k in range(config.steps):
-        logger.info("Starting prediction")
-        ekf.predict()
-        logger.info("Starting update")
-        obs_records_step = ekf.update(z_hist[k], k)
-        logger.info("Adding new record")
-        all_obs_records.extend(obs_records_step)
-        x_hist[k] = ekf.ekf.x
-        logger.info("Completed EKF step %d/%d", k + 1, config.steps)
+    # Attempt to load EKF results if requested
+    if load_ekf_results and os.path.exists(ekf_results_path):
+        logger.info("Attempting to load EKF simulation results from %s", ekf_results_path)
+        try:
+            with np.load(ekf_results_path, allow_pickle=True) as data:
+                # Reconstruct FilterConfig from saved attributes
+                loaded_config = FilterConfig(
+                    N=data['config_N'],
+                    steps=data['config_steps'],
+                    dt=data['config_dt'],
+                    sig_r=data['config_sig_r'],
+                    sig_rdot=data['config_sig_rdot'],
+                    q_acc_target=data['config_q_acc_target'],
+                    q_acc_obs=data['config_q_acc_obs'],
+                    seed=data['config_seed']
+                )
+
+                # Check if loaded config matches current config
+                if loaded_config == config:
+                    truth = data['truth']
+                    z_hist = data['z_hist']
+                    # Ensure all_obs_records is converted back to a list of dataclasses
+                    all_obs_records = data['all_obs_records']
+                    x_hist = data['x_hist']
+                    logger.info("Successfully loaded EKF simulation results.")
+                else:
+                    logger.warning("Loaded EKF config does not match current config. \
+                        Rerunning EKF simulation.")
+        except Exception as e:
+            logger.error("Failed to load EKF simulation results: %s. Rerunning EKF simulation.", e)
+
+    # If EKF results were not loaded or loading failed, run the EKF simulation
+    if truth is None or z_hist is None or all_obs_records is None or x_hist is None:
+        logger.info("Simulating satellite constellation to get truth")
+        truth, z_hist = simulate_truth_and_meas(
+            config.N, config.steps, config.dt, config.sig_r,
+            config.sig_rdot, config.seed
+        )
+
+        logger.info("Initializing Joint EKF")
+        ekf = JointEKF(config, truth[0])
+
+        logger.info("Collecting observation records")
+        all_obs_records = []
+        x_hist = np.zeros((config.steps, config.N * 6))
+        for k in range(config.steps):
+            logger.info("Starting prediction")
+            ekf.predict()
+            logger.info("Starting update")
+            obs_records_step = ekf.update(z_hist[k], k)
+            logger.info("Adding new record")
+            all_obs_records.extend(obs_records_step)
+            x_hist[k] = ekf.ekf.x
+            logger.info("Completed EKF step %d/%d", k + 1, config.steps)
+
+        # Save EKF results if requested
+        if save_ekf_results:
+            logger.info("Saving EKF simulation results to %s", ekf_results_path)
+            os.makedirs(os.path.dirname(ekf_results_path), exist_ok=True)
+            np.savez_compressed(
+                ekf_results_path,
+                config_N=config.N,
+                config_steps=config.steps,
+                config_dt=config.dt,
+                config_sig_r=config.sig_r,
+                config_sig_rdot=config.sig_rdot,
+                config_q_acc_target=config.q_acc_target,
+                config_q_acc_obs=config.q_acc_obs,
+                config_seed=config.seed,
+                truth=truth,
+                z_hist=z_hist,
+                all_obs_records=np.array(all_obs_records, dtype=object), # Save as object array
+                x_hist=x_hist
+            )
+            logger.info("EKF simulation results saved successfully.")
+
+    # Ensure data is available for the consensus part
+    if all_obs_records is None or x_hist is None or truth is None:
+        logger.error("EKF simulation data is not available after loading or running. Exiting.")
+        return None, None, None
 
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
@@ -193,7 +266,7 @@ async def run_consensus_demo(config: FilterConfig) -> tuple[Optional[DAG],
 # Run demo
 if __name__ == "__main__":
     default_config = FilterConfig(
-        N=50,
+        N=10,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
@@ -203,7 +276,15 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    final_dag, rep_hist, truth_history = asyncio.run(run_consensus_demo(default_config))
+    DATA_DIR = "sim_data"
+    DATA_FILENAME = "ekf_simulation_results.npz"
+    RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
+
+    final_dag, rep_hist, truth_history= asyncio.run(
+        run_consensus_demo(default_config, load_ekf_results=True, ekf_results_path=RESULTS_PATH)
+    )
+
+    # Use the results from the loaded run for plotting
     if final_dag:
         plot_nis_consistency_by_satellite(final_dag)
         plot_nis_boxplot(final_dag)
