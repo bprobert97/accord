@@ -40,7 +40,9 @@ from src.satellite_node import SatelliteNode
 logger = get_logger()
 
 # Maximum range for Inter-Satellite Links (ISL) in meters
-ISL_RANGE_METERS = 4000e3  # 4000 km
+ISL_RANGE_METERS = 1000e3  # 1000 km
+
+CLUSTER_SIZE = 10
 
 def clear_log() -> None:
     """
@@ -142,21 +144,92 @@ async def run_consensus_demo(config: FilterConfig,
             config.sig_rdot, config.seed
         )
 
-        logger.info("Initializing Joint EKF")
-        ekf = JointEKF(config, truth[0])
+        # --- Start of Clustered EKF Implementation ---
+        logger.info("Initializing Clustered EKF with cluster size %s", CLUSTER_SIZE)
 
-        logger.info("Collecting observation records")
+        # 1. Create clusters of satellite IDs
+        all_sat_ids = list(range(config.N))
+        clusters = [
+            all_sat_ids[i:i + CLUSTER_SIZE]
+            for i in range(0, config.N, CLUSTER_SIZE)
+        ]
+
+        # 2. Create a list of EKF instances, one for each cluster
+        cluster_ekfs = []
+        for i, cluster_sat_ids in enumerate(clusters):
+            cluster_n = len(cluster_sat_ids)
+            cluster_config = FilterConfig(
+                N=cluster_n,
+                steps=config.steps,
+                dt=config.dt,
+                sig_r=config.sig_r,
+                sig_rdot=config.sig_rdot,
+                q_acc_target=config.q_acc_target,
+                q_acc_obs=config.q_acc_obs,
+                seed=config.seed + i # Use different seed for each cluster
+            )
+
+            # Extract initial truth state for this cluster
+            # Extract initial truth state for this cluster
+            initial_state_slices = [truth[0, sat_id*6:(sat_id+1)*6] for sat_id in cluster_sat_ids]
+            cluster_truth_0 = np.concatenate(initial_state_slices)
+
+            cluster_ekfs.append(JointEKF(cluster_config, cluster_truth_0))
+            logger.info("Initialized EKF for cluster %d with %d satellites: %s",
+                        i, cluster_n, cluster_sat_ids)
+
+        # 3. Pre-calculate the mapping from (observer, target) to z_hist index
+        z_map = {}
+        z_idx = 0
+        for i in range(config.N):
+            for j in range(config.N):
+                if i != j:
+                    z_map[(i, j)] = slice(z_idx, z_idx + 2)
+                    z_idx += 2
+
+        # 4. Main simulation loop
+        logger.info("Collecting observation records using Clustered EKF")
         all_obs_records = []
         x_hist = np.zeros((config.steps, config.N * 6))
+
         for k in range(config.steps):
-            logger.info("Starting prediction")
-            ekf.predict()
-            logger.info("Starting update")
-            obs_records_step = ekf.update(z_hist[k], k)
-            logger.info("Adding new record")
-            all_obs_records.extend(obs_records_step)
-            x_hist[k] = ekf.ekf.x
+            for cluster_sat_ids, ekf in zip(clusters, cluster_ekfs):
+                # Predict step for the cluster
+                ekf.predict()
+
+                # Build the measurement vector `z_k_cluster` for this cluster
+                z_k_cluster_list = []
+                for obs_id_global in cluster_sat_ids:
+                    for tgt_id_global in cluster_sat_ids:
+                        if obs_id_global == tgt_id_global:
+                            continue
+
+                        z_slice = z_map.get((obs_id_global, tgt_id_global))
+                        if z_slice:
+                            z_k_cluster_list.append(z_hist[k, z_slice])
+
+                if not z_k_cluster_list:
+                    continue
+
+                z_k_cluster = np.concatenate(z_k_cluster_list)
+
+                # Update step for the cluster
+                obs_records_step = ekf.update(z_k_cluster, k)
+
+                # Remap local satellite IDs in records to global IDs and store
+                for record in obs_records_step:
+                    record.observer = cluster_sat_ids[record.observer]
+                    record.target = cluster_sat_ids[record.target]
+                all_obs_records.extend(obs_records_step)
+
+                # Update the global state history `x_hist`
+                for sat_idx_local, sat_idx_global in enumerate(cluster_sat_ids):
+                    global_slice = slice(sat_idx_global * 6, (sat_idx_global + 1) * 6)
+                    local_slice = slice(sat_idx_local * 6, (sat_idx_local + 1) * 6)
+                    x_hist[k, global_slice] = ekf.ekf.x[local_slice]
+
             logger.info("Completed EKF step %d/%d", k + 1, config.steps)
+        # --- End of Clustered EKF Implementation ---
 
         # Save EKF results if requested
         if save_ekf_results:
@@ -266,7 +339,7 @@ async def run_consensus_demo(config: FilterConfig,
 # Run demo
 if __name__ == "__main__":
     default_config = FilterConfig(
-        N=50,
+        N=200,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
