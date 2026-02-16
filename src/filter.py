@@ -268,13 +268,16 @@ def hx_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     Returns:
     - A stacked array of all expected range and range-rate measurements.
     """
-    z = []
+    num_measurements = N * (N - 1)
+    z = np.empty(2 * num_measurements)
+    idx = 0
     for i in range(N):
         xi = x[STATE_DIM*i:STATE_DIM*i+STATE_DIM]
         for j in range(N):
             if i != j:
-                z.append(hx_block(x[STATE_DIM*j:STATE_DIM*j+STATE_DIM], xi))
-    return np.concatenate(z)
+                z[idx:idx+2] = hx_block(x[STATE_DIM*j:STATE_DIM*j+STATE_DIM], xi)
+                idx += 2
+    return z
 
 def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     """
@@ -287,7 +290,10 @@ def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     Returns:
     - The stacked Jacobian matrix H for the joint measurement.
     """
-    rows = []
+    num_measurement_rows = 2 * N * (N - 1)
+    dim_x = STATE_DIM * N
+    H = np.zeros((num_measurement_rows, dim_x))
+    current_row = 0
     for i in range(N):
         xi = x[STATE_DIM*i:STATE_DIM*i+STATE_DIM]
         for j in range(N):
@@ -295,11 +301,10 @@ def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
                 continue
             xj = x[STATE_DIM*j:STATE_DIM*j+STATE_DIM]
             Ht, Ho = H_blocks_target_obs(xj, xi)
-            R = np.zeros((2, STATE_DIM*N))
-            R[:,STATE_DIM*j:STATE_DIM*j+STATE_DIM] = Ht
-            R[:,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = Ho
-            rows.append(R)
-    return np.vstack(rows)
+            H[current_row:current_row+2, STATE_DIM*j:STATE_DIM*j+STATE_DIM] = Ht
+            H[current_row:current_row+2, STATE_DIM*i:STATE_DIM*i+STATE_DIM] = Ho
+            current_row += 2
+    return H
 
 # ----------------------- EKF predict ----------------------
 def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
@@ -454,7 +459,7 @@ def _ekf_update(ekf: ExtendedKalmanFilter, z_k: np.ndarray, N: int) -> np.ndarra
     y = z_k - z_pred
 
     S = H @ ekf.P @ H.T + ekf.R
-    S_inv = np.linalg.pinv(S)
+    S_inv = np.linalg.inv(S)
     K = ekf.P @ H.T @ S_inv
 
     ekf.x = ekf.x + K @ y
@@ -479,24 +484,40 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
     - A list of ObservationRecord objects for the current step.
     """
     obs_records = []
-    dim_x = ekf.x.shape[0]
+    diag_R_ij = np.diag([sig_r**2, sig_rdot**2])
     idx = 0
     for i in range(N): # observer
+        xi_idx_slice = slice(STATE_DIM*i, STATE_DIM*i+STATE_DIM)
         for j in range(N): # target
             if i == j:
                 continue
 
-            rows = slice(idx, idx+2)
-            yij = y[rows]
+            xj_idx_slice = slice(STATE_DIM*j, STATE_DIM*j+STATE_DIM)
 
-            H_ij = np.zeros((2, dim_x))
-            Ht, Ho = H_blocks_target_obs(ekf.x[STATE_DIM*j:STATE_DIM*j+STATE_DIM],
-                                         ekf.x[STATE_DIM*i:STATE_DIM*i+STATE_DIM])
-            H_ij[:,STATE_DIM*j:STATE_DIM*j+STATE_DIM] = Ht
-            H_ij[:,STATE_DIM*i:STATE_DIM*i+STATE_DIM] = Ho
+            yij = y[idx:idx+2]
 
-            S_ij = H_ij @ ekf.P @ H_ij.T + np.diag([sig_r**2, sig_rdot**2])
-            S_ij_inv = np.linalg.pinv(S_ij)
+            # Recalculate Ht and Ho for the current pair, this is necessary.
+            # These are small 2x6 matrices.
+            Ht, Ho = H_blocks_target_obs(ekf.x[xj_idx_slice], ekf.x[xi_idx_slice])
+
+            # Extract relevant blocks from ekf.P
+            # These are 6x6 matrices
+            P_oo = ekf.P[xi_idx_slice, xi_idx_slice]
+            P_ot = ekf.P[xi_idx_slice, xj_idx_slice]
+            P_to = ekf.P[xj_idx_slice, xi_idx_slice]
+            P_tt = ekf.P[xj_idx_slice, xj_idx_slice]
+
+            # Calculate H_ij @ ekf.P @ H_ij.T more efficiently
+            # This avoids creating the full H_ij (2 x dim_x) matrix repeatedly
+            innovation_covariance_contribution = (
+                Ho @ P_oo @ Ho.T +
+                Ho @ P_ot @ Ht.T +
+                Ht @ P_to @ Ho.T +
+                Ht @ P_tt @ Ht.T
+            )
+
+            S_ij = innovation_covariance_contribution + diag_R_ij
+            S_ij_inv = np.linalg.inv(S_ij) # Changed from pinv to inv
             nis = float(yij.T @ S_ij_inv @ yij)
 
             obs_records.append(
