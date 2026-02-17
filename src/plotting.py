@@ -760,7 +760,7 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
     return False
 
 
-def plot_aggregated_reputation(rep_history: dict, faulty_ids: list[int]) -> None:
+def plot_aggregated_reputation(rep_history: dict, faulty_ids: set[int]) -> None:
     """
     Plots the aggregated median reputation over time for honest vs. faulty satellites,
     with shaded regions indicating the 10th to 90th percentile spread.
@@ -821,7 +821,7 @@ def plot_aggregated_reputation(rep_history: dict, faulty_ids: list[int]) -> None
     plt.show()
 
 
-def plot_nis_violin(dag, faulty_ids: list[int]) -> None:
+def plot_nis_violin(dag, faulty_ids: set[int]) -> None:
     """
     Generates a grouped violin plot for NIS values, separating honest and faulty satellites.
     """
@@ -900,7 +900,7 @@ def plot_nis_violin(dag, faulty_ids: list[int]) -> None:
     plt.show()
 
 
-def plot_ground_tracks(truth: np.ndarray, n: int, faulty_ids: list[int]) -> None:
+def plot_ground_tracks(truth: np.ndarray, n: int, faulty_ids: set[int]) -> None:
     """
     Plots a 2D ground track map of the constellation.
     Assumes `truth` contains Cartesian (X,Y,Z) coordinates.
