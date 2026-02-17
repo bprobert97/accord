@@ -31,6 +31,9 @@ import networkx as nx
 import numpy as np
 from scipy.stats import chi2
 from src.reputation import MAX_REPUTATION, ReputationManager
+from src.logger import get_logger
+
+logger = get_logger()
 
 # === Configuration ===
 FILENAME = "app.log"  # your log file path
@@ -756,6 +759,197 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
         print("- %s", issue)
     return False
 
+
+def plot_aggregated_reputation(rep_history: dict, faulty_ids: list[int]) -> None:
+    """
+    Plots the aggregated median reputation over time for honest vs. faulty satellites,
+    with shaded regions indicating the 10th to 90th percentile spread.
+    """
+    if not rep_history:
+        print("No reputation data to plot.")
+        return
+
+    max_len = max(len(h) for h in rep_history.values())
+    honest_matrix = []
+    faulty_matrix = []
+
+    # Pad histories so they are all the same length for numpy operations
+    for sid, history in rep_history.items():
+        padded_history = history + [history[-1]] * (max_len - len(history))
+        if int(sid) in faulty_ids:
+            faulty_matrix.append(padded_history)
+        else:
+            honest_matrix.append(padded_history)
+
+    honest_matrix = np.array(honest_matrix) # type: ignore [assignment]
+    faulty_matrix = np.array(faulty_matrix) # type: ignore [assignment]
+
+    steps = np.arange(max_len)
+    plt.figure(figsize=(10, 6))
+
+    # Plot Honest Satellites
+    if len(honest_matrix) > 0:
+        honest_median = np.median(honest_matrix, axis=0)
+        honest_p10 = np.percentile(honest_matrix, 10, axis=0)
+        honest_p90 = np.percentile(honest_matrix, 90, axis=0)
+
+        plt.plot(steps, honest_median, color='green', linewidth=2, label="Honest Median")
+        plt.fill_between(steps, honest_p10, honest_p90, color='green', alpha=0.2,
+        label="Honest Spread (10th-90th Percentile)")
+
+    # Plot Faulty Satellites
+    if len(faulty_matrix) > 0:
+        faulty_median = np.median(faulty_matrix, axis=0)
+        faulty_p10 = np.percentile(faulty_matrix, 10, axis=0)
+        faulty_p90 = np.percentile(faulty_matrix, 90, axis=0)
+
+        plt.plot(steps, faulty_median, color='red', linewidth=2, label="Faulty Median")
+        plt.fill_between(steps, faulty_p10, faulty_p90, color='red', alpha=0.2,
+        label="Faulty Spread (10th-90th Percentile)")
+
+    # Formatting
+    plt.axhline(0.5, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
+    plt.xlabel("Chronological Transaction Index [-]", fontsize=14)
+    plt.ylabel("Reputation Score [-]", fontsize=14)
+    plt.title("Aggregated Constellation Reputation", fontsize=16)
+
+    plt.tick_params(axis='both', labelsize=12)
+    plt.legend(loc="best", fontsize=12)
+    plt.grid(True, linestyle=":", alpha=0.7)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_nis_violin(dag, faulty_ids: list[int]) -> None:
+    """
+    Generates a grouped violin plot for NIS values, separating honest and faulty satellites.
+    """
+    honest_nis = []
+    faulty_nis = []
+
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "nis"):
+                continue
+
+            try:
+                tx_data = json.loads(tx.tx_data)
+            except Exception:
+                continue
+
+            sid = tx_data.get("observer")
+            nis = getattr(tx.metadata, "nis", None)
+
+            if sid is None or nis is None:
+                continue
+
+            if int(sid) in faulty_ids:
+                faulty_nis.append(nis)
+            else:
+                honest_nis.append(nis)
+
+    if not honest_nis and not faulty_nis:
+        print("No NIS data available to create a violin plot.")
+        return
+
+    plot_data = []
+    labels = []
+
+    if honest_nis:
+        plot_data.append(honest_nis)
+        labels.append("Honest Satellites")
+    if faulty_nis:
+        plot_data.append(faulty_nis)
+        labels.append("Faulty Satellites")
+
+    _, ax = plt.subplots(figsize=(10, 6))
+
+    # Create violin plot
+    parts = ax.violinplot(plot_data, showmeans=False, showmedians=True)
+
+    # Color formatting
+    for pc in parts['bodies']: # type: ignore [attr-defined]
+        pc.set_edgecolor('black')
+        pc.set_alpha(0.2)
+
+    for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
+        if partname in parts:
+            parts[partname].set_color('black')
+            parts[partname].set_linewidth(1.5)
+
+    # Add chi-squared bounds (assuming DOF=2 as in your boxplot)
+    dof = 2
+    confidence = 0.95
+    expected_median = 1.298
+    chi2_upper = chi2.ppf((1 + confidence) / 2, df=dof)
+
+    ax.axhline(chi2_upper, color='r', linestyle='--',
+    label=f'{int(confidence*100)}% Confidence Bound')
+    ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median')
+
+    ax.set_xticks(np.arange(1, len(labels) + 1))
+    ax.set_xticklabels(labels, fontsize=16)
+    ax.set_ylabel("Normalised Innovation Squared", fontsize=16)
+    ax.set_yscale("symlog")
+
+    ax.legend(fontsize=14)
+    ax.grid(True, linestyle=":", alpha=0.7)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_ground_tracks(truth: np.ndarray, n: int, faulty_ids: list[int]) -> None:
+    """
+    Plots a 2D ground track map of the constellation.
+    Assumes `truth` contains Cartesian (X,Y,Z) coordinates.
+    """
+    _, ax = plt.subplots(figsize=(12, 6))
+
+    # Plot a simple grid for the Earth map
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(-90, 90)
+    ax.axhline(0, color='black', linewidth=1) # Equator
+    ax.axvline(0, color='black', linewidth=1) # Prime Meridian
+
+    for i in range(n):
+        pos_hist = truth[:, i*6:i*6+3]
+
+        # Convert Cartesian X,Y,Z to Lat, Lon
+        # Assuming origin is Earth center.
+        # Note: If these are ECI coordinates, this represents a non-rotating Earth track.
+        r = np.linalg.norm(pos_hist, axis=1)
+        lat = np.degrees(np.arcsin(pos_hist[:, 2] / r))
+        lon = np.degrees(np.arctan2(pos_hist[:, 1], pos_hist[:, 0]))
+
+        # Handle wraparound for longitude (lines jumping across the map)
+        lon_diff = np.abs(np.diff(lon))
+        wrap_idx = np.where(lon_diff > 180)[0]
+        lon = np.insert(lon, wrap_idx + 1, np.nan)
+        lat = np.insert(lat, wrap_idx + 1, np.nan)
+
+        # Formatting based on honest vs faulty
+        color = 'red' if i in faulty_ids else 'dodgerblue'
+        alpha = 0.8 if i in faulty_ids else 0.3
+        zorder = 5 if i in faulty_ids else 2
+
+        ax.plot(lon, lat, color=color, alpha=alpha, zorder=zorder)
+        # Plot current/final position
+        ax.scatter(lon[-1], lat[-1], color=color, s=20, zorder=zorder+1)
+
+    # Custom legend
+    honest_patch = Line2D([0], [0], color='dodgerblue', lw=2, label='Honest Satellites')
+    faulty_patch = Line2D([0], [0], color='red', lw=2, label='Faulty Satellites')
+    ax.legend(handles=[honest_patch, faulty_patch], loc='upper right')
+
+    ax.set_title("Constellation 2D Ground Tracks", fontsize=16)
+    ax.set_xlabel("Longitude (Degrees)", fontsize=14)
+    ax.set_ylabel("Latitude (Degrees)", fontsize=14)
+    ax.grid(True, linestyle="--", alpha=0.5)
+
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
     main()

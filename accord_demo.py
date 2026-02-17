@@ -27,9 +27,8 @@ import os
 from typing import Optional
 import numpy as np
 from src.plotting import plot_constellation, \
-    plot_nis_consistency_by_satellite, \
-    plot_reputation, check_consensus_outcomes, \
-        plot_nis_boxplot
+    plot_aggregated_reputation, check_consensus_outcomes, \
+        plot_nis_violin, plot_ground_tracks, plot_reputation
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
@@ -339,7 +338,7 @@ async def run_consensus_demo(config: FilterConfig,
 # Run demo
 if __name__ == "__main__":
     default_config = FilterConfig(
-        N=200,
+        N=50,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
@@ -359,10 +358,11 @@ if __name__ == "__main__":
 
     # Use the results from the loaded run for plotting
     if final_dag:
-        plot_nis_consistency_by_satellite(final_dag)
-        plot_nis_boxplot(final_dag)
+        plot_nis_violin(final_dag, faulty_ids=[1, 2, 3])
         check_consensus_outcomes(final_dag)
     if rep_hist:
         plot_reputation(rep_hist)
+        plot_aggregated_reputation(rep_hist, faulty_ids=[1, 2, 3])
     if truth_history is not None:
         plot_constellation(truth_history, default_config.N)
+        plot_ground_tracks(truth_history, default_config.N, faulty_ids=[1, 2, 3])
