@@ -79,7 +79,8 @@ async def run_consensus_demo(config: FilterConfig,
                                 "sim_data/ekf_simulation_results.npz") -> \
                                     tuple[Optional[DAG],
                                           Optional[dict],
-                                          Optional[np.ndarray]]:
+                                          Optional[np.ndarray],
+                                          Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
@@ -254,8 +255,9 @@ async def run_consensus_demo(config: FilterConfig,
     # Ensure data is available for the consensus part
     if all_obs_records is None or x_hist is None or truth is None:
         logger.error("EKF simulation data is not available after loading or running. Exiting.")
-        return None, None, None
+        return None, None, None, None
 
+    faulty_ids = set()
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
@@ -277,11 +279,6 @@ async def run_consensus_demo(config: FilterConfig,
     obs_by_step: dict[int, list[ObservationRecord]] = {i: [] for i in range(config.steps)}
     for obs in all_obs_records:
         obs_by_step[obs.step].append(obs)
-
-    # Define satellite IDs for special behavior
-    perfect_sat_id = 1
-    faulty_sat_id = 2
-    intermittent_sat_id = 3
 
     for k in range(config.steps):
         # Update satellite positions at each step
@@ -307,11 +304,14 @@ async def run_consensus_demo(config: FilterConfig,
 
                     if obs_to_submit:
                         # --- Inject special satellite behavior ---
-                        if sid == perfect_sat_id:
+                        if sid % 10 == 1:
                             obs_to_submit.nis = 0.01
-                        elif sid == faulty_sat_id and config.N >= 7:
+                            faulty_ids.add(sid)
+                        elif sid % 10 == 2 and config.N >= 7:
                             obs_to_submit.nis = 50.0
-                        elif sid == intermittent_sat_id and config.N >= 10:
+                            faulty_ids.add(sid)
+                        elif sid % 10 == 3 and config.N >= 10:
+                            faulty_ids.add(sid)
                             if 200 <= k < 400:
                                 if obs_to_submit.nis > 2.0:
                                     obs_to_submit.nis = obs_to_submit.nis * 10
@@ -333,12 +333,12 @@ async def run_consensus_demo(config: FilterConfig,
             sat = satellites[sid]
             rep_history[str(sid)].append(sat.reputation)
 
-    return dag, rep_history, truth
+    return dag, rep_history, truth, faulty_ids
 
 # Run demo
 if __name__ == "__main__":
     default_config = FilterConfig(
-        N=50,
+        N=400,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
@@ -352,17 +352,17 @@ if __name__ == "__main__":
     DATA_FILENAME = "ekf_simulation_results.npz"
     RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 
-    final_dag, rep_hist, truth_history= asyncio.run(
+    final_dag, rep_hist, truth_history, faulty_sat_ids = asyncio.run(
         run_consensus_demo(default_config, load_ekf_results=True, ekf_results_path=RESULTS_PATH)
     )
 
     # Use the results from the loaded run for plotting
-    if final_dag:
-        plot_nis_violin(final_dag, faulty_ids=[1, 2, 3])
+    if final_dag and faulty_sat_ids is not None:
+        plot_nis_violin(final_dag, faulty_ids=faulty_sat_ids)
         check_consensus_outcomes(final_dag)
-    if rep_hist:
+    if rep_hist and faulty_sat_ids is not None:
         plot_reputation(rep_hist)
-        plot_aggregated_reputation(rep_hist, faulty_ids=[1, 2, 3])
-    if truth_history is not None:
+        plot_aggregated_reputation(rep_hist, faulty_ids=faulty_sat_ids)
+    if truth_history is not None and faulty_sat_ids is not None:
         plot_constellation(truth_history, default_config.N)
-        plot_ground_tracks(truth_history, default_config.N, faulty_ids=[1, 2, 3])
+        plot_ground_tracks(truth_history, default_config.N, faulty_ids=faulty_sat_ids)
