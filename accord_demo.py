@@ -362,7 +362,8 @@ if __name__ == "__main__":
         check_consensus_outcomes(final_dag)
     if rep_hist and faulty_sat_ids is not None:
         plot_reputation(rep_hist)
-        plot_aggregated_reputation(rep_hist, faulty_ids=faulty_sat_ids)
+        plot_aggregated_reputation(rep_hist, faulty_ids=faulty_sat_ids, \
+            start_at_full_constellation=False)
     if truth_history is not None and faulty_sat_ids is not None:
         plot_constellation(truth_history, default_config.N)
         plot_ground_tracks(truth_history, default_config.N, faulty_ids=faulty_sat_ids)

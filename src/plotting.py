@@ -760,10 +760,21 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
     return False
 
 
-def plot_aggregated_reputation(rep_history: dict, faulty_ids: set[int]) -> None:
+def plot_aggregated_reputation(
+    rep_history: dict, faulty_ids: set[int], start_at_full_constellation: bool = False
+) -> None:
     """
     Plots the aggregated median reputation over time for honest vs. faulty satellites,
     with shaded regions indicating the 10th to 90th percentile spread.
+
+    Args:
+        rep_history (dict): A dictionary of reputation histories for each satellite.
+        faulty_ids (set[int]): A set of IDs for faulty satellites.
+        start_at_full_constellation (bool): If True, starts plotting only after
+                                            a number of transactions equal to the
+                                            number of satellites has passed,
+                                            assuming this is when all nodes have
+                                            had a chance to submit data.
     """
     if not rep_history:
         print("No reputation data to plot.")
@@ -773,7 +784,7 @@ def plot_aggregated_reputation(rep_history: dict, faulty_ids: set[int]) -> None:
     honest_matrix = []
     faulty_matrix = []
 
-    # Pad histories so they are all the same length for numpy operations
+    # Pad histories to the same length for numpy operations
     for sid, history in rep_history.items():
         padded_history = history + [history[-1]] * (max_len - len(history))
         if int(sid) in faulty_ids:
@@ -781,31 +792,60 @@ def plot_aggregated_reputation(rep_history: dict, faulty_ids: set[int]) -> None:
         else:
             honest_matrix.append(padded_history)
 
-    honest_matrix = np.array(honest_matrix) # type: ignore [assignment]
-    faulty_matrix = np.array(faulty_matrix) # type: ignore [assignment]
+    honest_matrix = np.array(honest_matrix)  # type: ignore [assignment]
+    faulty_matrix = np.array(faulty_matrix)  # type: ignore [assignment]
 
-    steps = np.arange(max_len)
+    start_index = 0
+    if start_at_full_constellation:
+        # Assuming the constellation is fully formed after 60% of the transactions.
+        start_index = round(len(rep_history) * 0.6)
+
+    if start_index >= max_len:
+        print("Not enough data to plot with 'start_at_full_constellation'=True. Plotting all data.")
+        start_index = 0
+
+    # Slice data for plotting
+    steps = np.arange(max_len)[start_index:]
+    if len(honest_matrix) > 0:
+        honest_matrix = honest_matrix[:, start_index:]  # type: ignore [call-overload]
+    if len(faulty_matrix) > 0:
+        faulty_matrix = faulty_matrix[:, start_index:]  # type: ignore [call-overload]
+
+    if not steps.size:
+        print("No data points to plot after filtering.")
+        return
+
     plt.figure(figsize=(10, 6))
 
     # Plot Honest Satellites
     if len(honest_matrix) > 0:
-        honest_median = np.median(honest_matrix, axis=0)
-        honest_p10 = np.percentile(honest_matrix, 10, axis=0)
-        honest_p90 = np.percentile(honest_matrix, 90, axis=0)
+        honest_mean = np.mean(honest_matrix, axis=0)
+        honest_std = np.std(honest_matrix, axis=0)
 
-        plt.plot(steps, honest_median, color='green', linewidth=2, label="Honest Median")
-        plt.fill_between(steps, honest_p10, honest_p90, color='green', alpha=0.2,
-        label="Honest Spread (10th-90th Percentile)")
+        plt.plot(steps, honest_mean, color="green", linewidth=2, label="Honest Mean")
+        plt.fill_between(
+            steps,
+            honest_mean - honest_std,
+            honest_mean + honest_std,
+            color="green",
+            alpha=0.2,
+            label="Honest Spread (1 std. dev.)",
+        )
 
     # Plot Faulty Satellites
     if len(faulty_matrix) > 0:
-        faulty_median = np.median(faulty_matrix, axis=0)
-        faulty_p10 = np.percentile(faulty_matrix, 10, axis=0)
-        faulty_p90 = np.percentile(faulty_matrix, 90, axis=0)
+        faulty_mean = np.mean(faulty_matrix, axis=0)
+        faulty_std = np.std(faulty_matrix, axis=0)
 
-        plt.plot(steps, faulty_median, color='red', linewidth=2, label="Faulty Median")
-        plt.fill_between(steps, faulty_p10, faulty_p90, color='red', alpha=0.2,
-        label="Faulty Spread (10th-90th Percentile)")
+        plt.plot(steps, faulty_mean, color="red", linewidth=2, label="Faulty Mean")
+        plt.fill_between(
+            steps,
+            faulty_mean - faulty_std,
+            faulty_mean + faulty_std,
+            color="red",
+            alpha=0.2,
+            label="Faulty Spread (1 std. dev.)",
+        )
 
     # Formatting
     plt.axhline(0.5, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
