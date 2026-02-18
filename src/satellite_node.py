@@ -22,12 +22,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import asyncio
-import copy
 import json
 import dataclasses
 from typing import Optional
 import numpy as np
-from .dag import DAG
 from .reputation import ReputationManager, MAX_REPUTATION
 from .transaction import Transaction, TransactionMetadata
 from .filter import ObservationRecord
@@ -46,7 +44,6 @@ class SatelliteNode():
         self.reputation: float = MAX_REPUTATION / 2
         self.performance_ema: float = 0.5  # For tracking recent performance
         self.rep_manager = ReputationManager()
-        self.local_dag: Optional[DAG] = None
 
         self.sensor_data: Optional[ObservationRecord] = None
 
@@ -105,10 +102,3 @@ class SatelliteNode():
         await self.queue.put((transaction, self, future))
         # Waits until DAG sets the result
         return await future
-
-    def synchronise(self, network_dag: DAG) -> None:
-        """
-        Synchronise local DAG state with a given network DAG.
-        For now, replaces the local DAG with a deep copy.
-        """
-        self.local_dag = copy.deepcopy(network_dag)

@@ -25,7 +25,7 @@ from logging import Logger
 def get_logger(name: str = "ACCORD", log_file: str = "app.log") -> Logger:
     """
     Returns a logger that is safe to use across multiple modules.
-    Clears the log file on each run.
+    Configures the logger to overwrite the log file on each run.
 
     Args:
     - name: The name of the logger.

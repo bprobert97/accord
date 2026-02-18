@@ -30,6 +30,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
 from scipy.stats import chi2
+from src.dag import DAG
 from src.reputation import MAX_REPUTATION, ReputationManager
 
 # === Configuration ===
@@ -38,8 +39,16 @@ THRESHOLD = 0.5                # consensus threshold
 CMAP = "viridis"               # color map for correctness
 REP_MGR = ReputationManager()
 
-def plot_nis_vs_consensus(df):
-    """Plots NIS vs consensus score with a zoomed-in subplot for NIS values 0-10."""
+def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
+    """
+    Plots Normalised Innovation Squared (NIS) vs. consensus score.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing 'nis', 'consensus_score', and 'correctness' columns.
+
+    Returns:
+        None: Displays a matplotlib plot.
+    """
     fig, ax = plt.subplots(figsize=(10, 7))
 
     # Main plot
@@ -73,8 +82,11 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     Plots the 3D orbits of a satellite constellation around the Earth.
 
     Args:
-    - truth: The history of true stacked state vectors, with shape (steps, 6*N).
-    - n: The number of satellites.
+        truth (np.ndarray): The history of true stacked state vectors, with shape (steps, 6*N).
+        n (int): The number of satellites.
+
+    Returns:
+        None: Displays a matplotlib plot.
     """
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
@@ -121,15 +133,16 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     plt.show()
 
 
-def plot_reputation(rep_history: dict) -> None:
+def plot_reputation(rep_history: dict[str, list[float]]) -> None:
     """
     Plot the reputation history of satellite nodes.
+
     Args:
-    - rep_history: A dictionary where keys are node IDs and
-    values are lists of reputation scores over time.
+        rep_history (dict[str, list[float]]): A dictionary where keys are node IDs and
+                                              values are lists of reputation scores over time.
 
     Returns:
-    - None. Displays a plot of reputation over time for each node.
+        None: Displays a plot of reputation over time for each node.
     """
     neutral_level: float = MAX_REPUTATION / 2
     plt.figure(figsize=(8, 5))
@@ -166,7 +179,6 @@ def plot_reputation(rep_history: dict) -> None:
     plt.ylabel("Reputation Score [-]", fontsize=14)
     plt.tick_params(axis='x', labelsize=14)
     plt.tick_params(axis='y', labelsize=14)
-    # plt.yscale("log") TODO: consider log scale if wide range
     plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.,
                fontsize=14)
     plt.grid(True, linestyle=":")
@@ -174,18 +186,18 @@ def plot_reputation(rep_history: dict) -> None:
     plt.show()
 
 
-def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
+def plot_nis_consistency_by_satellite(dag: DAG, confidence: float = 0.95) -> None:
     """
     Plots Normalised Innovation Squared (NIS) values for each satellite individually,
     comparing them to expected chi-squared consistency bounds. Each satellite
     is displayed in a separate plot window.
 
     Args:
-    - dag: The final DAG object containing transactions (with NIS + DOF metadata).
-    - confidence: Confidence level for chi-square bounds (default=0.95).
+        dag (DAG): The final DAG object containing transactions (with NIS + DOF metadata).
+        confidence (float): Confidence level for chi-square bounds (default=0.95).
 
     Returns:
-    - None. Displays NIS plots with statistical consistency regions for each satellite.
+        None: Displays NIS plots with statistical consistency regions for each satellite.
     """
     # Collect data by satellite
     data_by_sat: dict[str, list] = {}
@@ -269,7 +281,7 @@ def plot_nis_consistency_by_satellite(dag, confidence: float = 0.95) -> None:
     plt.show()
 
 
-def plot_nis_boxplot(dag) -> None:
+def plot_nis_boxplot(dag: DAG) -> None:
     """
     Generates box plots visualizing the distribution of Normalised Innovation Squared (NIS)
     values for each simulated satellite.
@@ -287,11 +299,11 @@ def plot_nis_boxplot(dag) -> None:
     The y-axis uses a symmetrical log scale to better visualize a wide range of NIS values.
 
     Args:
-    - dag: The DAG object containing transaction data, including NIS metadata
-           for honest and intermittently faulty satellites.
+        dag (DAG): The DAG object containing transaction data, including NIS metadata
+                   for honest and intermittently faulty satellites.
 
     Returns:
-    - None. Displays a matplotlib box plot figure.
+        None: Displays a matplotlib box plot figure.
     """
     # Collect data by satellite
     nis_data_by_sat: dict[str, list[float]] = {}
@@ -376,7 +388,7 @@ def plot_nis_boxplot(dag) -> None:
     plt.show()
 
 
-def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
+def check_consensus_outcomes(dag: DAG, consensus_threshold: float = 0.5) -> bool:
     """
     Checks if transaction consensus outcomes (confirmed/rejected) are consistent
     with their consensus scores and reports any discrepancies.
@@ -387,11 +399,11 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
     2. Transactions with a score < threshold are marked as 'rejected'.
 
     Args:
-    - dag: The DAG containing transaction data.
-    - consensus_threshold: The consensus threshold used in the simulation.
+        dag (DAG): The DAG containing transaction data.
+        consensus_threshold (float): The consensus threshold used in the simulation.
 
     Returns:
-    - True if all outcomes are consistent, False otherwise.
+        True if all outcomes are consistent, False otherwise.
     """
     inconsistencies = []
     counter = 0
@@ -446,14 +458,17 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
     return False
 
 
-def calculate_convergence_index(rep_history: dict, \
-    faulty_ids: set[int], threshold: float = 0.5) -> int:
+def calculate_convergence_index(
+    rep_history: dict[str, list[float]],
+    faulty_ids: set[int],
+    threshold: float = 0.5
+) -> int:
     """
-    Heuristically identifies the convergence index based on when the mean 
+    Heuristically identifies the convergence index based on when the mean
     reputation of honest satellites starts to rise significantly above neutral.
 
     Args:
-        rep_history (dict): Dictionary of reputation histories.
+        rep_history (dict[str, list[float]]): Dictionary of reputation histories.
         faulty_ids (set[int]): Set of faulty satellite IDs.
         threshold (float): Reputation threshold to consider "converged".
 
@@ -477,7 +492,7 @@ def calculate_convergence_index(rep_history: dict, \
 
 
 def plot_aggregated_reputation(
-    rep_history: dict,
+    rep_history: dict[str, list[float]],
     faulty_ids: set[int],
     start_at_full_constellation: bool = False,
     convergence_index: Optional[int] = None
@@ -487,15 +502,19 @@ def plot_aggregated_reputation(
     with shaded regions indicating the 10th to 90th percentile spread.
 
     Args:
-        rep_history (dict): A dictionary of reputation histories for each satellite.
+        rep_history (dict[str, list[float]]): A dictionary of reputation histories
+                                              for each satellite.
         faulty_ids (set[int]): A set of IDs for faulty satellites.
         start_at_full_constellation (bool): If True, starts plotting only after
                                             a number of transactions equal to the
                                             number of satellites has passed,
                                             assuming this is when all nodes have
                                             had a chance to submit data.
-        convergence_index (int): Optional index to plot a vertical dashed line 
+        convergence_index (int): Optional index to plot a vertical dashed line
                                  indicating filter convergence.
+
+    Returns:
+        None: Displays a matplotlib plot.
     """
     if not rep_history:
         print("No reputation data to plot.")
@@ -586,9 +605,16 @@ def plot_aggregated_reputation(
     plt.show()
 
 
-def plot_nis_violin(dag, faulty_ids: set[int]) -> None:
+def plot_nis_violin(dag: DAG, faulty_ids: set[int]) -> None:
     """
     Generates a grouped violin plot for NIS values, separating honest and faulty satellites.
+
+    Args:
+        dag (DAG): The DAG object containing transaction data.
+        faulty_ids (set[int]): A set of IDs for faulty satellites.
+
+    Returns:
+        None: Displays a matplotlib plot.
     """
     honest_nis = []
     faulty_nis = []
@@ -668,7 +694,13 @@ def plot_nis_violin(dag, faulty_ids: set[int]) -> None:
 def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     """
     Plots a 2D ground track map using a static Earth image background.
-    Includes a fix for HTTP 403 errors by spoofing the User-Agent.
+
+    Args:
+        truth (np.ndarray): The history of true stacked state vectors, with shape (steps, 6*N).
+        n (int): The number of satellites.
+
+    Returns:
+        None: Displays a matplotlib plot.
     """
     _, ax = plt.subplots(figsize=(14, 8))
 
@@ -734,7 +766,7 @@ def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     plt.tight_layout()
     plt.show()
 
-def main():
+def main() -> None:
     """Main function to parse log and generate plots."""
     # === Step 1: Parse the log file ===
     pattern = re.compile(
