@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches
+# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches, too-few-public-methods, no-member
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -24,12 +24,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import asyncio
 import math
 import os
+import shutil
 from typing import Optional
 import numpy as np
 from src.plotting import plot_constellation, \
-    plot_nis_consistency_by_satellite, \
-    plot_reputation, check_consensus_outcomes, \
-        plot_nis_boxplot
+    plot_aggregated_reputation, check_consensus_outcomes, \
+        plot_nis_violin, plot_ground_tracks, plot_reputation
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
@@ -43,6 +43,12 @@ logger = get_logger()
 ISL_RANGE_METERS = 1000e3  # 1000 km
 
 CLUSTER_SIZE = 10
+
+DATA_DIR = "sim_data"
+DATA_FILENAME = "ekf_simulation_results.npz"
+EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
+
+SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 def clear_log() -> None:
     """
@@ -80,7 +86,8 @@ async def run_consensus_demo(config: FilterConfig,
                                 "sim_data/ekf_simulation_results.npz") -> \
                                     tuple[Optional[DAG],
                                           Optional[dict],
-                                          Optional[np.ndarray]]:
+                                          Optional[np.ndarray],
+                                          Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
@@ -255,8 +262,9 @@ async def run_consensus_demo(config: FilterConfig,
     # Ensure data is available for the consensus part
     if all_obs_records is None or x_hist is None or truth is None:
         logger.error("EKF simulation data is not available after loading or running. Exiting.")
-        return None, None, None
+        return None, None, None, None
 
+    faulty_ids = set()
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
@@ -278,11 +286,6 @@ async def run_consensus_demo(config: FilterConfig,
     obs_by_step: dict[int, list[ObservationRecord]] = {i: [] for i in range(config.steps)}
     for obs in all_obs_records:
         obs_by_step[obs.step].append(obs)
-
-    # Define satellite IDs for special behavior
-    perfect_sat_id = 1
-    faulty_sat_id = 2
-    intermittent_sat_id = 3
 
     for k in range(config.steps):
         # Update satellite positions at each step
@@ -308,11 +311,14 @@ async def run_consensus_demo(config: FilterConfig,
 
                     if obs_to_submit:
                         # --- Inject special satellite behavior ---
-                        if sid == perfect_sat_id:
+                        if sid % 10 == 1:
                             obs_to_submit.nis = 0.01
-                        elif sid == faulty_sat_id and config.N >= 7:
+                            faulty_ids.add(sid)
+                        elif sid % 10 == 2 and config.N >= 7:
                             obs_to_submit.nis = 50.0
-                        elif sid == intermittent_sat_id and config.N >= 10:
+                            faulty_ids.add(sid)
+                        elif sid % 10 == 3 and config.N >= 10:
+                            faulty_ids.add(sid)
                             if 200 <= k < 400:
                                 if obs_to_submit.nis > 2.0:
                                     obs_to_submit.nis = obs_to_submit.nis * 10
@@ -334,12 +340,24 @@ async def run_consensus_demo(config: FilterConfig,
             sat = satellites[sid]
             rep_history[str(sid)].append(sat.reputation)
 
-    return dag, rep_history, truth
+     # Save Consensus Simulation results
+    logger.info("Saving EKF simulation results to %s", SIM_RESULTS_PATH)
+    os.makedirs(os.path.dirname(SIM_RESULTS_PATH), exist_ok=True)
+    np.savez_compressed(
+        SIM_RESULTS_PATH,
+        dag_ledger=dag.ledger,  # type: ignore [arg-type]
+        rep_history=rep_history,  # type: ignore [arg-type]
+        truth=truth,
+        faulty_ids=np.array(list(faulty_ids))
+    )
+    logger.info("Simulation results saved successfully.")
+
+    return dag, rep_history, truth, faulty_ids
 
 # Run demo
 if __name__ == "__main__":
     default_config = FilterConfig(
-        N=200,
+        N=400,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
@@ -349,20 +367,63 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    DATA_DIR = "sim_data"
-    DATA_FILENAME = "ekf_simulation_results.npz"
-    RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
+    FINAL_DAG: Optional[DAG] = None
+    REP_HIST: Optional[dict] = None
+    TRUTH: Optional[np.ndarray] = None
+    FAULTY_IDS: Optional[set[int]] = None
 
-    final_dag, rep_hist, truth_history= asyncio.run(
-        run_consensus_demo(default_config, load_ekf_results=True, ekf_results_path=RESULTS_PATH)
-    )
+    class MockDAG(DAG):
+        """A mock DAG object that only holds a ledger for plotting."""
+        def __init__(self, ledger: dict):  # pylint: disable=super-init-not-called
+            self.ledger = ledger
+            # We don't call super().__init__ because we don't have the
+            # runtime dependencies (queue, consensus_mech) needed.
+            # This is acceptable because loaded DAGs are only used for plotting,
+            # which only requires the .ledger attribute.
 
-    # Use the results from the loaded run for plotting
-    if final_dag:
-        plot_nis_consistency_by_satellite(final_dag)
-        plot_nis_boxplot(final_dag)
-        check_consensus_outcomes(final_dag)
-    if rep_hist:
-        plot_reputation(rep_hist)
-    if truth_history is not None:
-        plot_constellation(truth_history, default_config.N)
+    # Attempt to load simulation results if they exist
+    if os.path.exists(SIM_RESULTS_PATH):
+        logger.info("Attempting to load simulation results from %s", SIM_RESULTS_PATH)
+        try:
+            with np.load(SIM_RESULTS_PATH, allow_pickle=True) as simulated_data:
+                # Check if the number of satellites in the saved data matches the current config
+                saved_N = int(simulated_data['truth'].shape[1] / 6)
+                if saved_N == default_config.N:
+                    dag_ledger = simulated_data['dag_ledger'].item()
+                    FINAL_DAG = MockDAG(dag_ledger)
+                    REP_HIST = simulated_data['rep_history'].item()
+                    TRUTH = simulated_data['truth']
+                    FAULTY_IDS = set(simulated_data['faulty_ids'])
+                    logger.info("Successfully loaded Simulation results.")
+                else:
+                    logger.warning(
+                        "Loaded config (N=%d) does not match current config (N=%d). "
+                        "Rerunning simulation.",
+                        saved_N, default_config.N
+                    )
+        except Exception as e:
+            logger.error("Failed to load simulation results: %s. Rerunning simulation.", e)
+
+    # If simulation results were not loaded or loading failed, run the consensus simulation
+    if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
+        FINAL_DAG, REP_HIST, TRUTH, FAULTY_IDS = asyncio.run(
+            run_consensus_demo(default_config, load_ekf_results=True,
+            ekf_results_path=EKF_RESULTS_PATH)
+        )
+
+    # Use the results for plotting
+    if FINAL_DAG is not None and FAULTY_IDS is not None:
+        plot_nis_violin(FINAL_DAG, faulty_ids=FAULTY_IDS)
+        check_consensus_outcomes(FINAL_DAG)
+    if REP_HIST and FAULTY_IDS is not None:
+        plot_reputation(REP_HIST)
+        plot_aggregated_reputation(REP_HIST, faulty_ids=FAULTY_IDS,
+                                   start_at_full_constellation=False)
+    if TRUTH is not None and FAULTY_IDS is not None:
+        plot_constellation(TRUTH, default_config.N)
+        plot_ground_tracks(TRUTH, default_config.N, faulty_ids=FAULTY_IDS)
+
+    # Copy the log file to the sim_data directory
+    if os.path.exists("app.log"):
+        shutil.copy("app.log", os.path.join(DATA_DIR, "app.log"))
+        logger.info("Copied app.log to %s.", DATA_DIR)
