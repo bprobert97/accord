@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches
+# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches, too-few-public-methods
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -42,6 +42,12 @@ logger = get_logger()
 ISL_RANGE_METERS = 1000e3  # 1000 km
 
 CLUSTER_SIZE = 10
+
+DATA_DIR = "sim_data"
+DATA_FILENAME = "ekf_simulation_results.npz"
+EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
+
+SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 def clear_log() -> None:
     """
@@ -333,6 +339,18 @@ async def run_consensus_demo(config: FilterConfig,
             sat = satellites[sid]
             rep_history[str(sid)].append(sat.reputation)
 
+     # Save Consensus Simulation results
+    logger.info("Saving EKF simulation results to %s", SIM_RESULTS_PATH)
+    os.makedirs(os.path.dirname(SIM_RESULTS_PATH), exist_ok=True)
+    np.savez_compressed(
+        SIM_RESULTS_PATH,
+        dag_ledger=dag.ledger,  # type: ignore [arg-type]
+        rep_history=rep_history,  # type: ignore [arg-type]
+        truth=truth,
+        faulty_ids=np.array(list(faulty_ids))
+    )
+    logger.info("Simulation results saved successfully.")
+
     return dag, rep_history, truth, faulty_ids
 
 # Run demo
@@ -348,22 +366,58 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    DATA_DIR = "sim_data"
-    DATA_FILENAME = "ekf_simulation_results.npz"
-    RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
+    FINAL_DAG: Optional[DAG] = None
+    REP_HIST: Optional[dict] = None
+    TRUTH: Optional[np.ndarray] = None
+    FAULTY_IDS: Optional[set[int]] = None
 
-    final_dag, rep_hist, truth_history, faulty_sat_ids = asyncio.run(
-        run_consensus_demo(default_config, load_ekf_results=True, ekf_results_path=RESULTS_PATH)
-    )
+    class MockDAG(DAG):
+        """A mock DAG object that only holds a ledger for plotting."""
+        def __init__(self, ledger: dict):  # pylint: disable=super-init-not-called
+            self.ledger = ledger
+            # We don't call super().__init__ because we don't have the
+            # runtime dependencies (queue, consensus_mech) needed.
+            # This is acceptable because loaded DAGs are only used for plotting,
+            # which only requires the .ledger attribute.
 
-    # Use the results from the loaded run for plotting
-    if final_dag and faulty_sat_ids is not None:
-        plot_nis_violin(final_dag, faulty_ids=faulty_sat_ids)
-        check_consensus_outcomes(final_dag)
-    if rep_hist and faulty_sat_ids is not None:
-        plot_reputation(rep_hist)
-        plot_aggregated_reputation(rep_hist, faulty_ids=faulty_sat_ids, \
-            start_at_full_constellation=False)
-    if truth_history is not None and faulty_sat_ids is not None:
-        plot_constellation(truth_history, default_config.N)
-        plot_ground_tracks(truth_history, default_config.N, faulty_ids=faulty_sat_ids)
+    # Attempt to load simulation results if they exist
+    if os.path.exists(SIM_RESULTS_PATH):
+        logger.info("Attempting to load simulation results from %s", SIM_RESULTS_PATH)
+        try:
+            with np.load(SIM_RESULTS_PATH, allow_pickle=True) as simulated_data:
+                # Check if the number of satellites in the saved data matches the current config
+                saved_N = int(simulated_data['truth'].shape[1] / 6)
+                if saved_N == default_config.N:
+                    dag_ledger = simulated_data['dag_ledger'].item()
+                    FINAL_DAG = MockDAG(dag_ledger)
+                    REP_HIST = simulated_data['rep_history'].item()
+                    TRUTH = simulated_data['truth']
+                    FAULTY_IDS = set(simulated_data['faulty_ids'])
+                    logger.info("Successfully loaded Simulation results.")
+                else:
+                    logger.warning(
+                        "Loaded config (N=%d) does not match current config (N=%d). "
+                        "Rerunning simulation.",
+                        saved_N, default_config.N
+                    )
+        except Exception as e:
+            logger.error("Failed to load simulation results: %s. Rerunning simulation.", e)
+
+    # If simulation results were not loaded or loading failed, run the consensus simulation
+    if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
+        FINAL_DAG, REP_HIST, TRUTH, FAULTY_IDS = asyncio.run(
+            run_consensus_demo(default_config, load_ekf_results=True,
+            ekf_results_path=EKF_RESULTS_PATH)
+        )
+
+    # Use the results for plotting
+    if FINAL_DAG is not None and FAULTY_IDS is not None:
+        plot_nis_violin(FINAL_DAG, faulty_ids=FAULTY_IDS)
+        check_consensus_outcomes(FINAL_DAG)
+    if REP_HIST and FAULTY_IDS is not None:
+        plot_reputation(REP_HIST)
+        plot_aggregated_reputation(REP_HIST, faulty_ids=FAULTY_IDS,
+                                   start_at_full_constellation=False)
+    if TRUTH is not None and FAULTY_IDS is not None:
+        plot_constellation(TRUTH, default_config.N)
+        plot_ground_tracks(TRUTH, default_config.N, faulty_ids=FAULTY_IDS)
