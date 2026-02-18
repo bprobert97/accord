@@ -27,9 +27,9 @@ import os
 import shutil
 from typing import Optional
 import numpy as np
-from src.plotting import plot_constellation, \
+from src.plotting import  \
     plot_aggregated_reputation, check_consensus_outcomes, \
-        plot_nis_violin, plot_ground_tracks, plot_reputation
+        plot_nis_violin, plot_ground_tracks
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
@@ -416,11 +416,9 @@ if __name__ == "__main__":
         plot_nis_violin(FINAL_DAG, faulty_ids=FAULTY_IDS)
         check_consensus_outcomes(FINAL_DAG)
     if REP_HIST and FAULTY_IDS is not None:
-        plot_reputation(REP_HIST)
         plot_aggregated_reputation(REP_HIST, faulty_ids=FAULTY_IDS,
                                    start_at_full_constellation=False)
     if TRUTH is not None and FAULTY_IDS is not None:
-        plot_constellation(TRUTH, default_config.N)
         plot_ground_tracks(TRUTH, default_config.N, faulty_ids=FAULTY_IDS)
 
     # Copy the log file to the sim_data directory

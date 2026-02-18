@@ -27,6 +27,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
+import os
 from scipy.stats import chi2
 from src.reputation import MAX_REPUTATION, ReputationManager
 
@@ -66,14 +67,13 @@ def plot_nis_vs_consensus(df):
     plt.show()
 
 
-def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Constellation") -> None:
+def plot_constellation(truth: np.ndarray, n: int) -> None:
     """
     Plots the 3D orbits of a satellite constellation around the Earth.
 
     Args:
     - truth: The history of true stacked state vectors, with shape (steps, 6*N).
     - n: The number of satellites.
-    - title: The title of the plot.
     """
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
@@ -100,11 +100,10 @@ def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Conste
         # Plot final position
         ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2], s=30) # type: ignore [misc]
 
-    # Set plot labels and title
+    # Set plot labels
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_zlabel("Z (m)") # type: ignore [attr-defined]
-    ax.set_title(title)
 
     # Make axes equal to avoid distortion
     max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(),
@@ -537,7 +536,6 @@ def plot_aggregated_reputation(
     plt.axhline(0.5, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
     plt.xlabel("Chronological Transaction Index [-]", fontsize=14)
     plt.ylabel("Reputation Score [-]", fontsize=14)
-    plt.title("Aggregated Constellation Reputation", fontsize=16)
 
     plt.tick_params(axis='both', labelsize=12)
     plt.legend(loc="best", fontsize=12)
@@ -628,55 +626,72 @@ def plot_nis_violin(dag, faulty_ids: set[int]) -> None:
 
 def plot_ground_tracks(truth: np.ndarray, n: int, faulty_ids: set[int]) -> None:
     """
-    Plots a 2D ground track map of the constellation.
-    Assumes `truth` contains Cartesian (X,Y,Z) coordinates.
+    Plots a 2D ground track map using a static Earth image background.
+    Includes a fix for HTTP 403 errors by spoofing the User-Agent.
     """
-    _, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(14, 8))
 
-    # Plot a simple grid for the Earth map
+    # --- PART 1: The "Poor Man's" Map Background ---
+
+    img_path = "images/1024px-Land_ocean_ice_2048.jpg"
+
+    # Display the image with the correct extent [-180, 180, -90, 90]
+    if os.path.exists(img_path):
+        img = plt.imread(img_path)
+        ax.imshow(img, extent=[-180, 180, -90, 90], aspect='auto', alpha=0.2)
+    else:
+        # Fallback if download fails
+        ax.set_facecolor('lightgray')
+
+    # --- PART 2: Plotting the Data ---
+
+    # Set limits explicitly to match the image extent
     ax.set_xlim(-180, 180)
     ax.set_ylim(-90, 90)
-    ax.axhline(0, color='black', linewidth=1) # Equator
-    ax.axvline(0, color='black', linewidth=1) # Prime Meridian
 
     for i in range(n):
         pos_hist = truth[:, i*6:i*6+3]
 
         # Convert Cartesian X,Y,Z to Lat, Lon
-        # Assuming origin is Earth center.
-        # Note: If these are ECI coordinates, this represents a non-rotating Earth track.
         r = np.linalg.norm(pos_hist, axis=1)
-        lat = np.degrees(np.arcsin(pos_hist[:, 2] / r))
+        lat = np.degrees(np.arcsin(np.clip(pos_hist[:, 2] / r, -1, 1)))
         lon = np.degrees(np.arctan2(pos_hist[:, 1], pos_hist[:, 0]))
 
-        # Handle wraparound for longitude (lines jumping across the map)
+        # Handle wraparound
         lon_diff = np.abs(np.diff(lon))
         wrap_idx = np.where(lon_diff > 180)[0]
-        lon = np.insert(lon, wrap_idx + 1, np.nan)
-        lat = np.insert(lat, wrap_idx + 1, np.nan)
 
-        # Formatting based on honest vs faulty
-        color = 'red' if i in faulty_ids else 'dodgerblue'
-        alpha = 0.8 if i in faulty_ids else 0.3
-        zorder = 5 if i in faulty_ids else 2
+        lon_plot = np.insert(lon, wrap_idx + 1, np.nan)
+        lat_plot = np.insert(lat, wrap_idx + 1, np.nan)
 
-        ax.plot(lon, lat, color=color, alpha=alpha, zorder=zorder)
+        # Formatting
+        color = 'black'
+        alpha = 0.1
+        zorder = 5
+        lw = 1.2
+
+        ax.plot(lon_plot, lat_plot, color=color, alpha=alpha,
+                lw=lw, zorder=zorder)
+
         # Plot current/final position
-        ax.scatter(lon[-1], lat[-1], color=color, s=20, zorder=zorder+1)
+        ax.scatter(lon[-1], lat[-1], color=color, s=30,
+                   edgecolor='white', linewidth=0.5, zorder=zorder+1)
+
+    # --- PART 3: Styling ---
 
     # Custom legend
-    honest_patch = Line2D([0], [0], color='dodgerblue', lw=2, label='Honest Satellites')
-    faulty_patch = Line2D([0], [0], color='red', lw=2, label='Faulty Satellites')
-    ax.legend(handles=[honest_patch, faulty_patch], loc='upper right')
+    handles = [
+        Line2D([0], [0], color='black', lw=2, label='Simulated Satellite Orbits')
+    ]
+    ax.legend(handles=handles, loc='upper right', framealpha=1.0, facecolor='white')
 
-    ax.set_title("Constellation 2D Ground Tracks", fontsize=16)
-    ax.set_xlabel("Longitude (Degrees)", fontsize=14)
-    ax.set_ylabel("Latitude (Degrees)", fontsize=14)
-    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.set_xlabel("Longitude (Degrees)", fontsize=12)
+    ax.set_ylabel("Latitude (Degrees)", fontsize=12)
+    # White grid looks better on dark maps
+    ax.grid(True, linestyle=":", alpha=0.4, color='white')
 
     plt.tight_layout()
     plt.show()
-
 
 def main():
     """Main function to parse log and generate plots."""
