@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import asyncio
 import math
 import os
+import shutil
 from typing import Optional
 import numpy as np
 from src.plotting import plot_constellation, \
@@ -421,3 +422,8 @@ if __name__ == "__main__":
     if TRUTH is not None and FAULTY_IDS is not None:
         plot_constellation(TRUTH, default_config.N)
         plot_ground_tracks(TRUTH, default_config.N, faulty_ids=FAULTY_IDS)
+
+    # Copy the log file to the sim_data directory
+    if os.path.exists("app.log"):
+        shutil.copy("app.log", os.path.join(DATA_DIR, "app.log"))
+        logger.info("Copied app.log to %s.", DATA_DIR)
