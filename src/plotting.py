@@ -22,12 +22,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import json
+import os
 import re
+from typing import Optional
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
-import os
 from scipy.stats import chi2
 from src.reputation import MAX_REPUTATION, ReputationManager
 
@@ -445,8 +446,41 @@ def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
     return False
 
 
+def calculate_convergence_index(rep_history: dict, \
+    faulty_ids: set[int], threshold: float = 0.5) -> int:
+    """
+    Heuristically identifies the convergence index based on when the mean 
+    reputation of honest satellites starts to rise significantly above neutral.
+
+    Args:
+        rep_history (dict): Dictionary of reputation histories.
+        faulty_ids (set[int]): Set of faulty satellite IDs.
+        threshold (float): Reputation threshold to consider "converged".
+
+    Returns:
+        int: The index of the first step where convergence is detected.
+    """
+    honest_sids = [sid for sid in rep_history.keys() if int(sid) not in faulty_ids]
+    if not honest_sids:
+        return 0
+
+    honest_histories = [rep_history[sid] for sid in honest_sids]
+    max_len = max(len(h) for h in honest_histories)
+
+    # Pad histories for mean calculation
+    padded = [h + [h[-1]] * (max_len - len(h)) for h in honest_histories]
+    honest_mean = np.mean(padded, axis=0)
+
+    # Find first index where honest mean exceeds threshold
+    indices = np.where(honest_mean > threshold)[0]
+    return int(indices[0]) if indices.size > 0 else 0
+
+
 def plot_aggregated_reputation(
-    rep_history: dict, faulty_ids: set[int], start_at_full_constellation: bool = False
+    rep_history: dict,
+    faulty_ids: set[int],
+    start_at_full_constellation: bool = False,
+    convergence_index: Optional[int] = None
 ) -> None:
     """
     Plots the aggregated median reputation over time for honest vs. faulty satellites,
@@ -460,6 +494,8 @@ def plot_aggregated_reputation(
                                             number of satellites has passed,
                                             assuming this is when all nodes have
                                             had a chance to submit data.
+        convergence_index (int): Optional index to plot a vertical dashed line 
+                                 indicating filter convergence.
     """
     if not rep_history:
         print("No reputation data to plot.")
@@ -483,7 +519,7 @@ def plot_aggregated_reputation(
     start_index = 0
     if start_at_full_constellation:
         # Assuming the constellation is fully formed after 60% of the transactions.
-        start_index = round(len(rep_history) * 0.6)
+        start_index = convergence_index if convergence_index is not None else int(0.6 * max_len)
 
     if start_index >= max_len:
         print("Not enough data to plot with 'start_at_full_constellation'=True. Plotting all data.")
@@ -534,6 +570,11 @@ def plot_aggregated_reputation(
 
     # Formatting
     plt.axhline(0.5, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
+
+    if convergence_index is not None and not start_at_full_constellation:
+        plt.axvline(x=convergence_index, color="black", linestyle="--",\
+            linewidth=1, label="Filter Convergence")
+
     plt.xlabel("Chronological Transaction Index [-]", fontsize=14)
     plt.ylabel("Reputation Score [-]", fontsize=14)
 
@@ -624,12 +665,12 @@ def plot_nis_violin(dag, faulty_ids: set[int]) -> None:
     plt.show()
 
 
-def plot_ground_tracks(truth: np.ndarray, n: int, faulty_ids: set[int]) -> None:
+def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     """
     Plots a 2D ground track map using a static Earth image background.
     Includes a fix for HTTP 403 errors by spoofing the User-Agent.
     """
-    fig, ax = plt.subplots(figsize=(14, 8))
+    _, ax = plt.subplots(figsize=(14, 8))
 
     # --- PART 1: The "Poor Man's" Map Background ---
 
@@ -638,7 +679,7 @@ def plot_ground_tracks(truth: np.ndarray, n: int, faulty_ids: set[int]) -> None:
     # Display the image with the correct extent [-180, 180, -90, 90]
     if os.path.exists(img_path):
         img = plt.imread(img_path)
-        ax.imshow(img, extent=[-180, 180, -90, 90], aspect='auto', alpha=0.2)
+        ax.imshow(img, extent=(-180.0, 180.0, -90.0, 90.0), aspect='auto', alpha=0.2)
     else:
         # Fallback if download fails
         ax.set_facecolor('lightgray')
