@@ -24,7 +24,6 @@ def test_satellite_node_init(mock_queue):
     assert node.reputation == MAX_REPUTATION / 2
     assert node.exp_pos == 0
     assert node.performance_ema == 0.5
-    assert node.local_dag is None
     assert node.sensor_data is None
 
 def test_load_sensor_data(mock_queue):

@@ -61,24 +61,6 @@ class ObservationRecord:
     nis: float
     dof: int
 
-@dataclass
-class JointResult:
-    """
-    Stores the results of a joint EKF simulation.
-
-    Attributes:
-    - target_ids: A list of identifiers for the target satellites.
-    - obs_records: A list of ObservationRecord objects, containing NIS data for each observation.
-    - x_hist: History of the estimated stacked state vectors over time.
-    - truth: History of the true stacked state vectors over time.
-    - z_hist: History of the noisy stacked measurements over time.
-    """
-    target_ids: List[str]                # ["sat_1", ...]
-    obs_records: List[ObservationRecord] # per-observation NIS records
-    x_hist: np.ndarray                   # (steps, 6*N)
-    truth: np.ndarray                    # (steps, 6*N)
-    z_hist: np.ndarray                   # (steps, 2*N*(N-1))
-
 # ----------------------- Dynamics ------------------------
 def two_body_f(x6: NDArray[np.float64]) -> NDArray[np.float64]:
     """
@@ -162,7 +144,7 @@ def van_loan_discretization(F: NDArray[np.float64],
 def F_midpoint(x: NDArray[np.float64], dt: float) -> NDArray[np.float64]:
     """
     Calculates the Jacobian matrix F at the midpoint of the integration step.
-    This is used for improved accuracy in the discretization of the process noise.
+    This is used for improved accuracy in the discretisation of the process noise.
 
     Args:
     - x: The current 6-element state vector.
@@ -420,7 +402,7 @@ def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64],
 
 def _initialise_state_and_cov(N: int, truth: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
-    initialises the estimated state vector and its covariance matrix.
+    Initialises the estimated state vector and its covariance matrix.
 
     Args:
     - N: The number of satellites.
@@ -598,42 +580,6 @@ class JointEKF:
         y = _ekf_update(self.ekf, z_k, self.config.N)
         return _log_nis(y, self.ekf, self.config.N, k, self.config.dt,
                         self.config.sig_r, self.config.sig_rdot)
-
-# ----------------------- Plot Helpers --------------------
-def extract_mean_nis_per_sat(result: JointResult) -> list[list[float]]:
-    """
-    Extracts the mean NIS per satellite per time step from the observation records.
-
-    Args:
-    - result: The result object containing observation records.
-
-    Returns:
-    - A list of lists, where `mean_nis[sat_idx][step]` is the mean NIS for that satellite
-      at that step.
-    """
-    N = len(result.target_ids)
-    steps = result.x_hist.shape[0]
-
-    # initialise storage
-    nis_matrix: List[List[List[float]]] = [[[] for _ in range(steps)] for _ in range(N)]
-
-    # Fill list for each observer,step
-    for rec in result.obs_records:
-        nis_matrix[rec.observer][rec.step].append(rec.nis)
-
-    # Convert lists of values → mean per step
-    nis_mean = []
-    for i in range(N):
-        sat_means = []
-        for t in range(steps):
-            vals = nis_matrix[i][t]
-            if vals:
-                sat_means.append(float(np.mean(vals)))
-            else:
-                sat_means.append(np.nan)  # should not happen
-        nis_mean.append(sat_means)
-
-    return nis_mean
 
 def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
     """

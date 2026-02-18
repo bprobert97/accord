@@ -3,7 +3,7 @@ Autonomous Cooperative Consensus Orbit Determination (ACCORD) is a decentralised
 
 In ACCORD, satellites use on-board sensors to observe one another and collaboratively determine their orbital positions. These observations are submitted to the distributed ledger, where consensus is achieved through Proof of Inter-Satellite Evaluation (PoISE) - a novel, reputation-based, Byzantine Fault Tolerant (BFT) consensus mechanism. Unlike traditional blockchain systems, PoISE does not rely on financial incentives or intermediaries. Instead, it validates orbit data by evaluating mutual observations and assessing the trustworthiness of both the data and the observing satellites.
 
-This decentralised approach enhances data integrity, trust, and resilience across heterogeneous constellations. As more satellites join the network, ACCORD scales naturally, enabling secure and autonomous satellite operations—even in zero-trust environmen
+This decentralised approach enhances data integrity, trust, and resilience across heterogeneous constellations. As more satellites join the network, ACCORD scales naturally, enabling secure and autonomous satellite operations—even in zero-trust environments.
 
 This code is licensed under a GNU General Public License v3.0.
 
@@ -34,10 +34,10 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure
 │   └── filter.py                  # Code for the orbit determination calculations
 │   └── logger.py                  # Code for the app logger
-|   └── plotting.py                # Python script for plotting NIS, correctness, reputation and consensus scores
+|   └── plotting.py                # Code for plotting simulation results
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
-│   └── simulation.py              # Code for simulating a satellite network
+│   └── simulation.py              # Helper functions for generating and converting satellite orbital elements.
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │
 ├── 📁 tests/                     # Unit tests, written with pytest

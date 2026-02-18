@@ -84,10 +84,7 @@ async def run_consensus_demo(config: FilterConfig,
                              load_ekf_results: bool = False,
                              ekf_results_path: str = \
                                 "sim_data/ekf_simulation_results.npz") -> \
-                                    tuple[Optional[DAG],
-                                          Optional[dict],
-                                          Optional[np.ndarray],
-                                          Optional[set[int]]]:
+        tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
@@ -104,6 +101,7 @@ async def run_consensus_demo(config: FilterConfig,
         - The final DAG object after all transactions have been processed.
         - A dictionary containing the reputation history for each satellite.
         - The ground truth trajectory history.
+        - A set of faulty satellite IDs.
     """
     clear_log()
 
@@ -152,7 +150,7 @@ async def run_consensus_demo(config: FilterConfig,
         )
 
         # --- Start of Clustered EKF Implementation ---
-        logger.info("Initializing Clustered EKF with cluster size %s", CLUSTER_SIZE)
+        logger.info("Initialising Clustered EKF with cluster size %s", CLUSTER_SIZE)
 
         # 1. Create clusters of satellite IDs
         all_sat_ids = list(range(config.N))
@@ -182,7 +180,7 @@ async def run_consensus_demo(config: FilterConfig,
             cluster_truth_0 = np.concatenate(initial_state_slices)
 
             cluster_ekfs.append(JointEKF(cluster_config, cluster_truth_0))
-            logger.info("Initialized EKF for cluster %d with %d satellites: %s",
+            logger.info("Initialised EKF for cluster %d with %d satellites: %s",
                         i, cluster_n, cluster_sat_ids)
 
         # 3. Pre-calculate the mapping from (observer, target) to z_hist index
@@ -271,14 +269,14 @@ async def run_consensus_demo(config: FilterConfig,
 
     asyncio.create_task(dag.listen())
 
-    # Create one SatelliteNode per unique observer_id in the JSON
+    # Create one SatelliteNode for each of the N satellites in the simulation.
     unique_ids = sorted(list(range(config.N)))
     satellites: dict[int, SatelliteNode] = {
         sid: SatelliteNode(node_id=sid, queue=queue) for sid in unique_ids
     }
     rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
 
-    # Initialise rep_history with the starting reputation for all satellites
+    # Initialise rep_history with the starting reputation for all satellites.
     for sid in unique_ids:
         rep_history[str(sid)].append(satellites[sid].reputation)
 
