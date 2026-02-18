@@ -29,7 +29,9 @@ from typing import Optional
 import numpy as np
 from src.plotting import  \
     plot_aggregated_reputation, check_consensus_outcomes, \
-        plot_nis_violin, plot_ground_tracks, calculate_convergence_index
+        plot_nis_violin, plot_ground_tracks, \
+            calculate_convergence_index, \
+                calculate_nis_convergence_index
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
@@ -412,6 +414,10 @@ if __name__ == "__main__":
     # Use the results for plotting
     if FINAL_DAG is not None and FAULTY_IDS is not None:
         plot_nis_violin(FINAL_DAG, faulty_ids=FAULTY_IDS)
+        NIS_CONVERGENCE_INDEX = calculate_nis_convergence_index(FINAL_DAG,\
+            faulty_ids=FAULTY_IDS)
+        plot_nis_violin(FINAL_DAG, faulty_ids=FAULTY_IDS, \
+            convergence_index=NIS_CONVERGENCE_INDEX)
         check_consensus_outcomes(FINAL_DAG)
     if REP_HIST and FAULTY_IDS is not None:
         CONVERGENCE_IDX = calculate_convergence_index(REP_HIST, faulty_ids=FAULTY_IDS)

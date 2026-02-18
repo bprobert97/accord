@@ -491,6 +491,76 @@ def calculate_convergence_index(
     return int(indices[0]) if indices.size > 0 else 0
 
 
+def calculate_nis_convergence_index(
+    dag: DAG,
+    faulty_ids: set[int],
+    confidence: float = 0.95,
+    window_size: int = 5
+) -> int:
+    """
+    Identifies the convergence index based on when the NIS values of honest
+    satellites enter and stay within the expected chi-squared consistency bounds.
+
+    Args:
+        dag (DAG): The DAG object containing transactions with NIS metadata.
+        faulty_ids (set[int]): Set of faulty satellite IDs to exclude.
+        confidence (float): Confidence level for chi-square bounds (default=0.95).
+        window_size (int): Number of consecutive steps NIS must be within bounds.
+
+    Returns:
+        int: The first step where convergence is detected.
+    """
+    # 1. Collect NIS values for honest satellites, grouped by step
+    step_nis_data: dict[int, list[float]] = {}
+    step_dof_data: dict[int, list[int]] = {}
+
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "nis") or not hasattr(tx.metadata, "dof"):
+                continue
+
+            try:
+                tx_data = json.loads(tx.tx_data)
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            sid = tx_data.get("observer")
+            step = tx_data.get("step")
+            if sid is None or step is None or int(sid) in faulty_ids:
+                continue
+
+            nis = getattr(tx.metadata, "nis", None)
+            dof = getattr(tx.metadata, "dof", None)
+            if nis is None or dof is None:
+                continue
+
+            step_nis_data.setdefault(int(step), []).append(float(nis))
+            step_dof_data.setdefault(int(step), []).append(int(dof))
+
+    if not step_nis_data:
+        return 0
+
+    sorted_steps = sorted(step_nis_data.keys())
+
+    # 2. Check per step if mean NIS is within chi-square upper bound
+    is_converged = []
+    for step in sorted_steps:
+        mean_nis = np.mean(step_nis_data[step])
+        mean_dof = np.mean(step_dof_data[step])
+
+        # Upper bound for chi-square
+        chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
+
+        is_converged.append(mean_nis <= chi2_upper)
+
+    # 3. Find first step where we have a window of consecutive converged steps
+    for i in range(len(is_converged) - window_size + 1):
+        if all(is_converged[i : i + window_size]):
+            return int(sorted_steps[i])
+
+    return 0
+
+
 def plot_aggregated_reputation(
     rep_history: dict[str, list[float]],
     faulty_ids: set[int],
@@ -605,19 +675,23 @@ def plot_aggregated_reputation(
     plt.show()
 
 
-def plot_nis_violin(dag: DAG, faulty_ids: set[int]) -> None:
+def plot_nis_violin(dag: DAG, faulty_ids: set[int],
+                    convergence_index: Optional[int] = None) -> None:
     """
     Generates a grouped violin plot for NIS values, separating honest and faulty satellites.
 
     Args:
         dag (DAG): The DAG object containing transaction data.
         faulty_ids (set[int]): A set of IDs for faulty satellites.
+        convergence_index (int): Optional index to only plot data
+                                 after filter convergence.
 
     Returns:
         None: Displays a matplotlib plot.
     """
     honest_nis = []
     faulty_nis = []
+    start_index = convergence_index if convergence_index is not None else 0
 
     for _, tx_list in dag.ledger.items():
         for tx in tx_list:
@@ -643,6 +717,9 @@ def plot_nis_violin(dag: DAG, faulty_ids: set[int]) -> None:
     if not honest_nis and not faulty_nis:
         print("No NIS data available to create a violin plot.")
         return
+
+    honest_nis = honest_nis[start_index:]
+    faulty_nis = faulty_nis[start_index:]
 
     plot_data = []
     labels = []
