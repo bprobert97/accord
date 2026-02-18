@@ -25,59 +25,16 @@ import json
 import re
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
-import networkx as nx
 import numpy as np
 from scipy.stats import chi2
 from src.reputation import MAX_REPUTATION, ReputationManager
-from src.logger import get_logger
-
-logger = get_logger()
 
 # === Configuration ===
-FILENAME = "app.log"  # your log file path
+FILENAME = "sim_data/app.log"  # your log file path
 THRESHOLD = 0.5                # consensus threshold
 CMAP = "viridis"               # color map for correctness
-
-def plot_consensus_vs_reputation(df):
-    """Plots consensus score vs reputation."""
-    plt.figure(figsize=(10, 7))
-    scatter = plt.scatter(
-        df["reputation"],
-        df["consensus_score"],
-        c=df["correctness"],
-        cmap=CMAP,
-        s=80,
-        alpha=0.8,
-    )
-    plt.axhline(THRESHOLD, color="red", linestyle="--",
-                linewidth=1.5, label=f"Threshold = {THRESHOLD}")
-    plt.colorbar(scatter, label="Correctness")
-
-    plt.xlabel("Reputation")
-    plt.ylabel("Consensus Score")
-    plt.legend()
-    plt.grid(True, linestyle=":")
-    plt.tight_layout()
-    plt.show()
-
-def plot_nis_vs_correctness(df):
-    """Plots NIS vs correctness."""
-    plt.figure(figsize=(10, 7))
-    plt.scatter(
-        df["nis"],
-        df["correctness"],
-        cmap=CMAP,
-        s=80,
-        alpha=0.8,
-    )
-
-    plt.xlabel("Normalised Innovation Squared")
-    plt.ylabel("Correctness")
-    plt.grid(True, linestyle=":")
-    plt.tight_layout()
-    plt.show()
+REP_MGR = ReputationManager()
 
 def plot_nis_vs_consensus(df):
     """Plots NIS vs consensus score with a zoomed-in subplot for NIS values 0-10."""
@@ -107,200 +64,6 @@ def plot_nis_vs_consensus(df):
 
     fig.tight_layout()
     plt.show()
-
-def main():
-    """Main function to parse log and generate plots."""
-    # === Step 1: Parse the log file ===
-    pattern = re.compile(
-        r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), consensus_score=([0-9.]+),\s*reputation=([0-9.]+)" # pylint: disable=line-too-long
-    )
-
-    data = []
-    try:
-        with open(FILENAME, "r", encoding="utf-8") as f:
-            content = f.read()
-            for match in pattern.finditer(content):
-                data.append(tuple(map(float, match.groups())))
-    except FileNotFoundError:
-        print(f"Error: Log file not found at '{FILENAME}'. \
-              Make sure the path is correct.")
-        return
-
-    if not data:
-        print("No data found in log file matching the pattern.")
-        return
-
-    # Convert to DataFrame
-    df = pd.DataFrame(data, columns=["nis", "dof", "correctness",
-                                     "consensus_score", "reputation"])
-
-    # === Step 2: Generate plots ===
-    plot_consensus_vs_reputation(df)
-    plot_nis_vs_correctness(df)
-    plot_nis_vs_consensus(df)
-
-
-def plot_transaction_dag(dag, max_nodes: int | None = 100, start_index: int = 0) -> None:
-    """
-    Plot a customizable slice of the transaction DAG.
-
-    Args:
-    - dag: The DAG object containing the transaction data.
-    - max_nodes: The maximum number of nodes (transactions) to display.
-                 If None, all transactions from start_index are shown.
-                 Defaults to 100.
-    - start_index: The starting index of the sorted transactions to plot.
-                   Negative indices count from the end. Defaults to 0.
-
-    Returns:
-    - None. Displays a plot of the transaction DAG.
-    """
-    graph: nx.DiGraph = nx.DiGraph()
-    tx_timestamps = {}
-    tx_status = {}
-
-    for key, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            graph.add_node(key)
-            tx_timestamps[key] = tx.metadata.timestamp
-            tx_status[key] = {
-                "is_confirmed": tx.metadata.is_confirmed,
-                "is_rejected": tx.metadata.is_rejected
-            }
-            for parent_hash in tx.metadata.parent_hashes:
-                graph.add_edge(key, parent_hash)
-
-    sorted_keys = sorted(tx_timestamps, key=lambda k: tx_timestamps[k])
-
-    # --- New slicing logic ---
-    if start_index < 0:
-        start_index = max(0, len(sorted_keys) + start_index)
-
-    end_index = len(sorted_keys)
-    if max_nodes is not None:
-        end_index = min(start_index + max_nodes, len(sorted_keys))
-
-    plot_keys = sorted_keys[start_index:end_index]
-    subgraph = graph.subgraph(plot_keys)
-    # ---
-
-    pos = {k: (i, (hash(k) % 100) / 100.0 - 0.5) for i, k in enumerate(plot_keys)}
-
-    plt.figure(figsize=(16, 6))
-
-    # --- Adjust axvline positions relative to the slice ---
-    real_data_line = 2 - start_index
-    bft_line = 5 - start_index
-
-    if 0 <= real_data_line < len(plot_keys):
-        plt.axvline(x=real_data_line, color="#000000", linestyle="--", linewidth=1.5,
-                    label="Real Data Added", zorder=1)
-
-    if 0 <= bft_line < len(plot_keys):
-        plt.axvline(x=bft_line, color="#000000", linestyle="--", linewidth=1.5,
-                    label="BFT Quorum Reached", zorder=1)
-
-    for node in subgraph.nodes():
-        outline_color = "black"
-        if tx_status[node]["is_confirmed"]:
-            outline_color = "green"
-        elif tx_status[node]["is_rejected"]:
-            outline_color = "red"
-        nx.draw_networkx_nodes(
-            subgraph, pos,
-            nodelist=[node],
-            node_color="lightblue",
-            node_size=300,
-            edgecolors=outline_color,
-            linewidths=1
-        )
-
-    edge_colors = []
-    # Only draw edges that are fully within the subgraph
-    for _, v in subgraph.edges():
-        if v in tx_status:
-            if tx_status[v]["is_confirmed"]:
-                edge_colors.append("green")
-            elif tx_status[v]["is_rejected"]:
-                edge_colors.append("red")
-            else:
-                edge_colors.append("gray")
-        else:
-            edge_colors.append("gray") # Should not happen with subgraph
-
-    nx.draw_networkx_edges(subgraph, pos,
-                           edge_color=edge_colors, arrowsize=15) # type: ignore [arg-type]
-
-    # Add legend
-    node_patch = mpatches.Patch(edgecolor="black", facecolor="lightblue",
-                                label="Initial Transaction", linewidth=1)
-    confirmed_patch = mpatches.Patch(edgecolor="green", facecolor="lightblue",
-                                     label="Confirmed Transaction", linewidth=1)
-    rejected_patch = mpatches.Patch(edgecolor="red", facecolor="lightblue",
-                                    label="Rejected Transaction", linewidth=1)
-    edge_confirmed = Line2D([0], [0], color="green", linewidth=1, label="Strong Edge")
-    edge_rejected = Line2D([0], [0], color="red", linewidth=1, label="Weak Edge")
-    edge_default = Line2D([0], [0], color="grey", linewidth=1, label="Default Edge")
-
-    plt.legend(
-        handles=[node_patch, confirmed_patch, rejected_patch, edge_confirmed,
-                 edge_rejected, edge_default],
-        loc="upper left",
-        bbox_to_anchor=(1, 1),
-        facecolor='none',
-        edgecolor='black',
-        labelcolor='black',
-        fontsize=18
-    )
-
-
-    plt.xlabel("Transaction Index", color='black', fontsize=12)
-    n = len(plot_keys)
-    step = max(1, n // 10)
-
-    tick_positions = range(0, n, step)
-    tick_labels = [str(i + start_index) for i in tick_positions]
-
-    plt.xticks(
-        tick_positions,
-        tick_labels,
-        color="black",
-        fontsize=12
-    )
-
-    ax = plt.gca()
-    ymin, _ = ax.get_ylim()
-
-    if 0 <= real_data_line < len(plot_keys):
-        ax.text(real_data_line - 0.1, ymin + 0.05, "Real Data Added", color="#000000",
-                rotation=90, rotation_mode="anchor",
-                va="bottom", ha="left", fontsize=10, zorder=10,
-                bbox={"facecolor": "none", "edgecolor": "none", "alpha": 0.7, "pad": 2})
-
-    if 0 <= bft_line < len(plot_keys):
-        ax.text(bft_line - 0.1, ymin + 0.05, "BFT Quorum Reached", color="#000000",
-                rotation=90, rotation_mode="anchor",
-                va="bottom", ha="left", fontsize=10, zorder=10,
-                bbox={"facecolor": "none", "edgecolor": "none", "alpha": 0.7, "pad": 2})
-
-
-    ax.get_yaxis().set_visible(False)
-    ax.spines['bottom'].set_visible(True)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_visible(False)
-    ax.xaxis.set_ticks_position('bottom')
-    ax.xaxis.set_label_position('bottom')
-
-    ax.spines['bottom'].set_color('black')
-    ax.tick_params(axis='x', colors='black', labelsize=12)
-    ax.xaxis.label.set_color('black')
-    ax.set_facecolor('none')
-    plt.gcf().patch.set_alpha(0.0)
-
-    plt.tight_layout(rect=[0, 0, 0.85, 1]) # type: ignore [arg-type]
-    plt.show()
-
 
 
 def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Constellation") -> None:
@@ -358,8 +121,6 @@ def plot_constellation(truth: np.ndarray, n: int, title: str = "Satellite Conste
     plt.show()
 
 
-REP_MGR = ReputationManager()
-
 def plot_reputation(rep_history: dict) -> None:
     """
     Plot the reputation history of satellite nodes.
@@ -409,82 +170,6 @@ def plot_reputation(rep_history: dict) -> None:
     plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.,
                fontsize=14)
     plt.grid(True, linestyle=":")
-    plt.tight_layout()
-    plt.show()
-
-def plot_consensus_correctness_dof(dag) -> None:
-    """
-    Plot consensus score, Correctness Score, and DOF for each satellite.
-    Consensus score on left y-axis, Correctness Score on right y-axis.
-    DOF shown as markers.
-    """
-    # Collect by satellite
-    data_by_sat: dict[str, list] = {}
-    for _, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            if not hasattr(tx.metadata, "consensus_score"):
-                continue
-            try:
-                tx_data = json.loads(tx.tx_data)
-            except Exception:
-                continue
-            sid = tx_data.get("observer") # Corrected: Use "observer" key
-            if not sid:
-                continue
-
-            data_by_sat.setdefault(str(sid), []).append({ # Ensure sid is string for dict key
-                "consensus": tx.metadata.consensus_score,
-                "correctness": getattr(tx.metadata, "correctness_score", None),
-                "dof": getattr(tx.metadata, "dof", None),
-                "confirmed": getattr(tx.metadata, "is_confirmed", False),
-                "rejected": getattr(tx.metadata, "is_rejected", False),
-            })
-
-    # Filter out satellites with no data
-    data_by_sat = {sid: vals for sid, vals in data_by_sat.items() if vals}
-    if not data_by_sat:
-        print("No consensus/Correctness/DOF data available to plot.")
-        return
-
-    n_sats = len(data_by_sat)
-    _, axes = plt.subplots(n_sats, 1, figsize=(10, 5 * n_sats), sharex=True)
-    if n_sats == 1:
-        axes = [axes]
-
-    for ax, (sid, records) in zip(axes, data_by_sat.items()):
-        steps = range(len(records))
-        consensus = [r["consensus"] for r in records]
-        correctness = [r["correctness"] for r in records] # Changed from cdf
-        dof = [r["dof"] for r in records]
-
-        # Scatter consensus
-        colors = ["green" if r["confirmed"] else "red" if r["rejected"] else "gray"
-                  for r in records]
-        ax.scatter(steps, consensus, c=colors, s=60, label="Consensus Score")
-        ax.plot(steps, consensus, linestyle="--", alpha=0.5, color="black")
-        ax.axhline(0.5, color="blue", linestyle=":", label="Threshold (0.5)")
-        ax.set_ylabel("Consensus Score")
-        ax.set_ylim(0, 1)
-
-        ax.grid(True, linestyle=":")
-
-        # Add Correctness Score on secondary axis
-        ax2 = ax.twinx()
-        ax2.plot(steps, correctness, "o-", color="orange", alpha=0.7,
-                 label="Correctness Score") # Changed from cdf
-        ax2.set_ylabel("Correctness Score", color="orange") # Changed from CDF Value
-        ax2.tick_params(axis="y", colors="orange")
-
-        # Optional DOF display as text/markers
-        for i, d in enumerate(dof):
-            ax.text(i, consensus[i] + 0.05, f"DOF={d}", ha="center", fontsize=8, color="gray")
-
-        # Merge legends
-        handles, labels = ax.get_legend_handles_labels()
-        handles2, labels2 = ax2.get_legend_handles_labels()
-        ax2.legend(handles + handles2, labels + labels2, loc="upper right")
-
-    axes[-1].set_xlabel("Transaction Index")
     plt.tight_layout()
     plt.show()
 
@@ -689,6 +374,7 @@ def plot_nis_boxplot(dag) -> None:
     plt.grid(True, linestyle=":", alpha=0.7)
     plt.tight_layout()
     plt.show()
+
 
 def check_consensus_outcomes(dag, consensus_threshold: float = 0.5) -> bool:
     """
@@ -990,6 +676,37 @@ def plot_ground_tracks(truth: np.ndarray, n: int, faulty_ids: set[int]) -> None:
 
     plt.tight_layout()
     plt.show()
+
+
+def main():
+    """Main function to parse log and generate plots."""
+    # === Step 1: Parse the log file ===
+    pattern = re.compile(
+        r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), consensus_score=([0-9.]+),\s*reputation=([0-9.]+)" # pylint: disable=line-too-long
+    )
+
+    data = []
+    try:
+        with open(FILENAME, "r", encoding="utf-8") as f:
+            content = f.read()
+            for match in pattern.finditer(content):
+                data.append(tuple(map(float, match.groups())))
+    except FileNotFoundError:
+        print(f"Error: Log file not found at '{FILENAME}'. \
+              Make sure the path is correct.")
+        return
+
+    if not data:
+        print("No data found in log file matching the pattern.")
+        return
+
+    # Convert to DataFrame
+    df = pd.DataFrame(data, columns=["nis", "dof", "correctness",
+                                     "consensus_score", "reputation"])
+
+    # === Step 2: Generate plots ===
+    plot_nis_vs_consensus(df)
+
 
 if __name__ == "__main__":
     main()
