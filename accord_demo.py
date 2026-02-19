@@ -27,9 +27,11 @@ import os
 import shutil
 from typing import Optional
 import numpy as np
-from src.plotting import plot_constellation, \
+from src.plotting import  \
     plot_aggregated_reputation, check_consensus_outcomes, \
-        plot_nis_violin, plot_ground_tracks, plot_reputation
+        plot_nis_violin, plot_ground_tracks, \
+            calculate_convergence_index, \
+                calculate_nis_convergence_index
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
@@ -84,10 +86,7 @@ async def run_consensus_demo(config: FilterConfig,
                              load_ekf_results: bool = False,
                              ekf_results_path: str = \
                                 "sim_data/ekf_simulation_results.npz") -> \
-                                    tuple[Optional[DAG],
-                                          Optional[dict],
-                                          Optional[np.ndarray],
-                                          Optional[set[int]]]:
+        tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
@@ -104,6 +103,7 @@ async def run_consensus_demo(config: FilterConfig,
         - The final DAG object after all transactions have been processed.
         - A dictionary containing the reputation history for each satellite.
         - The ground truth trajectory history.
+        - A set of faulty satellite IDs.
     """
     clear_log()
 
@@ -152,7 +152,7 @@ async def run_consensus_demo(config: FilterConfig,
         )
 
         # --- Start of Clustered EKF Implementation ---
-        logger.info("Initializing Clustered EKF with cluster size %s", CLUSTER_SIZE)
+        logger.info("Initialising Clustered EKF with cluster size %s", CLUSTER_SIZE)
 
         # 1. Create clusters of satellite IDs
         all_sat_ids = list(range(config.N))
@@ -182,7 +182,7 @@ async def run_consensus_demo(config: FilterConfig,
             cluster_truth_0 = np.concatenate(initial_state_slices)
 
             cluster_ekfs.append(JointEKF(cluster_config, cluster_truth_0))
-            logger.info("Initialized EKF for cluster %d with %d satellites: %s",
+            logger.info("Initialised EKF for cluster %d with %d satellites: %s",
                         i, cluster_n, cluster_sat_ids)
 
         # 3. Pre-calculate the mapping from (observer, target) to z_hist index
@@ -271,14 +271,14 @@ async def run_consensus_demo(config: FilterConfig,
 
     asyncio.create_task(dag.listen())
 
-    # Create one SatelliteNode per unique observer_id in the JSON
+    # Create one SatelliteNode for each of the N satellites in the simulation.
     unique_ids = sorted(list(range(config.N)))
     satellites: dict[int, SatelliteNode] = {
         sid: SatelliteNode(node_id=sid, queue=queue) for sid in unique_ids
     }
     rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
 
-    # Initialise rep_history with the starting reputation for all satellites
+    # Initialise rep_history with the starting reputation for all satellites.
     for sid in unique_ids:
         rep_history[str(sid)].append(satellites[sid].reputation)
 
@@ -408,22 +408,25 @@ if __name__ == "__main__":
     if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
         FINAL_DAG, REP_HIST, TRUTH, FAULTY_IDS = asyncio.run(
             run_consensus_demo(default_config, load_ekf_results=True,
-            ekf_results_path=EKF_RESULTS_PATH)
-        )
+            ekf_results_path=EKF_RESULTS_PATH))
+
+        # Copy the log file to the sim_data directory
+        if os.path.exists("app.log"):
+            shutil.copy("app.log", os.path.join(DATA_DIR, "app.log"))
+            logger.info("Copied app.log to %s.", DATA_DIR)
 
     # Use the results for plotting
     if FINAL_DAG is not None and FAULTY_IDS is not None:
         plot_nis_violin(FINAL_DAG, faulty_ids=FAULTY_IDS)
+        NIS_CONVERGENCE_INDEX = calculate_nis_convergence_index(FINAL_DAG,\
+            faulty_ids=FAULTY_IDS)
+        plot_nis_violin(FINAL_DAG, faulty_ids=FAULTY_IDS, \
+            convergence_index=NIS_CONVERGENCE_INDEX)
         check_consensus_outcomes(FINAL_DAG)
     if REP_HIST and FAULTY_IDS is not None:
-        plot_reputation(REP_HIST)
+        CONVERGENCE_IDX = calculate_convergence_index(REP_HIST, faulty_ids=FAULTY_IDS)
         plot_aggregated_reputation(REP_HIST, faulty_ids=FAULTY_IDS,
-                                   start_at_full_constellation=False)
+                                   start_at_full_constellation=False,
+                                   convergence_index=CONVERGENCE_IDX)
     if TRUTH is not None and FAULTY_IDS is not None:
-        plot_constellation(TRUTH, default_config.N)
-        plot_ground_tracks(TRUTH, default_config.N, faulty_ids=FAULTY_IDS)
-
-    # Copy the log file to the sim_data directory
-    if os.path.exists("app.log"):
-        shutil.copy("app.log", os.path.join(DATA_DIR, "app.log"))
-        logger.info("Copied app.log to %s.", DATA_DIR)
+        plot_ground_tracks(TRUTH, default_config.N)

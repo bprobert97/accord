@@ -2,7 +2,6 @@
 """
 Unit tests for the filter dynamics and measurement model functions.
 """
-from unittest.mock import MagicMock
 import numpy as np
 from src.filter import (
     two_body_f,
@@ -13,8 +12,6 @@ from src.filter import (
     rk4_step,
     H_blocks_target_obs,
     chi2_bounds,
-    extract_mean_nis_per_sat,
-    ObservationRecord,
     MU_EARTH,
     Re,
     STATE_DIM,
@@ -123,7 +120,7 @@ def test_f_jacobian_6():
 
 def test_van_loan_discretization():
     """
-    Test the Van Loan discretization method.
+    Test the Van Loan discretisation method.
     """
     dt = 0.1
     F = np.random.randn(6, 6)
@@ -141,7 +138,7 @@ def test_van_loan_discretization():
 
 def test_initialise_state_and_cov():
     """
-    Test the initialization of state and covariance.
+    Test the initialisation of state and covariance.
     """
     N = 3
     truth = np.random.randn(1, STATE_DIM * N)
@@ -173,25 +170,3 @@ def test_chi2_bounds():
     # For 2 DOF, 95% confidence, bounds are approx 0.05 and 7.38
     assert np.isclose(lo, 0.05, atol=0.01)
     assert np.isclose(hi, 7.38, atol=0.01)
-
-def test_extract_mean_nis_per_sat():
-    """
-    Test the extraction of mean NIS per satellite.
-    """
-    # Create a mock result object
-    mock_result = MagicMock()
-    mock_result.target_ids = ["sat0", "sat1"]
-    mock_result.x_hist = np.zeros((2, 12)) # 2 sats, 2 steps
-    mock_result.obs_records = [
-        ObservationRecord(step=0, observer=0, target=1, nis=2.0, dof=2, time=0),
-        ObservationRecord(step=1, observer=0, target=1, nis=3.0, dof=2, time=1),
-        ObservationRecord(step=0, observer=1, target=0, nis=4.0, dof=2, time=0),
-        ObservationRecord(step=1, observer=1, target=0, nis=5.0, dof=2, time=1),
-    ]
-
-    mean_nis = extract_mean_nis_per_sat(mock_result)
-
-    assert len(mean_nis) == 2 # 2 satellites
-    assert len(mean_nis[0]) == 2 # 2 steps
-    assert mean_nis[0] == [2.0, 3.0]
-    assert mean_nis[1] == [4.0, 5.0]

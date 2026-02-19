@@ -1,13 +1,21 @@
 # pylint: disable=protected-access, too-many-locals, too-many-positional-arguments, too-many-arguments
 """
+The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
+Author: Beth Probert
+Email: beth.probert@strath.ac.uk
+
+Copyright (C) 2025 Applied Space Technology Laboratory
+
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
+
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
+
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
@@ -44,6 +52,39 @@ def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
     argp = rng.uniform(0, 2 * np.pi)
     ta = rng.uniform(0, 2 * np.pi)
     return a, e, i, raan, argp, ta
+
+def generate_walker_delta_constellation(t: int, p: int, f: int, a: float,
+                                         i: float) -> list[tuple[float, float, float,
+                                                                 float, float, float]]:
+    """
+    Generates Keplerian elements for a Walker Delta constellation i: T/P/F.
+    Args:
+    - t: Total number of satellites
+    - p: Number of planes
+    - f: Phase factor (0 to p-1)
+    - a: Semi-major axis (assuming circular orbits, e=0)
+    - i: Inclination (radians)
+    Returns:
+    - List of tuples containing (a, e, i, raan, argp, ta) for each satellite
+    """
+    if t % p != 0:
+        raise ValueError("Total number of satellites T must be divisible by number of planes P.")
+
+    s = t // p  # Satellites per plane
+    e = 0.0     # Circular orbit
+    argp = 0.0  # Arbitrary for circular orbit
+
+    constellation = []
+    for plane_idx in range(p):
+        raan = (2 * np.pi / p) * plane_idx
+        for sat_idx in range(s):
+            # True Anomaly (for circular orbit, ta = Mean Anomaly)
+            ta = (2 * np.pi / s) * sat_idx + (2 * np.pi * f / t) * plane_idx
+            # Normalise ta to [0, 2*pi]
+            ta %= (2 * np.pi)
+            constellation.append((a, e, i, raan, argp, ta))
+
+    return constellation
 
 def keplerian_to_cartesian(a: float, e: float, i: float, raan: float,
                            argp: float, ta: float) -> NDArray[np.float64]:

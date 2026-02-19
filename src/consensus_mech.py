@@ -26,7 +26,7 @@ from typing import Optional
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
-from.filter import ObservationRecord
+from .filter import ObservationRecord
 from .logger import get_logger
 from .reputation import MAX_REPUTATION
 from .satellite_node import SatelliteNode
@@ -51,7 +51,7 @@ class ConsensusMechanism():
         """
         Convert NIS into a normalised [0,1] correctness score.
         The base score is calculated based on the two-sided probability of the NIS
-        value occurring in a chi-squared distribution (penalizing "too perfect"
+        value occurring in a chi-squared distribution (penalising "too perfect"
         and "too high" values). This score is then modulated by the satellite's
         historical performance (the EMA of its NIS values).
 
