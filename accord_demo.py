@@ -408,8 +408,12 @@ if __name__ == "__main__":
     if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
         FINAL_DAG, REP_HIST, TRUTH, FAULTY_IDS = asyncio.run(
             run_consensus_demo(default_config, load_ekf_results=True,
-            ekf_results_path=EKF_RESULTS_PATH)
-        )
+            ekf_results_path=EKF_RESULTS_PATH))
+
+        # Copy the log file to the sim_data directory
+        if os.path.exists("app.log"):
+            shutil.copy("app.log", os.path.join(DATA_DIR, "app.log"))
+            logger.info("Copied app.log to %s.", DATA_DIR)
 
     # Use the results for plotting
     if FINAL_DAG is not None and FAULTY_IDS is not None:
@@ -426,8 +430,3 @@ if __name__ == "__main__":
                                    convergence_index=CONVERGENCE_IDX)
     if TRUTH is not None and FAULTY_IDS is not None:
         plot_ground_tracks(TRUTH, default_config.N)
-
-    # Copy the log file to the sim_data directory
-    if os.path.exists("app.log"):
-        shutil.copy("app.log", os.path.join(DATA_DIR, "app.log"))
-        logger.info("Copied app.log to %s.", DATA_DIR)
