@@ -746,14 +746,9 @@ def plot_nis_violin(dag: DAG, faulty_ids: set[int],
             parts[partname].set_color('black')
             parts[partname].set_linewidth(1.5)
 
-    # Add chi-squared bounds (assuming DOF=2 as in your boxplot)
-    dof = 2
-    confidence = 0.95
+    # Add expected median (assuming DOF=2)
     expected_median = 1.298
-    chi2_upper = chi2.ppf((1 + confidence) / 2, df=dof)
 
-    ax.axhline(chi2_upper, color='r', linestyle='--',
-    label=f'{int(confidence*100)}% Confidence Bound')
     ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median')
 
     ax.set_xticks(np.arange(1, len(labels) + 1))
