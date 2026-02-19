@@ -35,7 +35,7 @@ def ekf(filter_config: FilterConfig):
 
 def test_joint_ekf_init(ekf, filter_config):
     """
-    Test the initialization of the JointEKF class.
+    Test the initialisation of the JointEKF class.
     """
     N = filter_config.N
     dim_x = STATE_DIM * N

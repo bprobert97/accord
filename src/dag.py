@@ -87,7 +87,7 @@ class DAG():
                     tx_data = json.loads(transaction.tx_data)
                     observer_id = tx_data.get("observer")
                     if observer_id is not None:
-                        # Initialise if observer_id is new
+                        # initialise if observer_id is new
                         self.nis_sums.setdefault(observer_id, 0.0)
                         self.nis_counts.setdefault(observer_id, 0)
 
