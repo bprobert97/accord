@@ -53,6 +53,39 @@ def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
     ta = rng.uniform(0, 2 * np.pi)
     return a, e, i, raan, argp, ta
 
+def generate_walker_delta_constellation(t: int, p: int, f: int, a: float,
+                                         i: float) -> list[tuple[float, float, float,
+                                                                 float, float, float]]:
+    """
+    Generates Keplerian elements for a Walker Delta constellation i: T/P/F.
+    Args:
+    - t: Total number of satellites
+    - p: Number of planes
+    - f: Phase factor (0 to p-1)
+    - a: Semi-major axis (assuming circular orbits, e=0)
+    - i: Inclination (radians)
+    Returns:
+    - List of tuples containing (a, e, i, raan, argp, ta) for each satellite
+    """
+    if t % p != 0:
+        raise ValueError("Total number of satellites T must be divisible by number of planes P.")
+
+    s = t // p  # Satellites per plane
+    e = 0.0     # Circular orbit
+    argp = 0.0  # Arbitrary for circular orbit
+
+    constellation = []
+    for plane_idx in range(p):
+        raan = (2 * np.pi / p) * plane_idx
+        for sat_idx in range(s):
+            # True Anomaly (for circular orbit, ta = Mean Anomaly)
+            ta = (2 * np.pi / s) * sat_idx + (2 * np.pi * f / t) * plane_idx
+            # Normalise ta to [0, 2*pi]
+            ta %= (2 * np.pi)
+            constellation.append((a, e, i, raan, argp, ta))
+
+    return constellation
+
 def keplerian_to_cartesian(a: float, e: float, i: float, raan: float,
                            argp: float, ta: float) -> NDArray[np.float64]:
     """
