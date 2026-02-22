@@ -281,32 +281,24 @@ def plot_nis_consistency_by_satellite(dag: DAG, confidence: float = 0.95) -> Non
     plt.show()
 
 
-def plot_nis_boxplot(dag: DAG) -> None:
+def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
+                    convergence_index: Optional[int] = None) -> None:
     """
-    Generates box plots visualizing the distribution of Normalised Innovation Squared (NIS)
-    values for each simulated satellite.
-
-    This function collects NIS data from the DAG for honest and intermittently faulty
-    satellites and loads pre-recorded malicious satellite NIS data from
-    'sat1_nis_data.json'. The box plots illustrate the spread of NIS values,
-    with different satellite types (honest, faulty, malicious) clearly labeled.
-
-    The plot includes horizontal lines indicating:
-    - The 95% chi-squared confidence interval (for DOF=2), providing statistical bounds
-      for expected NIS values.
-    - The expected median of the chi-squared distribution (for DOF=2).
-
-    The y-axis uses a symmetrical log scale to better visualize a wide range of NIS values.
+    Generates a grouped box plot for NIS values, separating honest and faulty satellites.
 
     Args:
-        dag (DAG): The DAG object containing transaction data, including NIS metadata
-                   for honest and intermittently faulty satellites.
+        dag (DAG): The DAG object containing transaction data.
+        faulty_ids (set[int]): A set of IDs for faulty satellites.
+        convergence_index (int): Optional index to only plot data
+                                 after filter convergence.
 
     Returns:
-        None: Displays a matplotlib box plot figure.
+        None: Displays a matplotlib plot.
     """
-    # Collect data by satellite
-    nis_data_by_sat: dict[str, list[float]] = {}
+    honest_nis = []
+    faulty_nis = []
+    start_index = convergence_index if convergence_index is not None else 0
+
     for _, tx_list in dag.ledger.items():
         for tx in tx_list:
             if not hasattr(tx.metadata, "nis"):
@@ -318,72 +310,56 @@ def plot_nis_boxplot(dag: DAG) -> None:
                 continue
 
             sid = tx_data.get("observer")
-            if sid is None:
-                continue
-
             nis = getattr(tx.metadata, "nis", None)
-            if nis is None:
+
+            if sid is None or nis is None:
                 continue
 
-            nis_data_by_sat.setdefault(str(sid), []).append(nis)
+            if int(sid) in faulty_ids:
+                faulty_nis.append(nis)
+            else:
+                honest_nis.append(nis)
 
-    # Filter out satellites with no data
-    nis_data_by_sat = {sid: vals for sid, vals in nis_data_by_sat.items() if vals}
-
-    # Load data for the malicious satellite from file and slice it
-    malicious_nis_data = None
-    try:
-        with open('sat1_nis_data.json', 'r', encoding='utf-8') as f:
-            malicious_nis_data = json.load(f)
-            if malicious_nis_data:
-                malicious_nis_data = malicious_nis_data[100:]
-    except FileNotFoundError:
-        print("Warning: sat1_nis_data.json not found. Cannot plot malicious data.")
-    except json.JSONDecodeError:
-        print("Warning: Could not decode sat1_nis_data.json. Cannot plot malicious data.")
-
-    # Sort satellites by ID, then move sat 1 to the end of the DAG-based data.
-    sorted_sids = sorted(nis_data_by_sat.keys(), key=int)
-    if '1' in sorted_sids:
-        sorted_sids.remove('1')
-        sorted_sids.append('1')
-
-    nis_values_for_plot = [nis_data_by_sat[sid] for sid in sorted_sids]
-    labels = [f"Honest Satellite\n(ID: Sat_{sid})" if sid != "1" else \
-              "Satellite with \nIntermittent Fault\n(ID: Sat_1)" for sid in sorted_sids]
-
-    # Add malicious data if loaded and it has points left
-    if malicious_nis_data:
-        nis_values_for_plot.append(malicious_nis_data)
-        labels.append("Malicious Satellite\n(ID: Sat_1)")
-
-    if not nis_values_for_plot:
+    if not honest_nis and not faulty_nis:
         print("No NIS data available to create a box plot.")
         return
 
-    plt.figure(figsize=(10, 6))
-    bp = plt.boxplot(nis_values_for_plot,
-                     labels=labels) # type: ignore [call-arg]
-    for median in bp['medians']:
-        median.set_color('blue')
+    honest_nis = honest_nis[start_index:]
+    faulty_nis = faulty_nis[start_index:]
 
-    # Add chi-squared bounds
-    dof = 2
-    confidence = 0.95
+    plot_data = []
+    labels = []
+
+    if honest_nis:
+        plot_data.append(honest_nis)
+        labels.append("Honest Satellites")
+    if faulty_nis:
+        plot_data.append(faulty_nis)
+        labels.append("Faulty Satellites")
+
+    _, ax = plt.subplots(figsize=(10, 6))
+
+    # Create box plot
+    parts = ax.boxplot(plot_data, labels=labels) # type: ignore [call-arg]
+
+    for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
+        if partname in parts:
+            parts[partname].set_color('black')
+            parts[partname].set_linewidth(1.5)
+
+    # Add expected median (assuming DOF=2)
     expected_median = 1.298
-    chi2_lower = chi2.ppf((1 - confidence) / 2, df=dof)
-    chi2_upper = chi2.ppf((1 + confidence) / 2, df=dof)
-    plt.axhline(chi2_lower, color='r', linestyle='--',
-                label='95% Chi-squared Confidence Interval (DOF=2)')
-    plt.axhline(chi2_upper, color='r', linestyle='--')
-    plt.axhline(expected_median, color='black', linestyle=':', label='Expected Median (DOF=2)')
 
-    plt.ylabel("Normalised Innovation Squared", fontsize=18)
-    plt.yscale("symlog")
-    plt.tick_params(axis='x', labelsize=18)
-    plt.tick_params(axis='y', labelsize=18)
-    plt.legend(fontsize=18)
-    plt.grid(True, linestyle=":", alpha=0.7)
+    ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median')
+
+    ax.set_xticks(np.arange(1, len(labels) + 1))
+    ax.set_xticklabels(labels, fontsize=16)
+    ax.set_ylabel("Normalised Innovation Squared", fontsize=16)
+    ax.set_yscale("symlog")
+
+    ax.legend(fontsize=14)
+    ax.grid(True, linestyle=":", alpha=0.7)
+
     plt.tight_layout()
     plt.show()
 
