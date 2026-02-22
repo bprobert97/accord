@@ -354,7 +354,7 @@ def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
 
     ax.set_xticks(np.arange(1, len(labels) + 1))
     ax.set_xticklabels(labels, fontsize=16)
-    ax.set_ylabel("Normalised Innovation Squared", fontsize=16)
+    ax.set_ylabel("Normalised Innovation Squared [-]", fontsize=16)
     ax.set_yscale("symlog")
 
     ax.legend(fontsize=14)
