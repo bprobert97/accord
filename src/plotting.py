@@ -65,8 +65,8 @@ def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
     cbar = fig.colorbar(scatter, ax=ax)
     cbar.set_label("Correctness", fontsize=16)
 
-    ax.set_xlabel("Normalised Innovation Squared", fontsize=16)
-    ax.set_ylabel("Consensus Score", fontsize=16)
+    ax.set_xlabel("Normalised Innovation Squared [-]", fontsize=16)
+    ax.set_ylabel("Consensus Score [-]", fontsize=16)
     ax.set_xscale('symlog')
     plt.tick_params(axis='x', labelsize=16)
     plt.tick_params(axis='y', labelsize=16)
@@ -806,8 +806,8 @@ def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     ]
     ax.legend(handles=handles, loc='upper right', framealpha=1.0, facecolor='white')
 
-    ax.set_xlabel("Longitude (Degrees)", fontsize=12)
-    ax.set_ylabel("Latitude (Degrees)", fontsize=12)
+    ax.set_xlabel("Longitude [Degrees]", fontsize=12)
+    ax.set_ylabel("Latitude [Degrees]", fontsize=12)
     # White grid looks better on dark maps
     ax.grid(True, linestyle=":", alpha=0.4, color='white')
 
