@@ -49,6 +49,7 @@ def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
     Returns:
         None: Displays a matplotlib plot.
     """
+
     fig, ax = plt.subplots(figsize=(10, 7))
 
     # Main plot
@@ -57,21 +58,29 @@ def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
         df["consensus_score"],
         c=df["correctness"],
         cmap=CMAP,
-        s=80,
+        s=20,
         alpha=0.8,
+        edgecolors='none'
     )
+
     ax.axhline(THRESHOLD, color="red", linestyle="--",
                 linewidth=1.5, label=f"Threshold = {THRESHOLD}")
     cbar = fig.colorbar(scatter, ax=ax)
-    cbar.set_label("Correctness", fontsize=16)
+    cbar.set_label("Correctness [-]", fontsize=16)
 
     ax.set_xlabel("Normalised Innovation Squared [-]", fontsize=16)
     ax.set_ylabel("Consensus Score [-]", fontsize=16)
     ax.set_xscale('symlog')
+
     plt.tick_params(axis='x', labelsize=16)
     plt.tick_params(axis='y', labelsize=16)
-    ax.legend(fontsize=16)
-    ax.grid(True, linestyle=":")
+
+    # Adjust legend to handle the transparency gracefully
+    leg = ax.legend(fontsize=16)
+    for lh in leg.legend_handles:
+        lh.set_alpha(1)  # type: ignore [union-attr]
+
+    ax.grid(True, linestyle=":", alpha=0.7)
 
     fig.tight_layout()
     plt.show()
@@ -348,20 +357,49 @@ def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
             parts[partname].set_linewidth(1.5)
 
     # Add expected median (assuming DOF=2)
-    expected_median = 1.298
+    expected_median = 1.386
 
-    ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median')
+    # Compute chi-square 95% confidence bounds
+    chi2_lower = chi2.ppf((1 - 0.95) / 2, df=2)
+    chi2_upper = chi2.ppf((1 + 0.95) / 2, df=2)
+
+    # Plot the horizontal lines for the confidence interval bounds
+    ax.axhline(chi2_lower, color='red', linestyle='--', alpha=0.7, \
+        label='95% Confidence Interval Bounds')
+    ax.axhline(chi2_upper, color='red', linestyle='--', alpha=0.7)
+
+    ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median (1.386)')
 
     ax.set_xticks(np.arange(1, len(labels) + 1))
     ax.set_xticklabels(labels, fontsize=16)
     ax.set_ylabel("Normalised Innovation Squared [-]", fontsize=16)
     ax.set_yscale("symlog")
 
-    ax.legend(fontsize=14)
+    ax.legend(fontsize=14, loc="upper center")
     ax.grid(True, linestyle=":", alpha=0.7)
 
     plt.tight_layout()
     plt.show()
+
+
+def calculate_median_percentiles(dof: int = 2) -> None:
+    """
+    Calculates the chi-squared CDF percentiles for given median values
+    and determines their absolute distance from the ideal 50th percentile.
+    """
+    median_values: list[float] = [1.386, 1.707, 2.678]
+    print(f"--- Chi-Squared CDF Percentiles (DOF={dof}) ---")
+    print(f"{'Median Value':<15} | {'Percentile (CDF)':<20} | {'Distance from 0.5':<20}")
+    print("-" * 60)
+
+    for val in median_values:
+        # Calculate the cumulative probability (percentile)
+        percentile = chi2.cdf(val, df=dof)
+
+        # Calculate how far it deviates from the ideal 0.5 (50%) mark
+        distance_from_ideal = abs(percentile - 0.5)
+
+        print(f"{val:<15.3f} | {percentile:<20.4f} | {distance_from_ideal:<20.4f}")
 
 
 def check_consensus_outcomes(dag: DAG, consensus_threshold: float = 0.5) -> bool:
@@ -723,7 +761,7 @@ def plot_nis_violin(dag: DAG, faulty_ids: set[int],
             parts[partname].set_linewidth(1.5)
 
     # Add expected median (assuming DOF=2)
-    expected_median = 1.298
+    expected_median = 1.386
 
     ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median')
 
