@@ -66,17 +66,17 @@ def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
     ax.axhline(THRESHOLD, color="red", linestyle="--",
                 linewidth=1.5, label=f"Threshold = {THRESHOLD}")
     cbar = fig.colorbar(scatter, ax=ax)
-    cbar.set_label("Correctness [-]", fontsize=16)
+    cbar.set_label("Correctness [-]", fontsize=20)
 
-    ax.set_xlabel("Normalised Innovation Squared [-]", fontsize=16)
-    ax.set_ylabel("Consensus Score [-]", fontsize=16)
+    ax.set_xlabel("Normalised Innovation Squared [-]", fontsize=20)
+    ax.set_ylabel("Consensus Score [-]", fontsize=20)
     ax.set_xscale('symlog')
 
     plt.tick_params(axis='x', labelsize=16)
     plt.tick_params(axis='y', labelsize=16)
 
     # Adjust legend to handle the transparency gracefully
-    leg = ax.legend(fontsize=16)
+    leg = ax.legend(fontsize=20)
     for lh in leg.legend_handles:
         lh.set_alpha(1)  # type: ignore [union-attr]
 
@@ -371,11 +371,12 @@ def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
     ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median (1.386)')
 
     ax.set_xticks(np.arange(1, len(labels) + 1))
-    ax.set_xticklabels(labels, fontsize=16)
-    ax.set_ylabel("Normalised Innovation Squared [-]", fontsize=16)
+    ax.set_xticklabels(labels, fontsize=20)
+    ax.set_ylabel("Normalised Innovation Squared [-]", fontsize=20)
     ax.set_yscale("symlog")
+    ax.tick_params(axis='y', labelsize=20)
 
-    ax.legend(fontsize=14, loc="upper center")
+    ax.legend(fontsize=16, loc="upper center")
     ax.grid(True, linestyle=":", alpha=0.7)
 
     plt.tight_layout()
@@ -678,11 +679,11 @@ def plot_aggregated_reputation(
         plt.axvline(x=convergence_index, color="black", linestyle="--",\
             linewidth=1, label="Filter Convergence")
 
-    plt.xlabel("Chronological Transaction Index [-]", fontsize=14)
-    plt.ylabel("Reputation Score [-]", fontsize=14)
+    plt.xlabel("Chronological Transaction Index [-]", fontsize=20)
+    plt.ylabel("Reputation Score [-]", fontsize=20)
 
-    plt.tick_params(axis='both', labelsize=12)
-    plt.legend(loc="best", fontsize=12)
+    plt.tick_params(axis='both', labelsize=16)
+    plt.legend(loc="lower right", fontsize=14)
     plt.grid(True, linestyle=":", alpha=0.7)
 
     plt.tight_layout()
@@ -842,10 +843,13 @@ def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     handles = [
         Line2D([0], [0], color='black', lw=2, label='Simulated Satellite Orbits')
     ]
-    ax.legend(handles=handles, loc='upper right', framealpha=1.0, facecolor='white')
+    leg = ax.legend(handles=handles, loc='upper right', framealpha=0.7, facecolor='white',
+                    fontsize=16)
+    leg.set_zorder(10)
 
-    ax.set_xlabel("Longitude [Degrees]", fontsize=12)
-    ax.set_ylabel("Latitude [Degrees]", fontsize=12)
+    ax.set_xlabel("Longitude [Degrees]", fontsize=20)
+    ax.set_ylabel("Latitude [Degrees]", fontsize=20)
+    ax.tick_params(axis='both', labelsize=20)
     # White grid looks better on dark maps
     ax.grid(True, linestyle=":", alpha=0.4, color='white')
 
