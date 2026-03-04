@@ -17,7 +17,8 @@ from accord_demo import run_consensus_demo
 # --- MC Configuration ---
 NUM_RUNS = 10
 NUM_PROCESSES = 4 # Adjust based on your CPU cores
-DATA_DIR = "sim_data/mc_results"
+DATA_DIR = "sim_data\\mc_results"
+MC_RESULTS_PATH = os.path.join(DATA_DIR, "mc_results.npz")
 
 def calculate_kpis(rep_history, faulty_ids, steps):
     """
@@ -39,7 +40,7 @@ def calculate_kpis(rep_history, faulty_ids, steps):
         if detected_at is not None:
             ttds.append(detected_at)
 
-    # False Positive Rate (FPR)
+    # False Positive Rate (FPR) TODO not sure this is right
     for sid in honest_ids:
         history = rep_history[str(sid)]
         if any(rep < threshold for rep in history[int(0.2*steps):]): # Ignore initialization
@@ -65,8 +66,10 @@ def run_single_simulation(run_idx):
     log_file = os.path.join(DATA_DIR, f"run_{run_idx}.log")
 
     # Initialize logger for this process with the unique log file
-
-    logger = get_logger(name=f"ACCORD_MC_{run_idx}", log_file=log_file)
+    # We use the same name "ACCORD" so that all modules using get_logger() 
+    # will get this redirected logger in this subprocess.
+    logger = get_logger(name="ACCORD", log_file=log_file)
+    logger.info("Starting Monte Carlo Run %d", run_idx)
 
     # Create a fresh event loop for this process
     loop = asyncio.new_event_loop()
@@ -88,7 +91,8 @@ def run_single_simulation(run_idx):
         # Note: we disable saving/loading EKF results to ensure each MC run is independent
         # and we pass clear_logs=False to avoid clearing other runs' logs
         _, rep_history, _, faulty_ids = loop.run_until_complete(
-            run_consensus_demo(config, save_ekf_results=False, load_ekf_results=False, clear_logs=False)
+            run_consensus_demo(config, save_ekf_results=False, load_ekf_results=False, 
+                               clear_logs=True, log_file=log_file)
         )
 
         if rep_history is None:
@@ -98,6 +102,8 @@ def run_single_simulation(run_idx):
         return kpis
     except Exception as e:
         print(f"Run {run_idx} failed: {e}")
+        import traceback
+        traceback.print_exc()
         return None
     finally:
         loop.close()
@@ -181,13 +187,29 @@ def plot_mc_results(all_kpis):
 if __name__ == "__main__":
     os.makedirs(DATA_DIR, exist_ok=True)
 
-    start_time = time.time()
-    print(f"Starting Monte Carlo simulation with {NUM_RUNS} runs using {NUM_PROCESSES} processes...")
+    results = None
+    if os.path.exists(MC_RESULTS_PATH):
+        print(f"Attempting to load Monte Carlo results from {MC_RESULTS_PATH}")
+        try:
+            with np.load(MC_RESULTS_PATH, allow_pickle=True) as data:
+                # results was saved as a single object (the list)
+                results = data['results'].tolist()
+                print(f"Successfully loaded {len(results)} MC runs.")
+        except Exception as e:
+            print(f"Failed to load MC results: {e}. Rerunning simulation.")
 
-    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-        results = list(executor.map(run_single_simulation, range(NUM_RUNS)))
+    if results is None:
+        start_time = time.time()
+        print(f"Starting Monte Carlo simulation with {NUM_RUNS} runs using {NUM_PROCESSES} processes...")
 
-    end_time = time.time()
-    print(f"Monte Carlo simulation completed in {end_time - start_time:.2f} seconds.")
+        with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+            results = list(executor.map(run_single_simulation, range(NUM_RUNS)))
+
+        end_time = time.time()
+        print(f"Monte Carlo simulation completed in {end_time - start_time:.2f} seconds.")
+
+        # Save results
+        print(f"Saving Monte Carlo results to {MC_RESULTS_PATH}")
+        np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
 
     plot_mc_results(results)
