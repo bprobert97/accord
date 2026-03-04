@@ -40,7 +40,9 @@ from src.filter import FilterConfig, \
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
 
-logger = get_logger()
+def get_accord_logger() -> None:
+    """Helper to get or initialize the logger."""
+    return get_logger()
 
 # Maximum range for Inter-Satellite Links (ISL) in meters
 ISL_RANGE_METERS = 1000e3  # 1000 km
@@ -53,15 +55,14 @@ EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 
 SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
-def clear_log() -> None:
+def clear_log(log_file_path: str = "app.log") -> None:
     """
     Clear the application log file at the start of the demo.
     """
-    log_file_path = "app.log"
     if os.path.exists(log_file_path):
         with open(log_file_path, 'w', encoding='utf-8') as f:
             f.truncate(0)
-        logger.info("Cleared app.log at the start of accord_demo.py")
+        get_logger().info("Cleared %s at the start of accord_demo.py", log_file_path)
 
 
 def is_in_isl_range(sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
@@ -86,7 +87,8 @@ async def run_consensus_demo(config: FilterConfig,
                              save_ekf_results: bool = True,
                              load_ekf_results: bool = False,
                              ekf_results_path: str = \
-                                "sim_data/ekf_simulation_results.npz") -> \
+                                "sim_data/ekf_simulation_results.npz",
+                             clear_logs: bool = True) -> \
         tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
@@ -98,6 +100,7 @@ async def run_consensus_demo(config: FilterConfig,
     - load_ekf_results: If True, attempts to load EKF simulation results from ekf_results_path.
                         If successful, skips the EKF simulation phase.
     - ekf_results_path: Path to the .npz file for saving/loading EKF results.
+    - clear_logs: If True, clears the app.log file at the start.
 
     Returns:
     - A tuple containing:
@@ -106,7 +109,9 @@ async def run_consensus_demo(config: FilterConfig,
         - The ground truth trajectory history.
         - A set of faulty satellite IDs.
     """
-    clear_log()
+    logger = get_logger()
+    if clear_logs:
+        clear_log()
 
     truth = None
     z_hist = None
@@ -357,6 +362,7 @@ async def run_consensus_demo(config: FilterConfig,
 
 # Run demo
 if __name__ == "__main__":
+    logger = get_logger()
     default_config = FilterConfig(
         N=400,
         steps=1000,
