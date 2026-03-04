@@ -88,7 +88,8 @@ async def run_consensus_demo(config: FilterConfig,
                              load_ekf_results: bool = False,
                              ekf_results_path: str = \
                                 "sim_data/ekf_simulation_results.npz",
-                             clear_logs: bool = True) -> \
+                             clear_logs: bool = True,
+                             log_file: str = "app.log") -> \
         tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
@@ -101,6 +102,7 @@ async def run_consensus_demo(config: FilterConfig,
                         If successful, skips the EKF simulation phase.
     - ekf_results_path: Path to the .npz file for saving/loading EKF results.
     - clear_logs: If True, clears the app.log file at the start.
+    - log_file: The file to write logs to.
 
     Returns:
     - A tuple containing:
@@ -109,9 +111,9 @@ async def run_consensus_demo(config: FilterConfig,
         - The ground truth trajectory history.
         - A set of faulty satellite IDs.
     """
-    logger = get_logger()
+    logger = get_logger(log_file=log_file)
     if clear_logs:
-        clear_log()
+        clear_log(log_file)
 
     truth = None
     z_hist = None
@@ -275,88 +277,96 @@ async def run_consensus_demo(config: FilterConfig,
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
 
-    asyncio.create_task(dag.listen())
+    listen_task = asyncio.create_task(dag.listen())
 
-    # Create one SatelliteNode for each of the N satellites in the simulation.
-    unique_ids = sorted(list(range(config.N)))
-    satellites: dict[int, SatelliteNode] = {
-        sid: SatelliteNode(node_id=sid, queue=queue) for sid in unique_ids
-    }
-    rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
+    try:
+        # Create one SatelliteNode for each of the N satellites in the simulation.
+        unique_ids = sorted(list(range(config.N)))
+        satellites: dict[int, SatelliteNode] = {
+            sid: SatelliteNode(node_id=sid, queue=queue) for sid in unique_ids
+        }
+        rep_history: dict[str, list[float]] = {str(sid): [] for sid in unique_ids}
 
-    # Initialise rep_history with the starting reputation for all satellites.
-    for sid in unique_ids:
-        rep_history[str(sid)].append(satellites[sid].reputation)
-
-    # Group observations by step
-    obs_by_step: dict[int, list[ObservationRecord]] = {i: [] for i in range(config.steps)}
-    for obs in all_obs_records:
-        obs_by_step[obs.step].append(obs)
-
-    for k in range(config.steps):
-        # Update satellite positions at each step
-        for sid, sat in satellites.items():
-            state_vector = truth[k, sid*6:(sid+1)*6]
-            sat.update_position(state_vector)
-
-        transactions_submitted_this_step = {sid: False for sid in unique_ids}
-
-        # Iterate through satellites to check for ISL opportunities
-        for sid, sat in satellites.items():
-            for other_sid, other_sat in satellites.items():
-                if sid == other_sid:
-                    continue
-
-                if is_in_isl_range(sat, other_sat):
-                    # Find the corresponding observation record
-                    obs_to_submit = None
-                    for obs in obs_by_step.get(k, []):
-                        if obs.observer == sid and obs.target == other_sid:
-                            obs_to_submit = obs
-                            break
-
-                    if obs_to_submit:
-                        # --- Inject special satellite behavior ---
-                        if sid % 10 == 1:
-                            obs_to_submit.nis = 0.01
-                            faulty_ids.add(sid)
-                        elif sid % 10 == 2 and config.N >= 7:
-                            obs_to_submit.nis = 50.0
-                            faulty_ids.add(sid)
-                        elif sid % 10 == 3 and config.N >= 10:
-                            faulty_ids.add(sid)
-                            if 200 <= k < 400:
-                                if obs_to_submit.nis > 2.0:
-                                    obs_to_submit.nis = obs_to_submit.nis * 10
-                                else:
-                                    obs_to_submit.nis = obs_to_submit.nis / 10
-
-                        sat.load_sensor_data(obs_to_submit)
-                        logger.info("Satellite %s: submitting transaction \
-                                    for witness of %s.", sid, other_sid)
-                        await sat.submit_transaction(recipient_address=other_sid)
-                        transactions_submitted_this_step[sid] = True
-
-            # If no transaction submitted, reputation decays towards neutral
-            if not transactions_submitted_this_step[sid]:
-                sat.reputation = sat.rep_manager.decay(sat.reputation)
-
-        # Record reputation for all satellites at the end of the step
+        # Initialise rep_history with the starting reputation for all satellites.
         for sid in unique_ids:
-            sat = satellites[sid]
-            rep_history[str(sid)].append(sat.reputation)
+            rep_history[str(sid)].append(satellites[sid].reputation)
 
-     # Save Consensus Simulation results
-    logger.info("Saving EKF simulation results to %s", SIM_RESULTS_PATH)
-    os.makedirs(os.path.dirname(SIM_RESULTS_PATH), exist_ok=True)
-    np.savez_compressed(
-        SIM_RESULTS_PATH,
-        dag_ledger=dag.ledger,  # type: ignore [arg-type]
-        rep_history=rep_history,  # type: ignore [arg-type]
-        truth=truth,
-        faulty_ids=np.array(list(faulty_ids))
-    )
-    logger.info("Simulation results saved successfully.")
+        # Group observations by step
+        obs_by_step: dict[int, list[ObservationRecord]] = {i: [] for i in range(config.steps)}
+        for obs in all_obs_records:
+            obs_by_step[obs.step].append(obs)
+
+        for k in range(config.steps):
+            # Update satellite positions at each step
+            for sid, sat in satellites.items():
+                state_vector = truth[k, sid*6:(sid+1)*6]
+                sat.update_position(state_vector)
+
+            transactions_submitted_this_step = {sid: False for sid in unique_ids}
+
+            # Iterate through satellites to check for ISL opportunities
+            for sid, sat in satellites.items():
+                for other_sid, other_sat in satellites.items():
+                    if sid == other_sid:
+                        continue
+
+                    if is_in_isl_range(sat, other_sat):
+                        # Find the corresponding observation record
+                        obs_to_submit = None
+                        for obs in obs_by_step.get(k, []):
+                            if obs.observer == sid and obs.target == other_sid:
+                                obs_to_submit = obs
+                                break
+
+                        if obs_to_submit:
+                            # --- Inject special satellite behavior ---
+                            if sid % 10 == 1:
+                                obs_to_submit.nis = 0.01
+                                faulty_ids.add(sid)
+                            elif sid % 10 == 2 and config.N >= 7:
+                                obs_to_submit.nis = 50.0
+                                faulty_ids.add(sid)
+                            elif sid % 10 == 3 and config.N >= 10:
+                                faulty_ids.add(sid)
+                                if 200 <= k < 400:
+                                    if obs_to_submit.nis > 2.0:
+                                        obs_to_submit.nis = obs_to_submit.nis * 10
+                                    else:
+                                        obs_to_submit.nis = obs_to_submit.nis / 10
+
+                            sat.load_sensor_data(obs_to_submit)
+                            logger.info("Satellite %s: submitting transaction \
+                                        for witness of %s.", sid, other_sid)
+                            await sat.submit_transaction(recipient_address=other_sid)
+                            transactions_submitted_this_step[sid] = True
+
+                # If no transaction submitted, reputation decays towards neutral
+                if not transactions_submitted_this_step[sid]:
+                    sat.reputation = sat.rep_manager.decay(sat.reputation)
+
+            # Record reputation for all satellites at the end of the step
+            for sid in unique_ids:
+                sat = satellites[sid]
+                rep_history[str(sid)].append(sat.reputation)
+
+        # Save Consensus Simulation results
+        logger.info("Saving EKF simulation results to %s", SIM_RESULTS_PATH)
+        os.makedirs(os.path.dirname(SIM_RESULTS_PATH), exist_ok=True)
+        np.savez_compressed(
+            SIM_RESULTS_PATH,
+            dag_ledger=dag.ledger,  # type: ignore [arg-type]
+            rep_history=rep_history,  # type: ignore [arg-type]
+            truth=truth,
+            faulty_ids=np.array(list(faulty_ids))
+        )
+        logger.info("Simulation results saved successfully.")
+
+    finally:
+        listen_task.cancel()
+        try:
+            await listen_task
+        except asyncio.CancelledError:
+            pass
 
     return dag, rep_history, truth, faulty_ids
 
