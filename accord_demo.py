@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches, too-few-public-methods, no-member
+# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches, too-few-public-methods, no-member, too-many-arguments, too-many-positional-arguments
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -25,6 +25,7 @@ import asyncio
 import math
 import os
 import shutil
+from logging import Logger
 from typing import Optional
 import numpy as np
 from src.plotting import  \
@@ -40,7 +41,7 @@ from src.filter import FilterConfig, \
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
 
-def get_accord_logger() -> None:
+def get_accord_logger() -> Logger:
     """Helper to get or initialize the logger."""
     return get_logger()
 
@@ -89,7 +90,8 @@ async def run_consensus_demo(config: FilterConfig,
                              ekf_results_path: str = \
                                 "sim_data/ekf_simulation_results.npz",
                              clear_logs: bool = True,
-                             log_file: str = "app.log") -> \
+                             log_file: str = "app.log",
+                             save_sim_results: bool = True) -> \
         tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
@@ -103,6 +105,8 @@ async def run_consensus_demo(config: FilterConfig,
     - ekf_results_path: Path to the .npz file for saving/loading EKF results.
     - clear_logs: If True, clears the app.log file at the start.
     - log_file: The file to write logs to.
+    - save_sim_results: If True, saves the final consensus simulation results to
+                        SIM_RESULTS_PATH.
 
     Returns:
     - A tuple containing:
@@ -350,16 +354,17 @@ async def run_consensus_demo(config: FilterConfig,
                 rep_history[str(sid)].append(sat.reputation)
 
         # Save Consensus Simulation results
-        logger.info("Saving EKF simulation results to %s", SIM_RESULTS_PATH)
-        os.makedirs(os.path.dirname(SIM_RESULTS_PATH), exist_ok=True)
-        np.savez_compressed(
-            SIM_RESULTS_PATH,
-            dag_ledger=dag.ledger,  # type: ignore [arg-type]
-            rep_history=rep_history,  # type: ignore [arg-type]
-            truth=truth,
-            faulty_ids=np.array(list(faulty_ids))
-        )
-        logger.info("Simulation results saved successfully.")
+        if save_sim_results:
+            logger.info("Saving EKF simulation results to %s", SIM_RESULTS_PATH)
+            os.makedirs(os.path.dirname(SIM_RESULTS_PATH), exist_ok=True)
+            np.savez_compressed(
+                SIM_RESULTS_PATH,
+                dag_ledger=dag.ledger,  # type: ignore [arg-type]
+                rep_history=rep_history,  # type: ignore [arg-type]
+                truth=truth,
+                faulty_ids=np.array(list(faulty_ids))
+            )
+            logger.info("Simulation results saved successfully.")
 
     finally:
         listen_task.cancel()
@@ -372,7 +377,7 @@ async def run_consensus_demo(config: FilterConfig,
 
 # Run demo
 if __name__ == "__main__":
-    logger = get_logger()
+    accord_logger = get_logger()
     default_config = FilterConfig(
         N=400,
         steps=1000,
@@ -400,7 +405,7 @@ if __name__ == "__main__":
 
     # Attempt to load simulation results if they exist
     if os.path.exists(SIM_RESULTS_PATH):
-        logger.info("Attempting to load simulation results from %s", SIM_RESULTS_PATH)
+        accord_logger.info("Attempting to load simulation results from %s", SIM_RESULTS_PATH)
         try:
             with np.load(SIM_RESULTS_PATH, allow_pickle=True) as simulated_data:
                 # Check if the number of satellites in the saved data matches the current config
@@ -411,15 +416,15 @@ if __name__ == "__main__":
                     REP_HIST = simulated_data['rep_history'].item()
                     TRUTH = simulated_data['truth']
                     FAULTY_IDS = set(simulated_data['faulty_ids'])
-                    logger.info("Successfully loaded Simulation results.")
+                    accord_logger.info("Successfully loaded Simulation results.")
                 else:
-                    logger.warning(
+                    accord_logger.warning(
                         "Loaded config (N=%d) does not match current config (N=%d). "
                         "Rerunning simulation.",
                         saved_N, default_config.N
                     )
         except Exception as e:
-            logger.error("Failed to load simulation results: %s. Rerunning simulation.", e)
+            accord_logger.error("Failed to load simulation results: %s. Rerunning simulation.", e)
 
     # If simulation results were not loaded or loading failed, run the consensus simulation
     if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
@@ -430,7 +435,7 @@ if __name__ == "__main__":
         # Copy the log file to the sim_data directory
         if os.path.exists("app.log"):
             shutil.copy("app.log", os.path.join(DATA_DIR, "app.log"))
-            logger.info("Copied app.log to %s.", DATA_DIR)
+            accord_logger.info("Copied app.log to %s.", DATA_DIR)
 
     # Use the results for plotting
     if FINAL_DAG is not None and FAULTY_IDS is not None:

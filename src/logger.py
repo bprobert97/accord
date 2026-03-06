@@ -36,7 +36,7 @@ def get_logger(name: str = "ACCORD", log_file: Optional[str] = None) -> Logger:
     - A configured Logger instance.
     """
     logger = logging.getLogger(name)
-    
+
     # If no handlers exist, do initial configuration
     if not logger.hasHandlers():
         logger.setLevel(logging.DEBUG)
@@ -60,18 +60,18 @@ def get_logger(name: str = "ACCORD", log_file: Optional[str] = None) -> Logger:
         # Optional: prevent messages from propagating to the root logger
         logger.propagate = False
     elif log_file is not None:
-        # If handlers exist but a specific log_file is requested, 
+        # If handlers exist but a specific log_file is requested,
         # update the FileHandler to point to the new file.
         # This is useful for Monte Carlo runs where we want to redirect the same logger.
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-        
+
         # Remove old file handlers
         for handler in logger.handlers[:]:
             if isinstance(handler, logging.FileHandler):
                 logger.removeHandler(handler)
-        
+
         # Add new file handler
         fh = logging.FileHandler(log_file, mode='w')
         fh.setLevel(logging.DEBUG)
