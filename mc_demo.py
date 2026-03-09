@@ -316,7 +316,7 @@ if __name__ == "__main__":
         try:
             with np.load(MC_RESULTS_PATH, allow_pickle=True) as data:
                 # results was saved as a single object (the list)
-                results = data['results'].tolist()
+                results = list(data['results'])
                 print(f"Successfully loaded {len(results)} MC runs.")
 
             if args.recalculate:
