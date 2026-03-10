@@ -49,6 +49,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 ├── accord_demo.py           # Demonstration of ACCORD
 ├── changelog.md             # Release change log
 ├── LICENSE.MD               # License file
+├── mc_demo.py               # Monte Carlo Simulation of ACCORD
 ├── mypy.ini                 # Mypy configuration
 ├── README.md                # Project overview
 ├── requirements.txt         # List of python package dependencies
@@ -102,3 +103,12 @@ Follow these steps to set up the project in a Python virtual environment:
 To run the ACCORD demo, either:
 * In VSCode, right click `accord_demo.py` and select `Run Python File in Terminal`
 * In a terminal, execute `py accord_demo.py`
+
+To run the Monte Carlo Simulation:
+* In a terminal, run `py mc_demo.py`
+* You can also use the following arguments:
+   * `--num-runs`: The number of Monte Carlo runs you wish to do (default: 10)
+   * `--threshold`: Detection threshold for KPIs (default: 0.4)
+   * `--fpr-offset`: False Palsitive Rate offset percent to ignore initialisation effects of the Extended Kalman Filter (default: 0.2)
+   * `--recalculate`: Recalculate KPIs from saved data stored in `./sim_data/mc_results/mc_results.npz`
+   * Example: `py mc_demo.py --num-runs 10 --threshold 0.2`
