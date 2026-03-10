@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught
+# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught, duplicate-code
 """
 Monte Carlo Simulation for the ACCORD framework.
 """
@@ -179,7 +179,7 @@ def run_single_simulation(run_idx: int,
         sig_r=10.0,
         sig_rdot=0.2,
         q_acc_target=1e-5,
-        q_acc_obs=1e-5,  # pylint: disable=duplicate-code
+        q_acc_obs=1e-5,
         seed=100 + run_idx,
     )
 
