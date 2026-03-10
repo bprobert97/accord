@@ -19,7 +19,7 @@ from accord_demo import run_consensus_demo
 
 
 # --- MC Configuration ---
-NUM_RUNS = 10
+NUM_RUNS = 20
 NUM_PROCESSES = 4
 DATA_DIR = "sim_data\\mc_results"
 MC_RESULTS_PATH = os.path.join(DATA_DIR, "mc_results.npz")
