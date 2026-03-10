@@ -20,7 +20,7 @@ from accord_demo import run_consensus_demo
 
 # --- MC Configuration ---
 NUM_RUNS = 10
-NUM_PROCESSES = 4 # Adjust based on CPU cores
+NUM_PROCESSES = 4
 DATA_DIR = "sim_data\\mc_results"
 MC_RESULTS_PATH = os.path.join(DATA_DIR, "mc_results.npz")
 
@@ -173,8 +173,8 @@ def run_single_simulation(run_idx: int,
     asyncio.set_event_loop(loop)
 
     config = FilterConfig(
-        N=50, # Smaller N for faster MC testing
-        steps=300,
+        N=200,
+        steps=1000,
         dt=60.0,
         sig_r=10.0,
         sig_rdot=0.2,
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float,
                         default=0.4, help="Detection threshold for KPIs")
     parser.add_argument("--fpr-offset", type=float,
-                        default=0.2, help="FPR offset percent (initialization ignore)")
+                        default=0.2, help="FPR offset percent (initialisation ignored)")
     parser.add_argument("--recalculate", action="store_true",
                         help="Recalculate KPIs from saved data")
     args = parser.parse_args()
