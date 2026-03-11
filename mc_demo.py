@@ -3,13 +3,6 @@
 Monte Carlo Simulation for the ACCORD framework.
 """
 import os
-# Limit NumPy to 1 thread per process to prevent over-subscription
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-
 import asyncio
 import time
 import argparse
@@ -22,6 +15,18 @@ import matplotlib.pyplot as plt
 from src.filter import FilterConfig
 from src.logger import get_logger
 from accord_demo import run_consensus_demo
+
+# Limit NumPy to 1 thread per process to prevent over-subscription
+# This is needed for parallel processing using ProcessPoolExecutor.
+# Libraries like NumPy and SciPy automatically use all available
+# CPU cores for matrix operations, so running in parallel without
+# setting these values causes CPU over subscription and causes
+# huge performance degredation.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 
 # --- MC Configuration ---
