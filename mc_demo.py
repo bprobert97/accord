@@ -1,4 +1,4 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught, duplicate-code
+# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught
 """
 Monte Carlo Simulation for the ACCORD framework.
 """
@@ -12,16 +12,15 @@ from typing import Dict, List, Optional, Any
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import matplotlib.pyplot as plt
-from src.filter import FilterConfig
 from src.logger import get_logger
-from accord_demo import run_consensus_demo
+from accord_demo import run_consensus_demo, DEFAULT_CONFIG
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
 # This is needed for parallel processing using ProcessPoolExecutor.
 # Libraries like NumPy and SciPy automatically use all available
 # CPU cores for matrix operations, so running in parallel without
 # setting these values causes CPU over subscription and causes
-# huge performance degredation.
+# huge performance degradation.
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -183,16 +182,7 @@ def run_single_simulation(run_idx: int,
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    config = FilterConfig(
-        N=200,
-        steps=1000,
-        dt=60.0,
-        sig_r=10.0,
-        sig_rdot=0.2,
-        q_acc_target=1e-5,
-        q_acc_obs=1e-5,
-        seed=100 + run_idx,
-    )
+    config = DEFAULT_CONFIG
 
     try:
         # Run the simulation

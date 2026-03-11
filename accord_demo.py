@@ -41,11 +41,8 @@ from src.filter import FilterConfig, \
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
 
-def get_accord_logger() -> Logger:
-    """Helper to get or initialize the logger."""
-    return get_logger()
-
-# Maximum range for Inter-Satellite Links (ISL) in meters
+#------------------
+# Constants
 ISL_RANGE_METERS = 1000e3  # 1000 km
 
 CLUSTER_SIZE = 10
@@ -55,6 +52,24 @@ DATA_FILENAME = "ekf_simulation_results.npz"
 EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 
 SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
+
+DEFAULT_CONFIG = FilterConfig(
+        N=400,
+        steps=1000,
+        dt=60.0,
+        sig_r=10.0,
+        sig_rdot=0.2,
+        q_acc_target=1e-5,
+        q_acc_obs=1e-5,   # kept for signature compatibility
+        seed=42,
+    )
+#------------------
+# Logging functions
+
+def get_accord_logger() -> Logger:
+    """Helper to get or initialize the logger."""
+    return get_logger()
+
 
 def clear_log(log_file_path: str = "app.log") -> None:
     """
@@ -378,16 +393,6 @@ async def run_consensus_demo(config: FilterConfig,
 # Run demo
 if __name__ == "__main__":
     accord_logger = get_logger()
-    default_config = FilterConfig(
-        N=400,
-        steps=1000,
-        dt=60.0,
-        sig_r=10.0,
-        sig_rdot=0.2,
-        q_acc_target=1e-5,
-        q_acc_obs=1e-5,   # kept for signature compatibility
-        seed=42,
-    )
 
     FINAL_DAG: Optional[DAG] = None
     REP_HIST: Optional[dict] = None
@@ -410,7 +415,7 @@ if __name__ == "__main__":
             with np.load(SIM_RESULTS_PATH, allow_pickle=True) as simulated_data:
                 # Check if the number of satellites in the saved data matches the current config
                 saved_N = int(simulated_data['truth'].shape[1] / 6)
-                if saved_N == default_config.N:
+                if saved_N == DEFAULT_CONFIG.N:
                     dag_ledger = simulated_data['dag_ledger'].item()
                     FINAL_DAG = MockDAG(dag_ledger)
                     REP_HIST = simulated_data['rep_history'].item()
@@ -421,7 +426,7 @@ if __name__ == "__main__":
                     accord_logger.warning(
                         "Loaded config (N=%d) does not match current config (N=%d). "
                         "Rerunning simulation.",
-                        saved_N, default_config.N
+                        saved_N, DEFAULT_CONFIG.N
                     )
         except Exception as e:
             accord_logger.error("Failed to load simulation results: %s. Rerunning simulation.", e)
@@ -429,7 +434,7 @@ if __name__ == "__main__":
     # If simulation results were not loaded or loading failed, run the consensus simulation
     if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
         FINAL_DAG, REP_HIST, TRUTH, FAULTY_IDS = asyncio.run(
-            run_consensus_demo(default_config, load_ekf_results=True,
+            run_consensus_demo(DEFAULT_CONFIG, load_ekf_results=True,
             ekf_results_path=EKF_RESULTS_PATH))
 
         # Copy the log file to the sim_data directory
@@ -452,4 +457,4 @@ if __name__ == "__main__":
                                    start_at_full_constellation=False,
                                    convergence_index=CONVERGENCE_IDX)
     if TRUTH is not None and FAULTY_IDS is not None:
-        plot_ground_tracks(TRUTH, default_config.N)
+        plot_ground_tracks(TRUTH, DEFAULT_CONFIG.N)
