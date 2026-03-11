@@ -2,9 +2,15 @@
 """
 Monte Carlo Simulation for the ACCORD framework.
 """
+import os
+# Limit NumPy to 1 thread per process to prevent over-subscription
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import asyncio
-import os
 import time
 import argparse
 import functools
