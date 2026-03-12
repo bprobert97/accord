@@ -327,7 +327,7 @@ with tab3:
                     # but respects the chronological layout (genesis on left)
                     dot.edge(p_hash, tx_hash, dir='back')
 
-        st.graphviz_chart(dot, use_container_width=True)
+        st.graphviz_chart(dot, width='stretch')
     else:
         st.info("Simulation data required to visualise DAG.")
 
