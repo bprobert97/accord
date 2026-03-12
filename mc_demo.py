@@ -183,6 +183,7 @@ def run_single_simulation(run_idx: int,
     asyncio.set_event_loop(loop)
 
     config = DEFAULT_CONFIG
+    config.seed += run_idx
 
     try:
         # Run the simulation
