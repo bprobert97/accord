@@ -89,13 +89,13 @@ Follow these steps to set up the project in a Python virtual environment:
    On Windows:
 
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements_windows.txt
    ```
 
    On macOS/Linux:
 
    ```bash
-   pip install -r requirements_linux.txt
+   pip install -r requirements.txt
    ```
 
 # Usage
