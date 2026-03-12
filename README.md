@@ -100,6 +100,9 @@ Follow these steps to set up the project in a Python virtual environment:
 
 # Usage
 
+Note: if you wish to fork the repository using Git, you will need to have [Git LFS](https://git-lfs.com/) installed in order to commit the large `.npz` data files that the simulations produce, or add the `.npz` files to you `.gitignore`.
+
+## Local Demo
 To run the ACCORD demo, either:
 * In VSCode, right click `accord_demo.py` and select `Run Python File in Terminal`
 * In a terminal, execute `py accord_demo.py`
@@ -112,3 +115,11 @@ To run the Monte Carlo Simulation:
    * `--fpr-offset`: False Palsitive Rate offset percent to ignore initialisation effects of the Extended Kalman Filter (default: 0.2)
    * `--recalculate`: Recalculate KPIs from saved data stored in `./sim_data/mc_results/mc_results.npz`
    * Example: `py mc_demo.py --num-runs 10 --threshold 0.2`
+
+
+## StreamLit App
+The key results from the ACCORD simulations are hosted online at: https://accord-demo.streamlit.app/
+
+If you would like to run strreamlit locally, in your terminal run:
+`streamlit run streamlit_app.py `
+
