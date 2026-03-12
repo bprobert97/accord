@@ -191,7 +191,7 @@ def run_single_simulation(run_idx: int,
         # and we pass clear_logs=False to avoid clearing other runs' logs
         _, rep_history, _, faulty_ids = loop.run_until_complete(
             run_consensus_demo(config, save_ekf_results=False, load_ekf_results=False,
-                               clear_logs=True, log_file=log_file, save_sim_results=False)
+                               clear_logs=False, log_file=log_file, save_sim_results=False)
         )
 
         if rep_history is None:
