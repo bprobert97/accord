@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
+import base64
 import json
 import os
 import re
@@ -29,11 +30,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
+import plotly.graph_objects as go
 from scipy.stats import chi2
 from src.dag import DAG
 from src.reputation import MAX_REPUTATION, ReputationManager
 
 # === Configuration ===
+DATA_DIR = "sim_data"
 FILENAME = "sim_data/app.log"  # your log file path
 THRESHOLD = 0.5                # consensus threshold
 CMAP = "viridis"               # color map for correctness
@@ -690,94 +693,6 @@ def plot_aggregated_reputation(
     plt.show()
 
 
-def plot_nis_violin(dag: DAG, faulty_ids: set[int],
-                    convergence_index: Optional[int] = None) -> None:
-    """
-    Generates a grouped violin plot for NIS values, separating honest and faulty satellites.
-
-    Args:
-        dag (DAG): The DAG object containing transaction data.
-        faulty_ids (set[int]): A set of IDs for faulty satellites.
-        convergence_index (int): Optional index to only plot data
-                                 after filter convergence.
-
-    Returns:
-        None: Displays a matplotlib plot.
-    """
-    honest_nis = []
-    faulty_nis = []
-    start_index = convergence_index if convergence_index is not None else 0
-
-    for _, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            if not hasattr(tx.metadata, "nis"):
-                continue
-
-            try:
-                tx_data = json.loads(tx.tx_data)
-            except Exception:
-                continue
-
-            sid = tx_data.get("observer")
-            nis = getattr(tx.metadata, "nis", None)
-
-            if sid is None or nis is None:
-                continue
-
-            if int(sid) in faulty_ids:
-                faulty_nis.append(nis)
-            else:
-                honest_nis.append(nis)
-
-    if not honest_nis and not faulty_nis:
-        print("No NIS data available to create a violin plot.")
-        return
-
-    honest_nis = honest_nis[start_index:]
-    faulty_nis = faulty_nis[start_index:]
-
-    plot_data = []
-    labels = []
-
-    if honest_nis:
-        plot_data.append(honest_nis)
-        labels.append("Honest Satellites")
-    if faulty_nis:
-        plot_data.append(faulty_nis)
-        labels.append("Faulty Satellites")
-
-    _, ax = plt.subplots(figsize=(10, 6))
-
-    # Create violin plot
-    parts = ax.violinplot(plot_data, showmeans=False, showmedians=True)
-
-    # Color formatting
-    for pc in parts['bodies']: # type: ignore [attr-defined]
-        pc.set_edgecolor('black')
-        pc.set_alpha(0.2)
-
-    for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
-        if partname in parts:
-            parts[partname].set_color('black')
-            parts[partname].set_linewidth(1.5)
-
-    # Add expected median (assuming DOF=2)
-    expected_median = 1.386
-
-    ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median')
-
-    ax.set_xticks(np.arange(1, len(labels) + 1))
-    ax.set_xticklabels(labels, fontsize=16)
-    ax.set_ylabel("Normalised Innovation Squared", fontsize=16)
-    ax.set_yscale("symlog")
-
-    ax.legend(fontsize=14)
-    ax.grid(True, linestyle=":", alpha=0.7)
-
-    plt.tight_layout()
-    plt.show()
-
-
 def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     """
     Plots a 2D ground track map using a static Earth image background.
@@ -854,7 +769,135 @@ def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     ax.grid(True, linestyle=":", alpha=0.4, color='white')
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig(os.path.join(DATA_DIR, "orbit_map.png"))
+
+def plot_ground_tracks_plotly(truth: np.ndarray, n: int) -> go.Figure:
+    """
+    Plots an interactive 2D ground track map using Plotly with an Earth background.
+    
+    Args:
+        truth (np.ndarray): The history of true stacked state vectors.
+        n (int): The number of satellites.
+        
+    Returns:
+        go.Figure: A Plotly figure object.
+    """
+    fig = go.Figure()
+
+    # --- PART 1: Background Image ---
+    img_path = "images/1024px-Land_ocean_ice_2048.jpg"
+    if os.path.exists(img_path):
+        with open(img_path, "rb") as f:
+            encoded_string = base64.b64encode(f.read()).decode()
+        img_source = f"data:image/jpeg;base64,{encoded_string}"
+
+        fig.add_layout_image(
+            {
+                "source": img_source,
+                "xref": "x",
+                "yref": "y",
+                "x": -180,
+                "y": 90,
+                "sizex": 360,
+                "sizey": 180,
+                "sizing": "stretch",
+                "opacity": 0.2,
+                "layer": "below"
+            }
+        )
+
+    # --- PART 2: Data ---
+    for i in range(n):
+        pos_hist = truth[:, i*6:i*6+3]
+
+        # Convert Cartesian X,Y,Z to Lat, Lon
+        r = np.linalg.norm(pos_hist, axis=1)
+        lat = np.degrees(np.arcsin(np.clip(pos_hist[:, 2] / r, -1, 1)))
+        lon = np.degrees(np.arctan2(pos_hist[:, 1], pos_hist[:, 0]))
+
+        # Handle wraparound (insert NaNs)
+        lon_diff = np.abs(np.diff(lon))
+        wrap_idx = np.where(lon_diff > 180)[0]
+        lon_plot = np.insert(lon, wrap_idx + 1, np.nan)
+        lat_plot = np.insert(lat, wrap_idx + 1, np.nan)
+
+        # Track line
+        fig.add_trace(go.Scatter(
+            x=lon_plot, y=lat_plot,
+            mode='lines',
+            line={"width": 1.2, "color": "black"},
+            opacity=0.1,
+            name=f"Sat {i} Track",
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+
+        # Current position
+        fig.add_trace(go.Scatter(
+            x=[lon[-1]], y=[lat[-1]],
+            mode='markers',
+            marker={
+                "size": 10,
+                "color": "black",
+                "line": {"width": 0.5, "color": "white"}
+            },
+            name=f"Sat {i}",
+            text=f"Satellite {i}<br>Lat: {lat[-1]:.2f}<br>Lon: {lon[-1]:.2f}",
+            hoverinfo='text',
+            showlegend=False
+        ))
+
+    # --- PART 3: Custom Legend ---
+    # Add a dummy trace to represent the legend entry
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='lines',
+        line={"width": 2, "color": "black"},
+        name='Simulated Satellite Orbits'
+    ))
+
+    # --- PART 4: Styling ---
+    fig.update_xaxes(
+        range=[-180, 180],
+        title={"text": "Longitude [Degrees]", "font": {"size": 20}},
+        gridcolor='rgba(255,255,255,0.4)',
+        gridwidth=1,
+        zeroline=False,
+        tickfont={"size": 16}
+    )
+    fig.update_yaxes(
+        range=[-90, 90],
+        title={"text": "Latitude [Degrees]", "font": {"size": 20}},
+        gridcolor='rgba(255,255,255,0.4)',
+        gridwidth=1,
+        zeroline=False,
+        tickfont={"size": 16}
+    )
+
+    fig.update_layout(
+        template="plotly_white",
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        margin={"l": 60, "r": 40, "t": 40, "b": 60},
+        height=500,
+        showlegend=True,
+        legend={
+            "x": 0.98, "y": 0.98,
+            "xanchor": "right", "yanchor": "top",
+            "bgcolor": "rgba(255,255,255,0.7)",
+            "bordercolor": "rgba(0,0,0,0.1)",
+            "borderwidth": 1,
+            "font": {"size": 14, "color": "black"}
+        }
+    )
+
+    # Force axis labels and ticks to be black for visibility on white background
+    fig.update_xaxes(showgrid=True, gridcolor='rgba(0,0,0,0.1)', tickfont={"color": "black"},
+                     title_font={"color": "black"})
+    fig.update_yaxes(showgrid=True, gridcolor='rgba(0,0,0,0.1)', tickfont={"color": "black"},
+                     title_font={"color": "black"})
+
+    return fig
 
 def main() -> None:
     """Main function to parse log and generate plots."""
