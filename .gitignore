@@ -13,5 +13,8 @@ app.log
 /venv
 /tests/__pycache__
 .coverage
-/sim_data
 coverage.xml
+/sim_data/*.log
+/sim_data/*.png
+/sim_data/mc_results/*.log
+/sim_data/mc_results/*.png
