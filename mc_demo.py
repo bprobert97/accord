@@ -30,7 +30,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 # --- MC Configuration ---
 NUM_RUNS = 40
-NUM_PROCESSES = 6
+NUM_PROCESSES = 4
 DATA_DIR = "sim_data\\mc_results"
 MC_RESULTS_PATH = os.path.join(DATA_DIR, "mc_results.npz")
 
