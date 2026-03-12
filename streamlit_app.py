@@ -5,7 +5,7 @@ import os
 import plotly.express as px
 import plotly.graph_objects as go
 from graphviz import Digraph
-from mc_demo import recalculate_all_kpis
+from mc_demo import recalculate_all_kpis, NUM_RUNS, NUM_PROCESSES
 from accord_demo import DEFAULT_CONFIG
 from src.plotting import plot_ground_tracks_plotly
 
@@ -129,7 +129,9 @@ with tab0:
         "Range-Rate Noise (sig_rdot)": f"{DEFAULT_CONFIG.sig_rdot} m/s",
         "Process Noise (Target)": DEFAULT_CONFIG.q_acc_target,
         "Process Noise (Observer)": DEFAULT_CONFIG.q_acc_obs,
-        "Random Seed": DEFAULT_CONFIG.seed
+        "Initial Random Seed": DEFAULT_CONFIG.seed,
+        "Number of Monte Carlo Runs": NUM_RUNS,
+        "Number of CPU Cores Used": NUM_PROCESSES
     }
 
     # Split into two columns
