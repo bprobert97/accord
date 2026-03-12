@@ -21,7 +21,7 @@ jobs:
         pip install pytest-cov # Ensure pytest-cov is installed for coverage reporting
     - name: Analyse the code with pylint
       run: |
-        pylint src/ tests/ accord_demo.py
+        pylint src/ tests/ accord_demo.py mc_demo.py
     - name: Run mypy static type checker
       run: |
         mypy .

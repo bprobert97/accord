@@ -20,26 +20,26 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import logging
+from typing import Optional
 from logging import Logger
 
-def get_logger(name: str = "ACCORD", log_file: str = "app.log") -> Logger:
+def get_logger(name: str = "ACCORD", log_file: Optional[str] = None) -> Logger:
     """
     Returns a logger that is safe to use across multiple modules.
-    Configures the logger to overwrite the log file on each run.
+    Configures the logger to write to a file.
 
     Args:
     - name: The name of the logger.
-    - log_file: The file to write logs to.
+    - log_file: The file to write logs to. If None, defaults to "app.log" for new loggers.
 
     Returns:
     - A configured Logger instance.
     """
     logger = logging.getLogger(name)
 
-    # Only configure if no handlers exist
+    # If no handlers exist, do initial configuration
     if not logger.hasHandlers():
         logger.setLevel(logging.DEBUG)
-
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
@@ -50,13 +50,32 @@ def get_logger(name: str = "ACCORD", log_file: str = "app.log") -> Logger:
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
-        # File handler – overwrite file each run
-        fh = logging.FileHandler(log_file, mode='w')
+        # File handler
+        actual_log_file = log_file if log_file else "app.log"
+        fh = logging.FileHandler(actual_log_file, mode='w')
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
         logger.addHandler(fh)
 
         # Optional: prevent messages from propagating to the root logger
         logger.propagate = False
+    elif log_file is not None:
+        # If handlers exist but a specific log_file is requested,
+        # update the FileHandler to point to the new file.
+        # This is useful for Monte Carlo runs where we want to redirect the same logger.
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+
+        # Remove old file handlers
+        for handler in logger.handlers[:]:
+            if isinstance(handler, logging.FileHandler):
+                logger.removeHandler(handler)
+
+        # Add new file handler
+        fh = logging.FileHandler(log_file, mode='w')
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
 
     return logger
