@@ -330,5 +330,3 @@ with tab3:
         st.graphviz_chart(dot, width='stretch')
     else:
         st.info("Simulation data required to visualise DAG.")
-
-# TODO - website, LFS needed for data, emails, governance ofep, metrics check (95% - other useful metric), starplot fix, poster, re-run sim and update saved data (seed wasn't random)
