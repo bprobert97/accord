@@ -176,7 +176,6 @@ def run_single_simulation(run_idx: int,
     # We use the same name "ACCORD" so that all modules using get_logger()
     # will get this redirected logger in this subprocess.
     logger = get_logger(name="ACCORD", log_file=log_file)
-    logger.info("Starting Monte Carlo Run %d", run_idx)
 
     # Create a fresh event loop for this process
     loop = asyncio.new_event_loop()
@@ -184,6 +183,8 @@ def run_single_simulation(run_idx: int,
 
     config = DEFAULT_CONFIG
     config.seed += run_idx
+
+    logger.info("Starting Monte Carlo Run %d with Seed %d", run_idx, config.seed)
 
     try:
         # Run the simulation
