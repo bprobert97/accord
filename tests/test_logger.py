@@ -46,22 +46,22 @@ def test_get_logger_truncation():
     # Clean up before test
     if os.path.exists(log_file):
         os.remove(log_file)
-    
+
     logger_instance = logging.getLogger(logger_name)
     logger_instance.handlers.clear()
 
     try:
         # 1. Initialise logger
         logger = get_logger(name=logger_name, log_file=log_file)
-        
+
         # 2. Write something
         test_msg = "Initial log line"
         logger.info(test_msg)
-        
+
         # Ensure it is flushed
         for handler in logger.handlers:
             handler.flush()
-        
+
         # Verify it's there
         with open(log_file, 'r', encoding='utf-8') as f:
             content = f.read()
