@@ -29,7 +29,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 
 # --- MC Configuration ---
-NUM_RUNS = 20
+NUM_RUNS = 40
 NUM_PROCESSES = 4
 DATA_DIR = "sim_data\\mc_results"
 MC_RESULTS_PATH = os.path.join(DATA_DIR, "mc_results.npz")
@@ -176,7 +176,6 @@ def run_single_simulation(run_idx: int,
     # We use the same name "ACCORD" so that all modules using get_logger()
     # will get this redirected logger in this subprocess.
     logger = get_logger(name="ACCORD", log_file=log_file)
-    logger.info("Starting Monte Carlo Run %d", run_idx)
 
     # Create a fresh event loop for this process
     loop = asyncio.new_event_loop()
@@ -185,13 +184,15 @@ def run_single_simulation(run_idx: int,
     config = DEFAULT_CONFIG
     config.seed += run_idx
 
+    logger.info("Starting Monte Carlo Run %d with Seed %d", run_idx, config.seed)
+
     try:
         # Run the simulation
         # Note: we disable saving/loading EKF results to ensure each MC run is independent
         # and we pass clear_logs=False to avoid clearing other runs' logs
         _, rep_history, _, faulty_ids = loop.run_until_complete(
             run_consensus_demo(config, save_ekf_results=False, load_ekf_results=False,
-                               clear_logs=True, log_file=log_file, save_sim_results=False)
+                               clear_logs=False, log_file=log_file, save_sim_results=False)
         )
 
         if rep_history is None:

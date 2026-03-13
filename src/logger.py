@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import logging
+import os
 from typing import Optional
 from logging import Logger
 
@@ -37,8 +38,8 @@ def get_logger(name: str = "ACCORD", log_file: Optional[str] = None) -> Logger:
     """
     logger = logging.getLogger(name)
 
-    # If no handlers exist, do initial configuration
-    if not logger.hasHandlers():
+    # If no handlers are attached to this logger, do initial configuration
+    if not logger.handlers:
         logger.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -63,6 +64,18 @@ def get_logger(name: str = "ACCORD", log_file: Optional[str] = None) -> Logger:
         # If handlers exist but a specific log_file is requested,
         # update the FileHandler to point to the new file.
         # This is useful for Monte Carlo runs where we want to redirect the same logger.
+
+        # Check if we already have a FileHandler for this exact file
+        target_abs_path = os.path.abspath(log_file)
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                if os.path.abspath(handler.baseFilename) == target_abs_path:
+                    return logger
+
+        # Ensure level is set if we are redirecting
+        if logger.level == logging.NOTSET:
+            logger.setLevel(logging.DEBUG)
+
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
