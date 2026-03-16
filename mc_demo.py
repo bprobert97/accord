@@ -246,15 +246,15 @@ def plot_mc_results(all_kpis: List[Optional[Dict[str, Any]]]) -> None:
     h_mean = np.mean(all_honest_means, axis=0)
     h_std = np.std(all_honest_means, axis=0)
     plt.plot(steps, h_mean, color="green", label="Honest (MC Mean)")
-    plt.fill_between(steps, h_mean - 2*h_std, h_mean + 2*h_std, color="green",
-                     alpha=0.2, label="Honest 95% CI")
+    plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color="green",
+                     alpha=0.2, label="Honest Pop. 1 Std. Dev. Spread")
 
     # Faulty
     f_mean = np.mean(all_faulty_means, axis=0)
     f_std = np.std(all_faulty_means, axis=0)
     plt.plot(steps, f_mean, color="red", label="Faulty (MC Mean)")
-    plt.fill_between(steps, f_mean - 2*f_std, f_mean + 2*f_std, color="red",
-                     alpha=0.2, label="Faulty 95% CI")
+    plt.fill_between(steps, f_mean - f_std, f_mean, f_std, color="red",
+                     alpha=0.2, label="Faulty Pop. 1 Std. Dev. Spread")
 
     plt.axhline(0.5, color="gray", linestyle="--")
     plt.xlabel("Step")
