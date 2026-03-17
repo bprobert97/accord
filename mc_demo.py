@@ -65,9 +65,16 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         A dictionary containing:
             - "avg_ttd": Average Time to Detection for faulty nodes (in steps),
                          or None if none detected.
+            - "worst_ttd": Maximum Time to Detection for any faulty node.
             - "fpr": False Positive Rate (%) among honest nodes.
+            - "recall": Recall (Sensitivity) - percentage of faulty nodes detected.
+            - "precision": Precision - percentage of detected nodes that are actually faulty.
+            - "fnr": False Negative Rate (%) - percentage of faulty nodes not detected.
             - "final_honest_rep": Mean reputation of honest nodes at the final step.
             - "final_faulty_rep": Mean reputation of faulty nodes at the final step.
+            - "honest_spread": Standard deviation of honest node reputations at the final step.
+            - "detection_margin": The gap between honest and faulty final reputations.
+            - "flips": Total number of threshold crossings (stability indicator).
             - "honest_matrix": The processed honest reputation matrix.
             - "faulty_matrix": The processed faulty reputation matrix.
     """
@@ -86,35 +93,65 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
 
     ttds = [] # List to store Time to Detection for each faulty node
     false_positives = 0
+    true_positives = 0
+    total_flips = 0
 
     # Extract final reputations for reporting
     final_honest_reps = honest_matrix[:, -1]
     final_faulty_reps = faulty_matrix[:, -1]
 
-    # Calculate Time to Detection (TTD) for each faulty node
-    # TTD is the first step where reputation drops below the detection_threshold
+    # Calculate Time to Detection (TTD) and Recall/FNR for faulty nodes
+    # TODO what about for after initialisation
     for history in faulty_matrix:
         detected_at = next((i for i, rep in enumerate(history) if rep < detection_threshold), None)
         if detected_at is not None:
             ttds.append(detected_at)
+            true_positives += 1
+
+        # Calculate flips (stability)
+        # TODO what about for after initialisation
+        diff = np.diff((history < detection_threshold).astype(int))
+        total_flips += np.sum(np.abs(diff))
 
     # Calculate False Positive Rate (FPR) among honest nodes
-    # We ignore the first X% of steps to account for initial EKF stabilization
     fpr_start_step = int(fpr_offset_percent * steps)
     for history in honest_matrix:
         # A false positive occurs if an honest node's reputation ever drops below the threshold
         if any(rep < detection_threshold for rep in history[fpr_start_step:]):
             false_positives += 1
 
-    # Normalise FPR and TTD
-    fpr = (false_positives / len(honest_matrix)) * 100 if len(honest_matrix) > 0 else 0
+        # Calculate flips for honest nodes too
+        diff = np.diff((history[fpr_start_step:] < detection_threshold).astype(int))
+        total_flips += np.sum(np.abs(diff))
+
+    # Normalise Metrics
+    num_honest = len(honest_matrix)
+    num_faulty = len(faulty_matrix)
+
+    fpr = (false_positives / num_honest) * 100 if num_honest > 0 else 0
+    recall = (true_positives / num_faulty) * 100 if num_faulty > 0 else 0
+    fnr = 100 - recall
+    precision = (true_positives / (true_positives + false_positives)) * 100 \
+                if (true_positives + false_positives) > 0 else 0
+
     avg_ttd = np.mean(ttds) if ttds else None
+    worst_ttd = np.max(ttds) if ttds else None
+
+    mean_honest = np.mean(final_honest_reps) if num_honest > 0 else 0
+    mean_faulty = np.mean(final_faulty_reps) if num_faulty > 0 else 0
 
     return {
         "avg_ttd": avg_ttd,
+        "worst_ttd": worst_ttd,
         "fpr": fpr,
-        "final_honest_rep": np.mean(final_honest_reps) if len(final_honest_reps) > 0 else 0,
-        "final_faulty_rep": np.mean(final_faulty_reps) if len(final_faulty_reps) > 0 else 0,
+        "recall": recall,
+        "precision": precision,
+        "fnr": fnr,
+        "final_honest_rep": mean_honest,
+        "final_faulty_rep": mean_faulty,
+        "honest_spread": np.std(final_honest_reps) if num_honest > 0 else 0,
+        "detection_margin": mean_honest - mean_faulty,
+        "flips": total_flips,
         "honest_matrix": honest_matrix,
         "faulty_matrix": faulty_matrix
     }
@@ -208,37 +245,36 @@ def run_single_simulation(run_idx: int,
     finally:
         loop.close()
 
-def plot_mc_results(all_kpis: List[Optional[Dict[str, Any]]]) -> None:
+def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
     """
     Aggregate results from all Monte Carlo runs and generate summary plots.
 
-    Generates two plots:
-    1. Reputation history over time with 95% confidence intervals for honest vs. faulty nodes.
+    Generates three plots:
+    1. Reputation history over time with 1 Std. Dev. spread for honest vs. faulty nodes.
     2. Histograms of Time to Detection (TTD) and False Positive Rate (FPR).
+    3. Metrics summary for Recall, Precision, and Stability (Flips).
 
     Args:
-        all_kpis: A list of KPI dictionaries from multiple simulation runs.
+        all_kpis_raw: A list of KPI dictionaries from multiple simulation runs.
     """
     # Filter out failed runs
-    all_kpis = [k for k in all_kpis if k is not None]
+    all_kpis: List[Dict[str, Any]] = [k for k in all_kpis_raw if k is not None]
     if not all_kpis:
         print("No successful runs to plot.")
         return
 
     # 1. Aggregate Reputation Histories
-    # We'll average the honest/faulty averages across runs
-    all_honest_means = []
-    all_faulty_means = []
+    honest_means_list: List[np.ndarray] = []
+    faulty_means_list: List[np.ndarray] = []
 
     for kpi in all_kpis:
-        if kpi is not None:
-            all_honest_means.append(np.mean(kpi["honest_matrix"], axis=0))
-            all_faulty_means.append(np.mean(kpi["faulty_matrix"], axis=0))
+        honest_means_list.append(np.mean(kpi["honest_matrix"], axis=0))
+        faulty_means_list.append(np.mean(kpi["faulty_matrix"], axis=0))
 
-    all_honest_means = np.array(all_honest_means)  # type: ignore [assignment]
-    all_faulty_means = np.array(all_faulty_means)  # type: ignore [assignment]
+    all_honest_means = np.array(honest_means_list)
+    all_faulty_means = np.array(faulty_means_list)
 
-    steps = np.arange(all_honest_means.shape[1])  # type: ignore [attr-defined]
+    steps = np.arange(all_honest_means.shape[1])
 
     plt.figure(figsize=(10, 6))
 
@@ -253,35 +289,48 @@ def plot_mc_results(all_kpis: List[Optional[Dict[str, Any]]]) -> None:
     f_mean = np.mean(all_faulty_means, axis=0)
     f_std = np.std(all_faulty_means, axis=0)
     plt.plot(steps, f_mean, color="red", label="Faulty (MC Mean)")
-    plt.fill_between(steps, f_mean - f_std, f_mean, f_std, color="red",
+    plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color="red",
                      alpha=0.2, label="Faulty Pop. 1 Std. Dev. Spread")
 
     plt.axhline(0.5, color="gray", linestyle="--")
     plt.xlabel("Step")
     plt.ylabel("Reputation")
-    plt.title(f"Monte Carlo Results ({len(all_kpis)} runs)")
+    plt.title(f"Monte Carlo Reputation Trends ({len(all_kpis)} runs)")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.savefig(os.path.join(DATA_DIR, "mc_reputation.png"))
     plt.show()
 
     # 2. Plot KPI Distributions
-    _, axes = plt.subplots(1, 2, figsize=(12, 5))
+    _, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    ttds = [k["avg_ttd"] for k in all_kpis if k is not None and k["avg_ttd"] is not None]
+    # TTD Histogram
+    ttds = [float(k.get("avg_ttd", 0)) for k in all_kpis if k.get("avg_ttd") is not None]
     if ttds:
         axes[0].hist(ttds, bins=10, color='skyblue', edgecolor='black')
         axes[0].set_title("Time to Detection (Steps)")
-        axes[0].axvline(np.mean(ttds), color='red', linestyle='dashed',
+        axes[0].axvline(float(np.mean(ttds)), color='red', linestyle='dashed',
                         label=f'Mean: {np.mean(ttds):.1f}')
         axes[0].legend()
 
-    fprs = [k["fpr"] for k in all_kpis if k is not None]
+    # FPR Histogram
+    fprs = [float(k.get("fpr", 0)) for k in all_kpis]
     axes[1].hist(fprs, bins=10, color='salmon', edgecolor='black')
     axes[1].set_title("False Positive Rate (%)")
-    axes[1].axvline(np.mean(fprs), color='red', linestyle='dashed',
+    axes[1].axvline(float(np.mean(fprs)), color='red', linestyle='dashed',
                     label=f'Mean: {np.mean(fprs):.1f}%')
     axes[1].legend()
+
+    # Recall/Precision Scatter
+    recalls = [float(k.get("recall", 0)) for k in all_kpis]
+    precisions = [float(k.get("precision", 0)) for k in all_kpis]
+    axes[2].scatter(recalls, precisions, color='purple', alpha=0.5)
+    axes[2].set_xlabel("Recall (%)")
+    axes[2].set_ylabel("Precision (%)")
+    axes[2].set_title("Detection Reliability")
+    axes[2].set_xlim(-5, 105)
+    axes[2].set_ylim(-5, 105)
+    axes[2].grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(os.path.join(DATA_DIR, "mc_kpis.png"))
@@ -290,13 +339,27 @@ def plot_mc_results(all_kpis: List[Optional[Dict[str, Any]]]) -> None:
     # Print Summary
     print("--- Monte Carlo Summary ---")
     print(f"Total Runs: {len(all_kpis)}")
+    print(f"Mean Recall: {np.mean(recalls):.2f}%")
+    print(f"Mean Precision: {np.mean(precisions):.2f}%")
+    print(f"Mean FPR: {np.mean(fprs):.2f}%")
+
     if ttds:
-        print(f"Mean Time to Detection: {np.mean(ttds):.2f} steps")
-    print(f"Mean False Positive Rate: {np.mean(fprs):.2f}%")
-    print(f"Avg Final Honest Rep: {np.mean([k['final_honest_rep'] for
-                                            k in all_kpis if k is not None]):.4f}")
-    print(f"Avg Final Faulty Rep: {np.mean([k['final_faulty_rep'] for
-                                            k in all_kpis if k is not None]):.4f}")
+        print(f"Mean TTD: {np.mean(ttds):.2f} steps")
+        worst_ttds = [float(k.get('worst_ttd', 0)) for k in \
+                      all_kpis if k.get('worst_ttd') is not None]
+        if worst_ttds:
+            print(f"Worst-Case TTD: {np.max(worst_ttds):.2f} steps")
+
+    print(f"Avg Detection Margin: {np.mean([float(k.get('detection_margin', 0)) \
+                                            for k in all_kpis]):.4f}")
+    print(f"Avg Honest Spread: {np.mean([float(k.get('honest_spread', 0)) \
+                                         for k in all_kpis]):.4f}")
+    print(f"Avg Stability (Total Flips): {np.mean([float(k.get('flips', 0)) \
+                                                   for k in all_kpis]):.2f}")
+    print(f"Avg Final Honest Rep: {np.mean([float(k.get('final_honest_rep', 0)) \
+                                            for k in all_kpis]):.4f}")
+    print(f"Avg Final Faulty Rep: {np.mean([float(k.get('final_faulty_rep', 0)) \
+                                            for k in all_kpis]):.4f}")
 
 if __name__ == "__main__":
     # e.g. python mc_demo.py --recalculate --threshold 0.3 --fpr-offset 0.1
@@ -322,11 +385,22 @@ if __name__ == "__main__":
                 results = list(data['results'])
                 print(f"Successfully loaded {len(results)} MC runs.")
 
-            if args.recalculate:
-                print(f"Recalculating KPIs with threshold={args.threshold}, \
+            # Check if new keys are missing and auto-trigger recalculate if needed
+            NEEDS_RECALCULATE = args.recalculate
+            if results and not NEEDS_RECALCULATE:
+                sample = next((r for r in results if r is not None), None)
+                if sample and "recall" not in sample:
+                    print("New metrics missing from saved data. Auto-recalculating...")
+                    NEEDS_RECALCULATE = True
+
+            if NEEDS_RECALCULATE:
+                print(f"Calculating KPIs with threshold={args.threshold}, \
                       fpr_offset={args.fpr_offset}")
                 results = recalculate_all_kpis(results, detection_threshold=args.threshold,
                                                fpr_offset_percent=args.fpr_offset)
+                # Save the updated KPIs back to the file
+                print(f"Updating saved results at {MC_RESULTS_PATH}")
+                np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
         except Exception as e:
             print(f"Failed to load MC results: {e}. Rerunning simulation.")
 

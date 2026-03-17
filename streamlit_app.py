@@ -1,3 +1,4 @@
+from typing import List, Dict, Any
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -213,43 +214,107 @@ with tab2:
 
             if st.button("Calculate KPIs"):
                 new_results = recalculate_all_kpis(mc_data, detection_threshold=threshold, fpr_offset_percent=fpr_offset)
-
-                # Filter out failed runs
-                valid_kpis = [k for k in new_results if k is not None]
-                ttds = [k["avg_ttd"] for k in valid_kpis if k["avg_ttd"] is not None]
-                fprs = [k["fpr"] for k in valid_kpis]
-
-                st.metric("Mean TTD", f"{np.mean(ttds):.2f} steps" if ttds else "N/A")
-                st.metric("Mean FPR", f"{np.mean(fprs):.2f}%")
+                valid_kpis: List[Dict[str, Any]] = [k for k in new_results if k is not None]
+                
+                if valid_kpis:
+                    st.subheader("Performance Summary")
+                    
+                    # Core Metrics
+                    ttds = [float(k.get("avg_ttd", 0)) for k in valid_kpis if k.get("avg_ttd") is not None]
+                    worst_ttds = [float(k.get("worst_ttd", 0)) for k in valid_kpis if k.get("worst_ttd") is not None]
+                    fprs = [float(k.get("fpr", 0)) for k in valid_kpis]
+                    recalls = [float(k.get("recall", 0)) for k in valid_kpis]
+                    precisions = [float(k.get("precision", 0)) for k in valid_kpis]
+                    
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Mean Recall", f"{np.mean(recalls):.1f}%")
+                    m2.metric("Mean Precision", f"{np.mean(precisions):.1f}%")
+                    m3.metric("Mean FPR", f"{np.mean(fprs):.1f}%")
+                    
+                    m4, m5 = st.columns(2)
+                    m4.metric("Mean TTD", f"{np.mean(ttds):.1f} steps" if ttds else "N/A")
+                    m5.metric("Worst-Case TTD", f"{np.max(worst_ttds):.1f} steps" if worst_ttds else "N/A")
+                    
+                    st.divider()
+                    st.subheader("System Robustness & Stability")
+                    
+                    margins = [float(k.get("detection_margin", 0)) for k in valid_kpis]
+                    spreads = [float(k.get("honest_spread", 0)) for k in valid_kpis]
+                    flips = [float(k.get("flips", 0)) for k in valid_kpis]
+                    h_reps = [float(k.get("final_honest_rep", 0)) for k in valid_kpis]
+                    f_reps = [float(k.get("final_faulty_rep", 0)) for k in valid_kpis]
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric("Detection Margin", f"{np.mean(margins):.3f}")
+                    c2.metric("Honest Spread (σ)", f"{np.mean(spreads):.3f}")
+                    
+                    c3, c4, c5 = st.columns(3)
+                    c3.metric("Avg Final Honest Rep", f"{np.mean(h_reps):.3f}")
+                    c4.metric("Avg Final Faulty Rep", f"{np.mean(f_reps):.3f}")
+                    c5.metric("Avg Flips (Stability)", f"{np.mean(flips):.1f}")
 
         with col2:
-            # We can't easily get new_results here without state, so let's just do it once
+            # We recalculate to ensure valid_kpis is available for the plots
             new_results = recalculate_all_kpis(mc_data, detection_threshold=threshold, fpr_offset_percent=fpr_offset)
-            valid_kpis = [k for k in new_results if k is not None]
+            valid_kpis_plot: List[Dict[str, Any]] = [k for k in new_results if k is not None]
 
-            all_honest_means = np.array([np.mean(k["honest_matrix"], axis=0) for k in valid_kpis])
-            all_faulty_means = np.array([np.mean(k["faulty_matrix"], axis=0) for k in valid_kpis])
-            steps = np.arange(all_honest_means.shape[1])
+            if valid_kpis_plot:
+                # Plot 1: Reputation Trends
+                all_honest_means = np.array([np.mean(k["honest_matrix"], axis=0) for k in valid_kpis_plot])
+                all_faulty_means = np.array([np.mean(k["faulty_matrix"], axis=0) for k in valid_kpis_plot])
+                steps = np.arange(all_honest_means.shape[1])
 
-            fig_mc = go.Figure()
-            # Honest Mean & CI
-            h_mean = np.mean(all_honest_means, axis=0)
-            h_std = np.std(all_honest_means, axis=0)
-            fig_mc.add_trace(go.Scatter(x=steps, y=h_mean, name="Honest Mean", line=dict(color='green')))
-            fig_mc.add_trace(go.Scatter(x=steps, y=h_mean+2*h_std, fill=None, mode='lines', line_color='rgba(0,255,0,0)', showlegend=False))
-            fig_mc.add_trace(go.Scatter(x=steps, y=h_mean-2*h_std, fill='tonexty', mode='lines', line_color='rgba(0,255,0,0.2)', name="Honest 95% CI"))
+                fig_mc = go.Figure()
+                # Honest Mean & CI
+                h_mean = np.mean(all_honest_means, axis=0)
+                h_std = np.std(all_honest_means, axis=0)
+                fig_mc.add_trace(go.Scatter(x=steps, y=h_mean, name="Honest Mean", line=dict(color='green', width=3)))
+                fig_mc.add_trace(go.Scatter(x=steps, y=h_mean+h_std, fill=None, mode='lines', line_color='rgba(0,255,0,0)', showlegend=False))
+                fig_mc.add_trace(go.Scatter(x=steps, y=h_mean-h_std, fill='tonexty', mode='lines', line_color='rgba(0,255,0,0.1)', name="Honest Pop. Spread (1σ)"))
 
-            # Faulty Mean & CI
-            f_mean = np.mean(all_faulty_means, axis=0)
-            f_std = np.std(all_faulty_means, axis=0)
-            fig_mc.add_trace(go.Scatter(x=steps, y=f_mean, name="Faulty Mean", line=dict(color='red')))
-            fig_mc.add_trace(go.Scatter(x=steps, y=f_mean+2*f_std, fill=None, mode='lines', line_color='rgba(255,0,0,0)', showlegend=False))
-            fig_mc.add_trace(go.Scatter(x=steps, y=f_mean-2*f_std, fill='tonexty', mode='lines', line_color='rgba(255,0,0,0.2)', name="Faulty 95% CI"))
+                # Faulty Mean & CI
+                f_mean = np.mean(all_faulty_means, axis=0)
+                f_std = np.std(all_faulty_means, axis=0)
+                fig_mc.add_trace(go.Scatter(x=steps, y=f_mean, name="Faulty Mean", line=dict(color='red', width=3)))
+                fig_mc.add_trace(go.Scatter(x=steps, y=f_mean+f_std, fill=None, mode='lines', line_color='rgba(255,0,0,0)', showlegend=False))
+                fig_mc.add_trace(go.Scatter(x=steps, y=f_mean-f_std, fill='tonexty', mode='lines', line_color='rgba(255,0,0,0.1)', name="Faulty Pop. Spread (1σ)"))
 
-            fig_mc.update_layout(title="MC Aggregated Reputation", xaxis_title="Step", yaxis_title="Reputation")
-            st.plotly_chart(fig_mc, width='stretch')
+                fig_mc.add_hline(y=threshold, line_dash="dash", line_color="orange", annotation_text=f"Threshold ({threshold})")
+                fig_mc.update_layout(title="Monte Carlo Reputation Trends", xaxis_title="Step", yaxis_title="Reputation", legend=dict(yanchor="bottom", y=0.01, xanchor="right", x=0.99))
+                st.plotly_chart(fig_mc, width='stretch')
+
+                # Plot 2: Distribution Row
+                col_p1, col_p2, col_p3 = st.columns(3)
+                
+                with col_p1:
+                    # Reliability Scatter
+                    recalls = [k.get("recall", 0) for k in valid_kpis]
+                    precisions = [k.get("precision", 0) for k in valid_kpis]
+                    
+                    fig_rel = px.scatter(x=recalls, y=precisions, labels={'x': 'Recall (%)', 'y': 'Precision (%)'},
+                                        title="Reliability (Recall vs Precision)", range_x=[-5, 105], range_y=[-5, 105])
+                    fig_rel.add_vline(x=np.mean(recalls), line_dash="dot", line_color="purple", opacity=0.5)
+                    fig_rel.add_hline(y=np.mean(precisions), line_dash="dot", line_color="purple", opacity=0.5)
+                    st.plotly_chart(fig_rel, width='stretch')
+                
+                with col_p2:
+                    # TTD Histogram
+                    ttds_flat = [k.get("avg_ttd") for k in valid_kpis if k.get("avg_ttd") is not None]
+                    if ttds_flat:
+                        fig_ttd = px.histogram(x=ttds_flat, nbins=15, labels={'x': 'Steps'}, title="Time to Detection Distribution")
+                        st.plotly_chart(fig_ttd, width='stretch')
+                    else:
+                        st.info("No detections occurred.")
+                
+                with col_p3:
+                    # FPR Histogram
+                    fprs_flat = [k.get("fpr", 0) for k in valid_kpis]
+                    fig_fpr = px.histogram(x=fprs_flat, nbins=15, labels={'x': 'FPR (%)'}, title="False Positive Rate Distribution", color_discrete_sequence=['salmon'])
+                    st.plotly_chart(fig_fpr, width='stretch')
+
     else:
         st.info("Please run `python mc_demo.py` to generate Monte Carlo results.")
+
 
 # --- Tab 3: DAG Viewer ---
 with tab3:
