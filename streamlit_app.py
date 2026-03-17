@@ -254,7 +254,7 @@ with tab2:
                     c5.metric("Avg Flips (Stability)", f"{np.mean(flips):.1f}")
 
         with col2:
-            # We recalculate to ensure valid_kpis is available for the plots
+            # We recalculate to ensure valid_kpis_plot is available for the plots
             new_results = recalculate_all_kpis(mc_data, detection_threshold=threshold, fpr_offset_percent=fpr_offset)
             valid_kpis_plot: List[Dict[str, Any]] = [k for k in new_results if k is not None]
 
@@ -288,8 +288,8 @@ with tab2:
                 
                 with col_p1:
                     # Reliability Scatter
-                    recalls = [k.get("recall", 0) for k in valid_kpis]
-                    precisions = [k.get("precision", 0) for k in valid_kpis]
+                    recalls = [k.get("recall", 0) for k in valid_kpis_plot]
+                    precisions = [k.get("precision", 0) for k in valid_kpis_plot]
                     
                     fig_rel = px.scatter(x=recalls, y=precisions, labels={'x': 'Recall (%)', 'y': 'Precision (%)'},
                                         title="Reliability (Recall vs Precision)", range_x=[-5, 105], range_y=[-5, 105])
@@ -299,7 +299,7 @@ with tab2:
                 
                 with col_p2:
                     # TTD Histogram
-                    ttds_flat = [k.get("avg_ttd") for k in valid_kpis if k.get("avg_ttd") is not None]
+                    ttds_flat = [k.get("avg_ttd") for k in valid_kpis_plot if k.get("avg_ttd") is not None]
                     if ttds_flat:
                         fig_ttd = px.histogram(x=ttds_flat, nbins=15, labels={'x': 'Steps'}, title="Time to Detection Distribution")
                         st.plotly_chart(fig_ttd, width='stretch')
@@ -308,7 +308,7 @@ with tab2:
                 
                 with col_p3:
                     # FPR Histogram
-                    fprs_flat = [k.get("fpr", 0) for k in valid_kpis]
+                    fprs_flat = [k.get("fpr", 0) for k in valid_kpis_plot]
                     fig_fpr = px.histogram(x=fprs_flat, nbins=15, labels={'x': 'FPR (%)'}, title="False Positive Rate Distribution", color_discrete_sequence=['salmon'])
                     st.plotly_chart(fig_fpr, width='stretch')
 
