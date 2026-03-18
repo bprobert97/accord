@@ -25,7 +25,7 @@ import base64
 import json
 import os
 import re
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -376,7 +376,7 @@ def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
     ax.set_xticks(np.arange(1, len(labels) + 1))
     ax.set_xticklabels(labels, fontsize=20)
     ax.set_ylabel("Normalised Innovation Squared [-]", fontsize=20)
-    ax.set_yscale("symlog")
+    ax.set_yscale("log")
     ax.tick_params(axis='y', labelsize=20)
 
     ax.legend(fontsize=16, loc="upper center")
@@ -898,6 +898,70 @@ def plot_ground_tracks_plotly(truth: np.ndarray, n: int) -> go.Figure:
                      title_font={"color": "black"})
 
     return fig
+
+def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
+    """
+    Plots the distribution of median NIS values across multiple Monte Carlo runs,
+    separated by honest and faulty populations.
+
+    Args:
+        all_kpis (List[Dict[str, Any]]): A list of KPI dictionaries, each containing
+                                         'honest_nis' and 'faulty_nis' lists.
+    """
+    all_honest_medians = []
+    all_faulty_medians = []
+
+    for kpi in all_kpis:
+        h_nis = kpi.get("honest_nis", [])
+        f_nis = kpi.get("faulty_nis", [])
+
+        if h_nis:
+            all_honest_medians.append(np.median(h_nis))
+        if f_nis:
+            all_faulty_medians.append(np.median(f_nis))
+
+    if not all_honest_medians and not all_faulty_medians:
+        print("No MC NIS data available to plot.")
+        return
+
+    plot_data = []
+    labels = []
+    if all_honest_medians:
+        plot_data.append(all_honest_medians)
+        labels.append("Honest Medians")
+    if all_faulty_medians:
+        plot_data.append(all_faulty_medians)
+        labels.append("Faulty Medians")
+
+    _, ax = plt.subplots(figsize=(10, 6))
+
+    # Create box plot for the medians
+    ax.boxplot(plot_data, label=labels, patch_artist=True,
+               boxprops={"facecolor": 'lightblue', "alpha": 0.5},
+               medianprops={"color": 'black', "linewidth": 2})
+
+    # Reference lines (assuming DOF=2)
+    dof = 2
+    expected_median = chi2.ppf(0.5, df=dof)
+    # chi2_lower = chi2.ppf(0.025, df=dof)
+    # chi2_upper = chi2.ppf(0.975, df=dof)
+
+    ax.axhline(expected_median, color='black', linestyle=':',
+                label=f'Expected Median ({expected_median:.3f})')
+    # ax.axhline(chi2_lower, color='red', linestyle='--', alpha=0.5,
+    #             label='95% Confidence Interval Bounds')
+    # ax.axhline(chi2_upper, color='red', linestyle='--', alpha=0.5)
+
+    ax.set_ylabel("Median NIS per Run [-]", fontsize=20)
+    ax.set_yscale("log")
+    ax.set_xticklabels(labels, fontsize=18)
+    ax.tick_params(axis='y', labelsize=16)
+    ax.grid(True, linestyle=":", alpha=0.7)
+    ax.legend(fontsize=14)
+
+    plt.tight_layout()
+    plt.show()
+
 
 def main() -> None:
     """Main function to parse log and generate plots."""
