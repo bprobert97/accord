@@ -1,8 +1,9 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught
+# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught, duplicate-code
 """
 Monte Carlo Simulation for the ACCORD framework.
 """
 import os
+import json
 import asyncio
 import time
 import argparse
@@ -189,7 +190,6 @@ def run_single_simulation(run_idx: int,
     Returns:
         A dictionary of KPIs if the simulation was successful, otherwise None.
     """
-    import json # Import here for use in subprocess
     # Create a unique log file for this run
     log_file = os.path.join(DATA_DIR, f"run_{run_idx}.log")
 
@@ -231,7 +231,7 @@ def run_single_simulation(run_idx: int,
                     if sid is None or nis is None:
                         continue
 
-                    if int(sid) in faulty_ids:
+                    if faulty_ids is not None and int(sid) in faulty_ids:
                         faulty_nis.append(float(nis))
                     else:
                         honest_nis.append(float(nis))

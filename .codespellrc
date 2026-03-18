@@ -1,3 +1,3 @@
 [codespell]
-skip = ./etc, ./Lib, ./Include, ./Scripts, ./share, pyvenv.cfg, ./.vscode, ./src/__pycache__, ./.mypy_cache, ./__pycache__, app.log, ./venv, requirements.txt, requirements_linux.txt, *.ipynb
+skip = ./etc, ./Lib, ./Include, ./Scripts, ./share, pyvenv.cfg, ./.vscode, ./src/__pycache__, ./.mypy_cache, ./__pycache__, app.log, ./venv, requirements.txt, requirements_windows.txt, *.ipynb
 ignore-words-list = fpr, FPR

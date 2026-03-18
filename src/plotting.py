@@ -936,21 +936,21 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     _, ax = plt.subplots(figsize=(10, 6))
 
     # Create box plot for the medians
-    ax.boxplot(plot_data, labels=labels, patch_artist=True,
-               boxprops=dict(facecolor='lightblue', alpha=0.5),
-               medianprops=dict(color='black', linewidth=2))
+    ax.boxplot(plot_data, label=labels, patch_artist=True,
+               boxprops={"facecolor": 'lightblue', "alpha": 0.5},
+               medianprops={"color": 'black', "linewidth": 2})
 
     # Reference lines (assuming DOF=2)
     dof = 2
     expected_median = chi2.ppf(0.5, df=dof)
-    chi2_lower = chi2.ppf(0.025, df=dof)
-    chi2_upper = chi2.ppf(0.975, df=dof)
+    # chi2_lower = chi2.ppf(0.025, df=dof)
+    # chi2_upper = chi2.ppf(0.975, df=dof)
 
     ax.axhline(expected_median, color='black', linestyle=':',
                 label=f'Expected Median ({expected_median:.3f})')
-    ax.axhline(chi2_lower, color='red', linestyle='--', alpha=0.5,
-                label='95% Confidence Interval Bounds')
-    ax.axhline(chi2_upper, color='red', linestyle='--', alpha=0.5)
+    # ax.axhline(chi2_lower, color='red', linestyle='--', alpha=0.5,
+    #             label='95% Confidence Interval Bounds')
+    # ax.axhline(chi2_upper, color='red', linestyle='--', alpha=0.5)
 
     ax.set_ylabel("Median NIS per Run [-]", fontsize=20)
     ax.set_yscale("log")
