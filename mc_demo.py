@@ -13,6 +13,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import matplotlib.pyplot as plt
 from src.logger import get_logger
+from src.plotting import plot_mc_nis_boxplot
 from accord_demo import run_consensus_demo, DEFAULT_CONFIG
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
@@ -39,14 +40,12 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                    steps: Optional[int] = None,
                    honest_matrix: Optional[np.ndarray] = None,
                    faulty_matrix: Optional[np.ndarray] = None,
+                   honest_nis: Optional[List[float]] = None,
+                   faulty_nis: Optional[List[float]] = None,
                    detection_threshold: float = 0.4,
                    fpr_offset_percent: float = 0.2) -> Dict[str, Any]:
     """
     Calculate Key Performance Indicators (KPIs) for a single MC simulation run.
-
-    This function can be initialised in two ways:
-    1. By providing raw simulation output (rep_history, faulty_ids, steps).
-    2. By providing pre-processed reputation matrices (honest_matrix, faulty_matrix).
 
     Args:
         rep_history: Dictionary mapping satellite IDs to their reputation history.
@@ -56,27 +55,15 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                        of an honest node.
         faulty_matrix: A 2D NumPy array where each row is the reputation history
                        of a faulty node.
+        honest_nis: List of NIS values for transactions from honest satellites.
+        faulty_nis: List of NIS values for transactions from faulty satellites.
         detection_threshold: The reputation value below which a node is considered
                              "detected" as faulty.
         fpr_offset_percent: The fraction of initial steps to ignore when calculating
                             False Positives (to allow for EKF convergence).
 
     Returns:
-        A dictionary containing:
-            - "avg_ttd": Average Time to Detection for faulty nodes (in steps),
-                         or None if none detected.
-            - "worst_ttd": Maximum Time to Detection for any faulty node.
-            - "fpr": False Positive Rate (%) among honest nodes.
-            - "recall": Recall (Sensitivity) - percentage of faulty nodes detected.
-            - "precision": Precision - percentage of detected nodes that are actually faulty.
-            - "fnr": False Negative Rate (%) - percentage of faulty nodes not detected.
-            - "final_honest_rep": Mean reputation of honest nodes at the final step.
-            - "final_faulty_rep": Mean reputation of faulty nodes at the final step.
-            - "honest_spread": Standard deviation of honest node reputations at the final step.
-            - "detection_margin": The gap between honest and faulty final reputations.
-            - "flips": Total number of threshold crossings (stability indicator).
-            - "honest_matrix": The processed honest reputation matrix.
-            - "faulty_matrix": The processed faulty reputation matrix.
+        A dictionary containing KPIs and processed matrices/NIS lists.
     """
     # If matrices aren't provided, convert the raw rep_history dictionary into NumPy matrices
     if honest_matrix is None or faulty_matrix is None:
@@ -101,7 +88,6 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
     final_faulty_reps = faulty_matrix[:, -1]
 
     # Calculate Time to Detection (TTD) and Recall/FNR for faulty nodes
-    # TODO what about for after initialisation
     for history in faulty_matrix:
         detected_at = next((i for i, rep in enumerate(history) if rep < detection_threshold), None)
         if detected_at is not None:
@@ -109,7 +95,6 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
             true_positives += 1
 
         # Calculate flips (stability)
-        # TODO what about for after initialisation
         diff = np.diff((history < detection_threshold).astype(int))
         total_flips += np.sum(np.abs(diff))
 
@@ -153,7 +138,9 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         "detection_margin": mean_honest - mean_faulty,
         "flips": total_flips,
         "honest_matrix": honest_matrix,
-        "faulty_matrix": faulty_matrix
+        "faulty_matrix": faulty_matrix,
+        "honest_nis": honest_nis if honest_nis is not None else [],
+        "faulty_nis": faulty_nis if faulty_nis is not None else []
     }
 
 def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
@@ -162,11 +149,8 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
     """
     Recalculate KPIs for a set of Monte Carlo results using new detection parameters.
 
-    This function iterates through previously saved simulation data and reapplies
-    the KPI logic without needing to re-run the expensive physics/consensus simulations.
-
     Args:
-        all_results: A list of KPI dictionaries (one per MC run) as returned by calculate_kpis.
+        all_results: A list of KPI dictionaries (one per MC run).
         detection_threshold: The new reputation threshold to apply.
         fpr_offset_percent: The new initialization offset percentage to apply.
 
@@ -179,10 +163,12 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
             new_results.append(None)
             continue
 
-        # We reuse the matrices already stored in the previous results
+        # We reuse the matrices and NIS data already stored in the previous results
         new_kpis = calculate_kpis(
             honest_matrix=res["honest_matrix"],
             faulty_matrix=res["faulty_matrix"],
+            honest_nis=res.get("honest_nis"),
+            faulty_nis=res.get("faulty_nis"),
             detection_threshold=detection_threshold,
             fpr_offset_percent=fpr_offset_percent
         )
@@ -195,23 +181,19 @@ def run_single_simulation(run_idx: int,
     """
     Wrapper to run a single simulation iteration within a subprocess.
 
-    This function sets up a unique event loop and logger for the simulation run,
-    executes the consensus demo, and calculates KPIs for the result.
-
     Args:
-        run_idx: Index of the current Monte Carlo run (used for logging and seeding).
+        run_idx: Index of the current Monte Carlo run.
         threshold: Reputation threshold for detection and false positives.
         fpr_offset: Fraction of initial steps to ignore for FPR calculation.
 
     Returns:
         A dictionary of KPIs if the simulation was successful, otherwise None.
     """
+    import json # Import here for use in subprocess
     # Create a unique log file for this run
     log_file = os.path.join(DATA_DIR, f"run_{run_idx}.log")
 
     # Initialise logger for this process with the unique log file
-    # We use the same name "ACCORD" so that all modules using get_logger()
-    # will get this redirected logger in this subprocess.
     logger = get_logger(name="ACCORD", log_file=log_file)
 
     # Create a fresh event loop for this process
@@ -225,17 +207,39 @@ def run_single_simulation(run_idx: int,
 
     try:
         # Run the simulation
-        # Note: we disable saving/loading EKF results to ensure each MC run is independent
-        # and we pass clear_logs=False to avoid clearing other runs' logs
-        _, rep_history, _, faulty_ids = loop.run_until_complete(
+        dag, rep_history, _, faulty_ids = loop.run_until_complete(
             run_consensus_demo(config, save_ekf_results=False, load_ekf_results=False,
                                clear_logs=False, log_file=log_file, save_sim_results=False)
         )
 
-        if rep_history is None:
+        if rep_history is None or dag is None:
             return None
 
+        # Extract NIS data from DAG
+        honest_nis = []
+        faulty_nis = []
+        for _, tx_list in dag.ledger.items():
+            for tx in tx_list:
+                if not hasattr(tx.metadata, "nis"):
+                    continue
+
+                try:
+                    tx_data = json.loads(tx.tx_data)
+                    sid = tx_data.get("observer")
+                    nis = getattr(tx.metadata, "nis")
+
+                    if sid is None or nis is None:
+                        continue
+
+                    if int(sid) in faulty_ids:
+                        faulty_nis.append(float(nis))
+                    else:
+                        honest_nis.append(float(nis))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
         kpis = calculate_kpis(rep_history, faulty_ids, config.steps,
+                              honest_nis=honest_nis, faulty_nis=faulty_nis,
                               detection_threshold=threshold, fpr_offset_percent=fpr_offset)
         return kpis
     except Exception as e:
@@ -295,7 +299,6 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
     plt.axhline(0.5, color="gray", linestyle="--")
     plt.xlabel("Step")
     plt.ylabel("Reputation")
-    plt.title(f"Monte Carlo Reputation Trends ({len(all_kpis)} runs)")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.savefig(os.path.join(DATA_DIR, "mc_reputation.png"))
@@ -360,6 +363,9 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
                                             for k in all_kpis]):.4f}")
     print(f"Avg Final Faulty Rep: {np.mean([float(k.get('final_faulty_rep', 0)) \
                                             for k in all_kpis]):.4f}")
+
+    # 4. NIS Median Distribution
+    plot_mc_nis_boxplot(all_kpis)
 
 if __name__ == "__main__":
     # e.g. python mc_demo.py --recalculate --threshold 0.3 --fpr-offset 0.1
