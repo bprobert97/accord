@@ -25,20 +25,68 @@ st.set_page_config(page_title="ACCORD Dashboard", layout="wide")
 # --- Global Styling ---
 st.markdown("""
     <style>
-    /* Global font size increase */
+    /* Global font size increase with media queries */
     html, body, [class*="st-"] {
         font-size: 1.15rem;
     }
 
+    @media screen and (max-width: 1024px) {
+        html, body, [class*="st-"] { font-size: 1rem; }
+    }
+
+    @media screen and (max-width: 768px) {
+        html, body, [class*="st-"] { font-size: 0.9rem; }
+    }
+
+    /* Force columns to stack vertically on smaller screens to prevent squashing */
+    @media screen and (max-width: 1200px) {
+        [data-testid="stHorizontalBlock"] {
+            flex-direction: column !important;
+        }
+        [data-testid="column"] {
+            width: 100% !important;
+            min-width: 100% !important;
+        }
+    }
+
+    /* Ensure the main content area uses all available width on smaller screens */
+    @media screen and (max-width: 1200px) {
+        .main .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            max-width: 100% !important;
+        }
+    }
+
     /* Headers */
+
     h1 { font-size: 3.5rem !important; }
     h2 { font-size: 2.5rem !important; }
     h3 { font-size: 2rem !important; }
+
+    @media screen and (max-width: 1024px) {
+        h1 { font-size: 2.8rem !important; }
+        h2 { font-size: 2.1rem !important; }
+        h3 { font-size: 1.7rem !important; }
+    }
+
+    @media screen and (max-width: 768px) {
+        h1 { font-size: 2.2rem !important; }
+        h2 { font-size: 1.8rem !important; }
+        h3 { font-size: 1.5rem !important; }
+    }
 
     /* Sidebar */
     [data-testid="stSidebar"] {
         min-width: 350px;
     }
+    @media screen and (max-width: 1200px) {
+        [data-testid="stSidebar"] { min-width: 300px; }
+    }
+    @media screen and (max-width: 768px) {
+        [data-testid="stSidebar"] { min-width: unset; }
+    }
+
     [data-testid="stSidebar"] .stMarkdown p {
         font-size: 1.2rem !important;
     }
@@ -47,6 +95,11 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
         font-size: 1.5rem !important;
         font-weight: bold !important;
+    }
+    @media screen and (max-width: 768px) {
+        .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+            font-size: 1.1rem !important;
+        }
     }
 
     /* Labels and inputs */
@@ -65,6 +118,22 @@ st.markdown("""
     .stButton button {
         font-size: 1.3rem !important;
         padding: 0.5rem 2rem !important;
+    }
+
+    /* Custom Config Display Classes */
+    .config-label {
+        font-size: 1.1rem;
+        margin-bottom: 0px;
+        color: gray;
+    }
+    .config-value {
+        font-size: 2rem;
+        font-weight: bold;
+        margin-top: -5px;
+    }
+    @media screen and (max-width: 768px) {
+        .config-label { font-size: 0.9rem; }
+        .config-value { font-size: 1.5rem; }
     }
     </style>
     """, unsafe_allow_html=True)
@@ -124,8 +193,8 @@ else:
     st.sidebar.warning("MC Data (mc_results.npz) not found.")
 
 # --- Tabs ---
-tab0, tab1, tab2, tab3 = st.tabs(["📋 Configuration", "📊 Results Explorer",
-                                  "📈 Sensitivity Analysis", "🕸️ DAG Viewer"])
+tab0, tab1, tab2, tab3, tab4 = st.tabs(["📋 Configuration", "📊 Results Explorer",
+                                  "📈 Sensitivity Analysis", "🕸️ DAG Viewer", "📚 Resources"])
 
 # --- Tab 0: Configuration ---
 with tab0:
@@ -158,8 +227,8 @@ with tab0:
         """Display a single configuration item with custom styling."""
         st.markdown(f"""
             <div style="margin-bottom: 20px;">
-                <p style="font-size: 18px; margin-bottom: 0px; color: gray;">{item_label}</p>
-                <p style="font-size: 32px; font-weight: bold; margin-top: -5px;">{item_value}</p>
+                <p class="config-label">{item_label}</p>
+                <p class="config-value">{item_value}</p>
             </div>
         """, unsafe_allow_html=True)
 
@@ -176,54 +245,53 @@ with tab1:
     if sim_data:
         st.header("Simulation Analysis")
 
-        col1, col2 = st.columns([1, 1])
+        st.subheader("Satellite Reputation")
+        rep_history = sim_data["rep_history"].item()
+        faulty_ids = sim_data["faulty_ids"]
 
-        with col1:
-            st.subheader("Satellite Reputation")
-            rep_history = sim_data["rep_history"]
-            faulty_ids = sim_data["faulty_ids"]
+        # Convert to DataFrame for Plotly
+        rep_df_list = []
+        for sid, history in rep_history.items():
+            is_faulty = int(sid) in faulty_ids
+            for step, rep in enumerate(history):
+                rep_df_list.append({
+                    "Timestep": step,
+                    "Reputation [-]": rep,
+                    "Satellite": f"Sat {sid}",
+                    "Status": "Faulty" if is_faulty else "Honest"
+                })
+        rep_df = pd.DataFrame(rep_df_list)
 
-            # Convert to DataFrame for Plotly
-            rep_df_list = []
-            for sid, history in rep_history.items():
-                is_faulty = int(sid) in faulty_ids
-                for step, rep in enumerate(history):
-                    rep_df_list.append({
-                        "Timestep": step,
-                        "Reputation [-]": rep,
-                        "Satellite": f"Sat {sid}",
-                        "Status": "Faulty" if is_faulty else "Honest"
-                    })
-            rep_df = pd.DataFrame(rep_df_list)
+        fig_rep = px.line(
+            rep_df, x="Timestep", y="Reputation [-]", color="Satellite",
+            line_dash="Status",
+            color_discrete_sequence=px.colors.qualitative.Safe
+        )
+        fig_rep.add_hline(
+            y=0.5, line_dash="dot", annotation_text="Neutral", line_color="gray"
+        )
+        st.plotly_chart(fig_rep, width="stretch")
 
-            fig_rep = px.line(
-                rep_df, x="Timestep", y="Reputation [-]", color="Satellite",
-                line_dash="Status",
-                color_discrete_sequence=px.colors.qualitative.Safe
+        st.divider()
+
+        st.subheader("Satellite Ground Tracks")
+        if sim_data and "truth" in sim_data:
+            # Calculate number of satellites (each state is 6 elements)
+            num_sats = sim_data["truth"].shape[1] // 6
+            fig_map = plot_ground_tracks_plotly(sim_data["truth"], num_sats)
+            st.plotly_chart(fig_map, width="stretch")
+        elif os.path.exists("sim_data/orbit_map.png"):
+            st.image(
+                "sim_data/orbit_map.png",
+                caption="Satellite Ground Tracks (Static Backup)",
+                width="stretch"
             )
-            fig_rep.add_hline(
-                y=0.5, line_dash="dot", annotation_text="Neutral", line_color="gray"
+        else:
+            st.info(
+                "Showing current positions. For full ground tracks, "
+                "see 'accord_demo.py' outputs."
             )
-            st.plotly_chart(fig_rep, width="stretch")
-
-        with col2:
-            st.subheader("Satellite Ground Tracks")
-            if sim_data and "truth" in sim_data:
-                # Calculate number of satellites (each state is 6 elements)
-                num_sats = sim_data["truth"].shape[1] // 6
-                fig_map = plot_ground_tracks_plotly(sim_data["truth"], num_sats)
-                st.plotly_chart(fig_map, width="stretch")
-            elif os.path.exists("sim_data/orbit_map.png"):
-                st.image(
-                    "sim_data/orbit_map.png",
-                    caption="Satellite Ground Tracks (Static Backup)"
-                )
-            else:
-                st.info(
-                    "Showing current positions. For full ground tracks, "
-                    "see 'accord_demo.py' outputs."
-                )
-                st.warning("Orbit data not found.")
+            st.warning("Orbit data not found.")
     else:
         st.info("Please run `python accord.py` to generate simulation data.")
 
@@ -352,44 +420,43 @@ with tab2:
                 )
                 st.plotly_chart(fig_mc, width="stretch")
 
-                # Plot 2: Distribution Row
-                col_p1, col_p2, col_p3 = st.columns(3)
+                # Plot 2: Distributions in Rows
+                # Reliability Scatter
+                recalls = [k.get("recall", 0) for k in valid_kpis_plot]
+                precisions = [k.get("precision", 0) for k in valid_kpis_plot]
 
-                with col_p1:
-                    # Reliability Scatter
-                    recalls = [k.get("recall", 0) for k in valid_kpis_plot]
-                    precisions = [k.get("precision", 0) for k in valid_kpis_plot]
+                fig_rel = px.scatter(x=recalls, y=precisions, labels={'x': 'Recall (%)',
+                                                                        'y': 'Precision (%)'},
+                                    title="Reliability (Recall vs Precision)",
+                                    range_x=[-5, 105], range_y=[-5, 105])
+                fig_rel.add_vline(x=np.mean(recalls), line_dash="dot",
+                                    line_color="purple", opacity=0.5)
+                fig_rel.add_hline(y=np.mean(precisions), line_dash="dot",
+                                    line_color="purple", opacity=0.5)
+                st.plotly_chart(fig_rel, width="stretch")
 
-                    fig_rel = px.scatter(x=recalls, y=precisions, labels={'x': 'Recall (%)',
-                                                                          'y': 'Precision (%)'},
-                                        title="Reliability (Recall vs Precision)",
-                                        range_x=[-5, 105], range_y=[-5, 105])
-                    fig_rel.add_vline(x=np.mean(recalls), line_dash="dot",
-                                      line_color="purple", opacity=0.5)
-                    fig_rel.add_hline(y=np.mean(precisions), line_dash="dot",
-                                      line_color="purple", opacity=0.5)
-                    st.plotly_chart(fig_rel, width='stretch')
+                st.divider()
 
-                with col_p2:
-                    # TTD Histogram
-                    ttds_flat = [k.get("avg_ttd") for k in valid_kpis_plot \
-                                 if k.get("avg_ttd") is not None]
-                    if ttds_flat:
-                        fig_ttd = px.histogram(x=ttds_flat, nbins=15, labels={'x': 'Steps'},
-                                               title="Time to Detection Distribution")
-                        st.plotly_chart(fig_ttd, width='stretch')
-                    else:
-                        st.info("No detections occurred.")
+                # TTD Histogram
+                ttds_flat = [k.get("avg_ttd") for k in valid_kpis_plot \
+                                if k.get("avg_ttd") is not None]
+                if ttds_flat:
+                    fig_ttd = px.histogram(x=ttds_flat, nbins=15, labels={'x': 'Steps'},
+                                            title="Time to Detection Distribution")
+                    st.plotly_chart(fig_ttd, width="stretch")
+                else:
+                    st.info("No detections occurred.")
 
-                with col_p3:
-                    # FPR Histogram
-                    fprs_flat = [k.get("fpr", 0) for k in valid_kpis_plot]
-                    fig_fpr = px.histogram(
-                        x=fprs_flat, nbins=15, labels={'x': 'FPR (%)'},
-                        title="False Positive Rate Distribution",
-                        color_discrete_sequence=['salmon']
-                    )
-                    st.plotly_chart(fig_fpr, width='stretch')
+                st.divider()
+
+                # FPR Histogram
+                fprs_flat = [k.get("fpr", 0) for k in valid_kpis_plot]
+                fig_fpr = px.histogram(
+                    x=fprs_flat, nbins=15, labels={'x': 'FPR (%)'},
+                    title="False Positive Rate Distribution",
+                    color_discrete_sequence=['salmon']
+                )
+                st.plotly_chart(fig_fpr, width="stretch")
 
     else:
         st.info("Please run `python mc_demo.py` to generate Monte Carlo results.")
@@ -401,7 +468,7 @@ with tab3:
         st.header("DAG Topology")
         st.markdown("Visualising the structure of the Distributed Ledger.")
 
-        ledger = sim_data["dag_ledger"]
+        ledger = sim_data["dag_ledger"].item()
 
         # Flatten ledger into a chronological list of transactions
         all_txs = []
@@ -476,6 +543,43 @@ with tab3:
                     # but respects the chronological layout (genesis on left)
                     dot.edge(p_hash, tx_hash, dir='back')
 
-        st.graphviz_chart(dot, width='stretch')
+        st.graphviz_chart(dot, width="stretch")
     else:
         st.info("Simulation data required to visualise DAG.")
+
+# --- Tab 4: Resources ---
+with tab4:
+    st.header("Project Resources")
+
+    st.subheader("Source Code")
+    st.markdown("""
+    The complete source code for the ACCORD project is available on GitHub.
+
+    [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/bprobert97/accord)
+
+    **License:** GNU General Public License v3.0
+    """)
+
+    st.divider()
+
+    st.subheader("Cite this Work")
+    st.markdown("""
+    If you use this work in your research, please cite it as:
+
+    > B. Probert, bprobert97/accord: v2.2. (Feb. 25, 2026). Python. University of Strathclyde, Glasgow. [DOI: 10.5281/zenodo.18776049](https://doi.org/10.5281/zenodo.18776049)
+    """)
+
+    st.divider()
+
+    st.subheader("Related Publications")
+    st.markdown("""
+    * B. Probert, R. A. Clark, E. Blasch, and M. Macdonald,
+      “Cooperative Orbit Determination for Trusted, Autonomous, and Decentralised Satellite Operations,”
+      in AIAA SCITECH 2026 Forum, in AIAA SciTech Forum. Orlando,
+      Florida: American Institute of Aeronautics and Astronautics, Jan. 2026.
+      [doi: 10.2514/6.2026-0825](https://arc.aiaa.org/doi/10.2514/6.2026-0825)
+    * B. Probert, R. A. Clark, E. Blasch, and M. Macdonald,
+      “A Review of Distributed Ledger Technologies for Satellite Operations,”
+      IEEE Access, vol. 13, pp. 123230–123258, 2025,
+      [doi: 10.1109/ACCESS.2025.3588688](https://ieeexplore.ieee.org/document/11079570)
+    """)
