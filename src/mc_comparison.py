@@ -21,9 +21,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 import os
+from typing import Dict, List, Any
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Dict, List, Any
 
 # Paths
 PATH_100KM = "sim_data/mc_results/mc_results.npz"
@@ -31,6 +31,15 @@ PATH_2000KM = "sim_data/mc_results_2000km/mc_results.npz"
 OUTPUT_DIR = "sim_data/comparison"
 
 def load_results(path: str) -> List[Dict[str, Any]]:
+    """
+    Loads Monte Carlo results from a compressed .npz file.
+
+    Args:
+        path: The file path to the .npz results.
+
+    Returns:
+        A list of result dictionaries, excluding any failed runs (None).
+    """
     if not os.path.exists(path):
         print(f"Warning: File not found at {path}")
         return []
@@ -42,7 +51,7 @@ def load_results(path: str) -> List[Dict[str, Any]]:
         print(f"Error loading {path}: {e}")
         return []
 
-def plot_reputation_comparison(results_100km: List[Dict[str, Any]], 
+def plot_reputation_comparison(results_100km: List[Dict[str, Any]],
                                 results_2000km: List[Dict[str, Any]]) -> None:
     """
     Plots reputation history for both datasets on the same graph.
@@ -64,12 +73,14 @@ def plot_reputation_comparison(results_100km: List[Dict[str, Any]],
         h_mean_100 = np.mean(h_100, axis=0)
         h_std_100 = np.std(h_100, axis=0)
         plt.plot(steps_100, h_mean_100, color="green", label="Honest (100km ISL)")
-        plt.fill_between(steps_100, h_mean_100 - h_std_100, h_mean_100 + h_std_100, color="green", alpha=0.1)
+        plt.fill_between(steps_100, h_mean_100 - h_std_100,
+                         h_mean_100 + h_std_100, color="green", alpha=0.1)
 
         f_mean_100 = np.mean(f_100, axis=0)
         f_std_100 = np.std(f_100, axis=0)
         plt.plot(steps_100, f_mean_100, color="red", label="Faulty (100km ISL)")
-        plt.fill_between(steps_100, f_mean_100 - f_std_100, f_mean_100 + f_std_100, color="red", alpha=0.1)
+        plt.fill_between(steps_100, f_mean_100 - f_std_100,
+                         f_mean_100 + f_std_100, color="red", alpha=0.1)
 
     if results_2000km:
         h_2000, f_2000 = get_aggregated_reps(results_2000km)
@@ -77,13 +88,17 @@ def plot_reputation_comparison(results_100km: List[Dict[str, Any]],
 
         h_mean_2000 = np.mean(h_2000, axis=0)
         h_std_2000 = np.std(h_2000, axis=0)
-        plt.plot(steps_2000, h_mean_2000, color="green", linestyle="--", label="Honest (2000km ISL)")
-        plt.fill_between(steps_2000, h_mean_2000 - h_std_2000, h_mean_2000 + h_std_2000, color="green", alpha=0.1)
+        plt.plot(steps_2000, h_mean_2000, color="green",
+                 linestyle="--", label="Honest (2000km ISL)")
+        plt.fill_between(steps_2000, h_mean_2000 - h_std_2000,
+                         h_mean_2000 + h_std_2000, color="green", alpha=0.1)
 
         f_mean_2000 = np.mean(f_2000, axis=0)
         f_std_2000 = np.std(f_2000, axis=0)
-        plt.plot(steps_2000, f_mean_2000, color="red", linestyle="--", label="Faulty (2000km ISL)")
-        plt.fill_between(steps_2000, f_mean_2000 - f_std_2000, f_mean_2000 + f_std_2000, color="red", alpha=0.1)
+        plt.plot(steps_2000, f_mean_2000, color="red", linestyle="--",
+                 label="Faulty (2000km ISL)")
+        plt.fill_between(steps_2000, f_mean_2000 - f_std_2000,
+                         f_mean_2000 + f_std_2000, color="red", alpha=0.1)
 
     plt.axhline(0.5, color="gray", linestyle=":", label="Neutral")
     plt.xlabel("Timestep [-]", fontsize=14)
@@ -94,7 +109,7 @@ def plot_reputation_comparison(results_100km: List[Dict[str, Any]],
     plt.savefig(os.path.join(OUTPUT_DIR, "reputation_comparison.png"))
     plt.show()
 
-def plot_kpi_comparison(results_100km: List[Dict[str, Any]], 
+def plot_kpi_comparison(results_100km: List[Dict[str, Any]],
                         results_2000km: List[Dict[str, Any]]) -> None:
     """
     Plots a bar chart comparison of key KPIs, including TTD as a percentage of runtime.
@@ -153,7 +168,8 @@ def plot_kpi_comparison(results_100km: List[Dict[str, Any]],
 
         # Reduce gap by setting positions closer and increasing widths
         positions = [1, 1.5]
-        plt.boxplot(data_to_plot, tick_labels=labels_ttd, positions=positions[:len(data_to_plot)], widths=0.35)
+        plt.boxplot(data_to_plot, tick_labels=labels_ttd,
+                    positions=positions[:len(data_to_plot)], widths=0.35)
         plt.xlim(0.5, 2.0)
         plt.ylabel("Time to Detection  [Timesteps]")
         plt.grid(axis='y', alpha=0.3)
@@ -162,6 +178,11 @@ def plot_kpi_comparison(results_100km: List[Dict[str, Any]],
         plt.show()
 
 def main():
+    """
+    Main entry point for the comparison script.
+    Loads results for both 100km and 2000km ISL ranges, generates
+    comparison plots, and prints a summary to the console.
+    """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print("Loading 100km results...")
@@ -180,7 +201,8 @@ def main():
 
     # Also print summary
     def print_summary(label, results):
-        if not results: return
+        if not results:
+            return
         print(f"\n--- {label} Summary ---")
         print(f"Mean Recall: {np.mean([k['recall'] for k in results]):.2f}%")
         print(f"Mean Precision: {np.mean([k['precision'] for k in results]):.2f}%")
@@ -188,7 +210,8 @@ def main():
         ttds = [float(k.get("avg_ttd", 0)) for k in results if k.get("avg_ttd") is not None]
         if ttds:
             print(f"Mean TTD: {np.mean(ttds):.2f} steps")
-        print(f"Avg Detection Margin: {np.mean([k.get('detection_margin', 0) for k in results]):.4f}")
+        print(f"Avg Detection Margin: {np.mean([k.get('detection_margin', 0) \
+                                                for k in results]):.4f}")
 
     print_summary("100km ISL", res_100)
     print_summary("2000km ISL", res_2000)

@@ -40,6 +40,7 @@ If you use this work, please cite it as:
 │   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure
 │   └── filter.py                  # Code for the orbit determination calculations
 │   └── logger.py                  # Code for the app logger
+│   └── mc_comparison.py           # Code for generating comparison plots for different Monte Carlo data sets
 |   └── plotting.py                # Code for plotting simulation results
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
@@ -55,7 +56,6 @@ If you use this work, please cite it as:
 ├── accord_demo.py           # Demonstration of ACCORD
 ├── changelog.md             # Release change log
 ├── LICENSE.MD               # License file
-├── mc_comparison.py         # Code for generating comparison plots for different Monte Carlo data sets
 ├── mc_demo.py               # Monte Carlo Simulation of ACCORD
 ├── mypy.ini                 # Mypy configuration
 ├── README.md                # Project overview
