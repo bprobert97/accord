@@ -13,7 +13,13 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 
 ## Related Publications
 
+* [B. Probert, R. A. Clark, E. Blasch, and M. Macdonald, “Cooperative Orbit Determination for Trusted, Autonomous, and Decentralised Satellite Operations,” in AIAA SCITECH 2026 Forum, in AIAA SciTech Forum. Orlando, Florida: American Institute of Aeronautics and Astronautics, Jan. 2026. doi: 10.2514/6.2026-0825](https://arc.aiaa.org/doi/10.2514/6.2026-0825)
+
 * [B. Probert, R. A. Clark, E. Blasch, and M. Macdonald, “A Review of Distributed Ledger Technologies for Satellite Operations,” IEEE Access, vol. 13, pp. 123230–123258, 2025, doi: 10.1109/ACCESS.2025.3588688](https://ieeexplore.ieee.org/document/11079570)
+
+## Citation
+If you use this work, please cite it as:
+> B. Probert, bprobert97/accord: v2.2. (Feb. 25, 2026). Python. University of Strathclyde, Glasgow. [DOI: 10.5281/zenodo.18776049](https://doi.org/10.5281/zenodo.18776049)
 
 
 # Repository Layout
@@ -34,6 +40,7 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 │   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure
 │   └── filter.py                  # Code for the orbit determination calculations
 │   └── logger.py                  # Code for the app logger
+│   └── mc_comparison.py           # Code for generating comparison plots for different Monte Carlo data sets
 |   └── plotting.py                # Code for plotting simulation results
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
