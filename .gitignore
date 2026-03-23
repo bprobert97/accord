@@ -20,3 +20,4 @@ coverage.xml
 /sim_data/mc_results/*.png
 /sim_data/mc_results_1000km
 /sim_data/mc_results_2000km
+/sim_data/comparison
