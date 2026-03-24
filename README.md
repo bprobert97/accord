@@ -59,8 +59,8 @@ If you use this work, please cite it as:
 ├── mc_demo.py               # Monte Carlo Simulation of ACCORD
 ├── mypy.ini                 # Mypy configuration
 ├── README.md                # Project overview
-├── requirements.txt         # List of python package dependencies
-└── requirements_linux.txt   # List of python package dependencies for Linux and CI
+├── requirements.txt         # List of python package dependencies for Linux and CI
+└── requirements_windows.txt   # List of python package dependencies for Windows
 
 </pre>
 
