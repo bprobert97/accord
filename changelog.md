@@ -4,6 +4,65 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.3] - 2026-03
+
+### Summary
+This release introduces the ability to run Monte Carlo simulations of the PoISE consensus mechanism. The largest test to date is 40 MC runs of random constellations of 400 satellites, which takes roughly 6.5 hours to run when using 4 CPU cores in parallel. This release also adds a new streamlit app for data inspection, hosted at https://accord-demo.streamlit.app/.
+
+### Added
+- Monte carlo simulation ability
+- Streamlit app hosting
+- Monte carlo metrics and the ability to compare runs with different initial conditions
+- Minor updates to figures
+---
+
+## [2.2] - 2026-03
+
+### Summary
+This release makes minor changes related to the calculation and visualisation of the expected and empirical medians of the NIS distributions.
+
+### Added
+- A function to calculate median percentiles, to show how the empircal data varies from the expected theoretical values.
+
+---
+
+## [2.1] - 2026-03
+
+### Summary
+This release makes minor changes ready for submitting this work to the 29th International Conference on Information Fusion in Trondheim.
+
+### Added
+- Box plot, in place of an old violin plot.
+
+---
+
+## [2.0] - 2026-02
+
+### Summary
+This release increases the simulation size to a random constellation of 400 satellites.
+
+### Added
+- Additional plots for constellation mapping.
+- Ability to simulate constellations of up to 400 satellites.
+- Abiliity to configure Inter Satellite Link (ISL) ranges to simulate connectivity changes.
+
+---
+
+## [v1.1] - 2025-12
+
+### Summary
+This release includes minor updates to make the codebase tidier in preparation for the 2026 AIAA SciTech forum.
+
+### Added
+- Test coverage metrics in the CI.
+- Updates to diagrams in the design directory.
+- Normalised reputation to be between 0 and 1 instead of 0 and 100.
+
+### Removed
+- The references directory and files.
+
+---
+
 ## [v1.0] - 2025-11
 
 ### Summary
