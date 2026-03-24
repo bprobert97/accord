@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [2.3] - 2026-03
+## [3.0] - 2026-03
 
 ### Summary
 This release introduces the ability to run Monte Carlo simulations of the PoISE consensus mechanism. The largest test to date is 40 MC runs of random constellations of 400 satellites, which takes roughly 6.5 hours to run when using 4 CPU cores in parallel. This release also adds a new streamlit app for data inspection, hosted at https://accord-demo.streamlit.app/.
