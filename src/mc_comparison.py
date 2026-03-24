@@ -26,8 +26,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Paths
-PATH_100KM = "sim_data/mc_results/mc_results.npz"
-PATH_2000KM = "sim_data/mc_results_2000km/mc_results.npz"
+PATH_A = "sim_data/mc_results/mc_results.npz"
+PATH_B = "sim_data/mc_results_2000km/mc_results.npz"
 OUTPUT_DIR = "sim_data/comparison"
 
 def load_results(path: str) -> List[Dict[str, Any]]:
@@ -51,54 +51,73 @@ def load_results(path: str) -> List[Dict[str, Any]]:
         print(f"Error loading {path}: {e}")
         return []
 
-def plot_reputation_comparison(results_100km: List[Dict[str, Any]],
-                                results_2000km: List[Dict[str, Any]]) -> None:
+def get_aggregated_reps(results: List[Dict[str, Any]]) -> tuple[np.ndarray,
+                                                                np.ndarray]:
+    """
+    Collects aggregated reputations across different satellite populations.
+
+    Args:
+        results: The results to extract aggregated reputation values from.
+
+    Returns:
+        Two arrays: One for the mean reputation values of the honest nodes,
+        and another for the faulty nodes.
+    """
+    honest_means = []
+    faulty_means = []
+    for kpi in results:
+        honest_means.append(np.mean(kpi["honest_matrix"], axis=0))
+        faulty_means.append(np.mean(kpi["faulty_matrix"], axis=0))
+    return np.array(honest_means), np.array(faulty_means)
+
+
+def plot_reputation_comparison(results_a: List[Dict[str, Any]],
+                               results_b: List[Dict[str, Any]]) -> None:
     """
     Plots reputation history for both datasets on the same graph.
+
+    Args:
+        results_a: Dataset A
+        results_b: Dataset B
+
+    Returns:
+        None. Saves MatPlotLib figures in OUTPUT_DIR.
     """
     plt.figure(figsize=(12, 7))
 
-    def get_aggregated_reps(results):
-        honest_means = []
-        faulty_means = []
-        for kpi in results:
-            honest_means.append(np.mean(kpi["honest_matrix"], axis=0))
-            faulty_means.append(np.mean(kpi["faulty_matrix"], axis=0))
-        return np.array(honest_means), np.array(faulty_means)
+    if results_a:
+        h_a, f_a = get_aggregated_reps(results_a)
+        steps_a = np.arange(h_a.shape[1])
 
-    if results_100km:
-        h_100, f_100 = get_aggregated_reps(results_100km)
-        steps_100 = np.arange(h_100.shape[1])
+        h_mean_a = np.mean(h_a, axis=0)
+        h_std_a = np.std(h_a, axis=0)
+        plt.plot(steps_a, h_mean_a, color="green", label="Honest (1000km ISL)")
+        plt.fill_between(steps_a, h_mean_a - h_std_a,
+                         h_mean_a + h_std_a, color="green", alpha=0.1)
 
-        h_mean_100 = np.mean(h_100, axis=0)
-        h_std_100 = np.std(h_100, axis=0)
-        plt.plot(steps_100, h_mean_100, color="green", label="Honest (100km ISL)")
-        plt.fill_between(steps_100, h_mean_100 - h_std_100,
-                         h_mean_100 + h_std_100, color="green", alpha=0.1)
+        f_mean_a = np.mean(f_a, axis=0)
+        f_std_a = np.std(f_a, axis=0)
+        plt.plot(steps_a, f_mean_a, color="red", label="Faulty (1000km ISL)")
+        plt.fill_between(steps_a, f_mean_a - f_std_a,
+                         f_mean_a + f_std_a, color="red", alpha=0.1)
 
-        f_mean_100 = np.mean(f_100, axis=0)
-        f_std_100 = np.std(f_100, axis=0)
-        plt.plot(steps_100, f_mean_100, color="red", label="Faulty (100km ISL)")
-        plt.fill_between(steps_100, f_mean_100 - f_std_100,
-                         f_mean_100 + f_std_100, color="red", alpha=0.1)
+    if results_b:
+        h_b, f_b = get_aggregated_reps(results_b)
+        steps_b = np.arange(h_b.shape[1])
 
-    if results_2000km:
-        h_2000, f_2000 = get_aggregated_reps(results_2000km)
-        steps_2000 = np.arange(h_2000.shape[1])
-
-        h_mean_2000 = np.mean(h_2000, axis=0)
-        h_std_2000 = np.std(h_2000, axis=0)
-        plt.plot(steps_2000, h_mean_2000, color="green",
+        h_mean_b = np.mean(h_b, axis=0)
+        h_std_b = np.std(h_b, axis=0)
+        plt.plot(steps_b, h_mean_b, color="green",
                  linestyle="--", label="Honest (2000km ISL)")
-        plt.fill_between(steps_2000, h_mean_2000 - h_std_2000,
-                         h_mean_2000 + h_std_2000, color="green", alpha=0.1)
+        plt.fill_between(steps_b, h_mean_b - h_std_b,
+                         h_mean_b + h_std_b, color="green", alpha=0.1)
 
-        f_mean_2000 = np.mean(f_2000, axis=0)
-        f_std_2000 = np.std(f_2000, axis=0)
-        plt.plot(steps_2000, f_mean_2000, color="red", linestyle="--",
+        f_mean_b = np.mean(f_b, axis=0)
+        f_std_b = np.std(f_b, axis=0)
+        plt.plot(steps_b, f_mean_b, color="red", linestyle="--",
                  label="Faulty (2000km ISL)")
-        plt.fill_between(steps_2000, f_mean_2000 - f_std_2000,
-                         f_mean_2000 + f_std_2000, color="red", alpha=0.1)
+        plt.fill_between(steps_b, f_mean_b - f_std_b,
+                         f_mean_b + f_std_b, color="red", alpha=0.1)
 
     plt.axhline(0.5, color="gray", linestyle=":", label="Neutral")
     plt.xlabel("Timestep [-]", fontsize=14)
@@ -109,17 +128,25 @@ def plot_reputation_comparison(results_100km: List[Dict[str, Any]],
     plt.savefig(os.path.join(OUTPUT_DIR, "reputation_comparison.png"))
     plt.show()
 
-def plot_kpi_comparison(results_100km: List[Dict[str, Any]],
-                        results_2000km: List[Dict[str, Any]]) -> None:
+
+def plot_kpi_comparison(results_a: List[Dict[str, Any]],
+                        results_b: List[Dict[str, Any]]) -> None:
     """
     Plots a bar chart comparison of key KPIs, including TTD as a percentage of runtime.
+
+    Args:
+        results_a: Dataset A
+        results_b: Dataset B
+
+    Returns:
+        None. Saves MatPlotLib figures in OUTPUT_DIR.
     """
     metrics = ["recall", "precision", "fpr"]
     labels = ["Recall", "Precision", "False Positive Rate", "Normalised TTD"]
 
     # Calculate means for standard metrics
-    means_100 = [np.mean([k[m] for k in results_100km]) for m in metrics]
-    means_2000 = [np.mean([k[m] for k in results_2000km]) for m in metrics]
+    means_a = [np.mean([k[m] for k in results_a]) for m in metrics]
+    means_b = [np.mean([k[m] for k in results_b]) for m in metrics]
 
     # Calculate Normalised TTD (as % of total steps)
     def get_ttd_percent(results):
@@ -130,15 +157,15 @@ def plot_kpi_comparison(results_100km: List[Dict[str, Any]],
                 ttd_pcts.append((k["avg_ttd"] / total_steps) * 100)
         return np.mean(ttd_pcts) if ttd_pcts else 0
 
-    means_100.append(get_ttd_percent(results_100km))
-    means_2000.append(get_ttd_percent(results_2000km))
+    means_a.append(get_ttd_percent(results_a))
+    means_b.append(get_ttd_percent(results_b))
 
     x = np.arange(len(labels))
     width = 0.35
 
     _, ax = plt.subplots(figsize=(12, 6))
-    ax.bar(x - width/2, means_100, width, label='100km ISL', color='skyblue')
-    ax.bar(x + width/2, means_2000, width, label='2000km ISL', color='salmon')
+    ax.bar(x - width/2, means_a, width, label='1000km ISL', color='skyblue')
+    ax.bar(x + width/2, means_b, width, label='2000km ISL', color='salmon')
 
     ax.set_ylabel('Percentage [%]')
     ax.set_xticks(x)
@@ -152,18 +179,18 @@ def plot_kpi_comparison(results_100km: List[Dict[str, Any]],
     plt.show()
 
     # TTD Comparison
-    ttds_100 = [float(k.get("avg_ttd", 0)) for k in results_100km if k.get("avg_ttd") is not None]
-    ttds_2000 = [float(k.get("avg_ttd", 0)) for k in results_2000km if k.get("avg_ttd") is not None]
+    ttds_a = [float(k.get("avg_ttd", 0)) for k in results_a if k.get("avg_ttd") is not None]
+    ttds_b = [float(k.get("avg_ttd", 0)) for k in results_b if k.get("avg_ttd") is not None]
 
-    if ttds_100 or ttds_2000:
+    if ttds_a or ttds_b:
         plt.figure(figsize=(6, 6))
         data_to_plot = []
         labels_ttd = []
-        if ttds_100:
-            data_to_plot.append(ttds_100)
-            labels_ttd.append("100km ISL")
-        if ttds_2000:
-            data_to_plot.append(ttds_2000)
+        if ttds_a:
+            data_to_plot.append(ttds_a)
+            labels_ttd.append("1000km ISL")
+        if ttds_b:
+            data_to_plot.append(ttds_b)
             labels_ttd.append("2000km ISL")
 
         # Reduce gap by setting positions closer and increasing widths
@@ -180,24 +207,27 @@ def plot_kpi_comparison(results_100km: List[Dict[str, Any]],
 def main():
     """
     Main entry point for the comparison script.
-    Loads results for both 100km and 2000km ISL ranges, generates
-    comparison plots, and prints a summary to the console.
+    Loads results generates comparison plots,
+    and prints a summary to the console.
+
+    To run this file in a terminal, execute:
+    python src/mc_comparison.py
     """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    print("Loading 100km results...")
-    res_100 = load_results(PATH_100KM)
+    print("Loading 1000km results...")
+    res_a = load_results(PATH_A)
     print("Loading 2000km results...")
-    res_2000 = load_results(PATH_2000KM)
+    res_b = load_results(PATH_B)
 
-    if not res_100 and not res_2000:
+    if not res_a and not res_b:
         print("No results found to compare.")
         return
 
-    print(f"Comparing {len(res_100)} runs (100km) vs {len(res_2000)} runs (2000km)")
+    print(f"Comparing {len(res_a)} runs (1000km) vs {len(res_b)} runs (2000km)")
 
-    plot_reputation_comparison(res_100, res_2000)
-    plot_kpi_comparison(res_100, res_2000)
+    plot_reputation_comparison(res_a, res_b)
+    plot_kpi_comparison(res_a, res_b)
 
     # Also print summary
     def print_summary(label, results):
@@ -213,8 +243,8 @@ def main():
         print(f"Avg Detection Margin: {np.mean([k.get('detection_margin', 0) \
                                                 for k in results]):.4f}")
 
-    print_summary("100km ISL", res_100)
-    print_summary("2000km ISL", res_2000)
+    print_summary("1000km ISL", res_a)
+    print_summary("2000km ISL", res_b)
 
 if __name__ == "__main__":
     main()
