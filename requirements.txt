@@ -31,6 +31,7 @@ defusedxml==0.7.1
 dill==0.4.0
 executing==2.2.0
 fastjsonschema==2.21.1
+ffmpeg==1.4
 filterpy==1.4.5
 fonttools==4.58.5
 fqdn==1.5.1
