@@ -5,6 +5,8 @@ In ACCORD, satellites use on-board sensors to observe one another and collaborat
 
 This decentralised approach enhances data integrity, trust, and resilience across heterogeneous constellations. As more satellites join the network, ACCORD scales naturally, enabling secure and autonomous satellite operations—even in zero-trust environments.
 
+![Satellite Constellation Animation](images/orbits.gif)
+
 This code is licensed under a GNU General Public License v3.0.
 
 # Current Status
@@ -27,12 +29,12 @@ If you use this work, please cite it as:
 <pre>
 📁 accord/
 │
-├── 📁 .github/workflows/              # GitHub Workflow files
-│   └── main.yml                       # CI configuration for github: Pylint, Mypy and Pytest
+├── 📁 .github/workflows/           # GitHub Workflow files
+│   └── main.yml                     # CI configuration for github: Pylint, Mypy and Pytest
 │
 ├── 📁 design/                      # Design documents, Jupyter notebooks and PlantUML diagrams
 │
-├── 📁 images/                         # Image assets
+├── 📁 images/                      # Image assets
 │
 ├── 📁 src/                        # Main source code
 │   └── __init__.py                # Empty file, for module creation
@@ -46,6 +48,7 @@ If you use this work, please cite it as:
 │   └── satellite_node.py          # Code representing a satellite in the network
 │   └── simulation.py              # Helper functions for generating and converting satellite orbital elements.
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
+│   └── visualise_orbits.py        # Code for generating a gif of truth orbits
 │
 ├── 📁 tests/                     # Unit tests, written with pytest
 |
