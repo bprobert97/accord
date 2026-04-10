@@ -18,15 +18,27 @@ sim -> sat: Create Satellite nodes
 sim -> dag: Initialise DAG with PoISE
 
 == Simulation Loop ==
+/'
+The simulation generates all possible observation records for a
+maximum possible ISL range set at 5000km. This way, the ISL range
+I want to test PoISE against can be set dynamically (up to the
+5000km maximum), but also physically impossible observations
+(such as 2 satellites at opposite sides of the earth seeing each
+other) are not created as this wastes computational effort.
+This is sufficient and efficient for research and testing.
+'/
+
 loop for each timestep k
     sim -> filter: predict() & update(z_hist[k])
     note right: Filter estimates state based on noisy measurements
     filter -->> sim: ObservationRecords (with NIS)
+    note right: Observation records generated for Max ISL for 5000km
 
     sim -> sat: update_position(truth_hist[k])
 
     group In-Range Observation
         sim -> sat: load_sensor_data(ObservationRecord)
+        note right: Only loads observations within specified ISL range
         sat -> dag: submit_transaction(queue)
     end
 end
