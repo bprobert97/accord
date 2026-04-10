@@ -39,6 +39,7 @@ MU_EARTH = 3.986004418e14  # m^3/s^2
 Re = 6378e3
 STATE_DIM = 6 # State vector dimension (position and velocity)
 POS_VEL_DIM = 3 # Position or velocity dimension
+MAX_ISL_RANGE = 5000e3 # Maximum range for ISL observation records (5000km)
 
 # ----------------------- Result Types ---------------------
 @dataclass
@@ -476,6 +477,14 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
 
             xj_idx_slice = slice(STATE_DIM*j, STATE_DIM*j+STATE_DIM)
 
+            # Skip records for satellites further than 5000km apart
+            dist = np.linalg.norm(ekf.x[STATE_DIM*i:STATE_DIM*i+3] -
+                                 ekf.x[STATE_DIM*j:STATE_DIM*j+3])
+            if dist > MAX_ISL_RANGE:
+                # Advance index by 2 as every pair is range and range rate
+                idx += 2
+                continue
+
             yij = y[idx:idx+2]
 
             # Recalculate Ht and Ho for the current pair, this is necessary.
@@ -507,6 +516,7 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
                     step=k, observer=i, target=j, nis=nis, dof=yij.shape[0], time = k*dt
                 )
             )
+            # Advance index by 2 as every pair is range and range rate
             idx += 2
     return obs_records
 
