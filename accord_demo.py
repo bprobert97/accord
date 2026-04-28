@@ -33,7 +33,8 @@ from src.plotting import  \
         plot_nis_boxplot, plot_ground_tracks, \
             calculate_convergence_index, \
                 calculate_nis_convergence_index, \
-                    calculate_median_percentiles
+                    calculate_median_percentiles, \
+                        generate_corner_plot
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
@@ -458,3 +459,4 @@ if __name__ == "__main__":
                                    convergence_index=CONVERGENCE_IDX)
     if TRUTH is not None and FAULTY_IDS is not None:
         plot_ground_tracks(TRUTH, DEFAULT_CONFIG.N)
+    generate_corner_plot()

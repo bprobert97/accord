@@ -1,4 +1,4 @@
-# pylint: disable=too-many-locals, too-many-statements, protected-access, broad-exception-caught, too-many-branches
+# pylint: disable=too-many-locals, too-many-statements, protected-access, broad-exception-caught, too-many-branches, too-many-lines
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -32,6 +32,8 @@ from matplotlib.lines import Line2D
 import numpy as np
 import plotly.graph_objects as go
 from scipy.stats import chi2
+import seaborn as sns
+from src.simulation import generate_random_keplerian_elements
 from src.dag import DAG
 from src.reputation import MAX_REPUTATION, ReputationManager
 
@@ -960,6 +962,69 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     ax.legend(fontsize=14)
 
     plt.tight_layout()
+    plt.show()
+
+def generate_constellation_df(num_sats: int, seed: int) -> pd.DataFrame:
+    """
+    Generates valid Keplerian elements for a LEO constellation using vectorized RNG.
+    Returns a pandas DataFrame formatted for easy plotting.
+    """
+    elements = []
+    for n in range(num_sats):
+        a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=seed + n)
+        elements.append((a, e, i, raan, argp, ta))
+
+    # Create a DataFrame
+    df = pd.DataFrame({
+        'Semi-Major Axis\n[km]': [elem[0] for elem in elements],
+        'Eccentricity\n[-]': [elem[1] for elem in elements],
+        'Inclination\n[deg]': [elem[2] for elem in elements],
+        'RAAN\n[deg]': [elem[3] for elem in elements],
+        'Arg of Perigee\n[deg]': [elem[4] for elem in elements],
+        'True Anomaly\n[deg]': [elem[5] for elem in elements]
+    })
+
+    return df
+
+def generate_corner_plot() -> None:
+    """
+    Generates a corner plot of the Keplerian elements for a LEO constellation.
+    """
+    # 1. Generate the 400 satellites
+    df_sats = generate_constellation_df(num_sats=400, seed=42)
+
+    # 2. Set up the visual style (reduced font_scale slightly for better fit)
+    sns.set_theme(style="ticks", context="paper", font_scale=1.0)
+
+    # 3. Create the Corner Plot
+    # Use 'height' to set the size of EACH subplot (in inches).
+    # height=2.2 makes a nice, large figure that gives the labels breathing room.
+    g = sns.PairGrid(df_sats, corner=True, diag_sharey=False, height=2.2)
+
+    g.map_diag(sns.histplot, kde=True, color="steelblue", element="step")
+    g.map_lower(sns.scatterplot, s=10, alpha=0.5, color="darkblue")
+
+    # 4. Fix overlapping labels and ticks
+    for ax in g.axes.flatten():
+        if ax is not None:
+            # Rotate x-axis numbers by 45 degrees so they don't crash into each other
+            ax.tick_params(axis='x', rotation=45)
+
+            # Explicitly control the axis label font size and padding
+            if ax.get_xlabel():
+                ax.set_xlabel(ax.get_xlabel(), fontsize=10, labelpad=5)
+            if ax.get_ylabel():
+                ax.set_ylabel(ax.get_ylabel(), fontsize=10, labelpad=5)
+
+    # Align labels across the grid to ensure they are even
+    g.figure.align_labels()
+
+    # 5. Force matplotlib to respect the margins
+    # top=0.92 leaves space for the suptitle. wspace/hspace control gaps between plots.
+    plt.subplots_adjust(top=0.92, bottom=0.08, wspace=0.15, hspace=0.15)
+
+    # Save and show
+    plt.savefig("images/orbital_elements_corner_plot.png", dpi=300, bbox_inches='tight')
     plt.show()
 
 
