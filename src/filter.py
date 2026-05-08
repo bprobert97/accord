@@ -54,6 +54,7 @@ class ObservationRecord:
     - target: The ID of the target satellite.
     - nis: The Normalised Innovation Squared value for this observation.
     - dof: The degrees of freedom for the NIS calculation.
+    - vector: A LOS vector used for looking at persistence of excitation.
     """
     step: int
     time: float
@@ -61,6 +62,7 @@ class ObservationRecord:
     target: int
     nis: float
     dof: int
+    vector: List[float] = None
 
 # ----------------------- Dynamics ------------------------
 def two_body_f(x6: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -477,10 +479,15 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
 
             xj_idx_slice = slice(STATE_DIM*j, STATE_DIM*j+STATE_DIM)
 
+            # Get position vectors, rho
+            po = ekf.x[STATE_DIM*i : STATE_DIM*i+3]
+            pt = ekf.x[STATE_DIM*j : STATE_DIM*j+3]
+
+            rho = pt - po
+
             # Skip records for satellites further than 5000km apart
-            dist = np.linalg.norm(ekf.x[STATE_DIM*i:STATE_DIM*i+3] -
-                                 ekf.x[STATE_DIM*j:STATE_DIM*j+3])
-            if dist > MAX_ISL_RANGE:
+            r = np.linalg.norm(rho)
+            if r > MAX_ISL_RANGE:
                 # Advance index by 2 as every pair is range and range rate
                 idx += 2
                 continue
@@ -511,9 +518,14 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
             S_ij_inv = np.linalg.inv(S_ij) # Changed from pinv to inv
             nis = float(yij.T @ S_ij_inv @ yij)
 
+            # Add unit LOS vector. Avoid division by zero.
+            # rhat is an NDArray so use tolist() later to make it json serialisable.
+            rhat = rho / (max(r, 1e-8))
+
             obs_records.append(
                 ObservationRecord(
-                    step=k, observer=i, target=j, nis=nis, dof=yij.shape[0], time = k*dt
+                    step=k, observer=i, target=j, nis=nis, dof=yij.shape[0],
+                    time = k*dt, vector=rhat.tolist()
                 )
             )
             # Advance index by 2 as every pair is range and range rate

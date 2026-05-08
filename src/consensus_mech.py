@@ -22,13 +22,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import json
+import math
 from typing import Optional
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
 from .filter import ObservationRecord
 from .logger import get_logger
-from .reputation import MAX_REPUTATION
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
 
@@ -138,7 +138,11 @@ class ConsensusMechanism():
         return score, new_ema_nis
 
 
-    def calculate_dof_score(self, dof: int) -> float:
+    def calculate_dof_score(self, dof: int,
+                            current_vector: list[float],
+                            previous_vector: Optional[list[float]] = None,
+                            delta_t: Optional[float] = None,
+                            decay_rate: float = 0.05) -> float:
         """
         Estimate a relative accuracy/reward score based on measurement DOF.
         Higher DOF -> higher score (since it reduces OD computational effort).
@@ -146,14 +150,57 @@ class ConsensusMechanism():
 
         Args:
         - dof: Degrees of freedom of the measurement.
+        - current_vector: The current measurement vector (e.g., LOS unit vector).
+        - previous_vector: The previous measurement vector for the same satellite (
+          if available).
+        - delta_t: Time difference between the current and previous measurement
+          (if available).
+        - decay_rate: Rate at which the DOF score decays if the measurement
+          direction changes significantly.
 
         Returns:
-        - DOF score in [0,1]. 0 = low accuracy, 1 = high accuracy.
+        - DOF score 0 = low DOF/ highly redundant, 1+ = high DOF/novelty.
+        - Note: assumed to be bounded in [0,1] where max k is assumed to be 3.
         """
 
-        # Normalise DOF
-        # dof = 1 returns 0.33, dof = 2 returns 0.66, dof of 3 returns 1.0.
-        return min(1.0, dof / self.max_dof)
+        # Calculate base score of (k-1)/2
+        # dof = 1 returns 0, dof = 2 returns 0.5 and dof = 3 returns 1.
+        base_score = (dof - 1) / 2
+        logger.info("BCP1")
+
+        if previous_vector is None or delta_t is None:
+            return base_score
+
+        logger.info("BCP2")
+        # 1. Pure Python calculations for dot product and squared norms
+        dot_prod = 0.0
+        v1_sq_norm = 0.0
+        v2_sq_norm = 0.0
+
+        logger.info("BCP3")
+        for c, p in zip(current_vector, previous_vector):
+            dot_prod += c * p
+            v1_sq_norm += c * c
+            v2_sq_norm += p * p
+
+        logger.info("BCP4")
+        if v1_sq_norm == 0.0 or v2_sq_norm == 0.0:
+            return base_score
+
+        logger.info("BCP5")
+        # 2. Normalize the dot product directly: dot(A,B) / (|A|*|B|)
+        mag_product = math.sqrt(v1_sq_norm * v2_sq_norm)
+        normalized_dot = abs(dot_prod) / mag_product
+
+        logger.info("BCP6")
+        # 3. Use standard math.exp (much faster for scalars than np.exp)
+        time_decay = math.exp(-decay_rate * delta_t)
+
+        logger.info("BCP7")
+        # 4. Calculate final multipliers
+        pe_multiplier = 1.0 - (time_decay * normalized_dot)
+
+        return base_score * pe_multiplier
 
     def calculate_consensus_score(self, correctness: float,
                                   dof_reward: float, reputation: float,
@@ -171,20 +218,12 @@ class ConsensusMechanism():
         Returns:
         - Consensus score in [0,1]. Higher is better.
         """
-        # Normalise reputation
-        rep_norm = min(max(reputation / MAX_REPUTATION, 0.0), 1.0)
-
-        # Normalise each variable relative to its threshold point
         # Min acceptable correctness for consensus = 0.5
-        # Min DOF score = 0.33
+        # Min DOF score = 0
         # Min reputation = 0
 
-        # Relative to baselines
-        d_rel = max(min((dof_reward - (1/3)) / (2/3), 1.0), 0.0)      # [0,1] with baseline at 0
-        r_rel = rep_norm                                            # [0,1] with baseline at 0
-
         # Cooperative DOF–reputation term (no weights, monotonic, bounded)
-        dr_term = (1 - (1 - d_rel) * (1 - r_rel)) ** alpha
+        dr_term = (1 - (1 - dof_reward) * (1 - reputation)) ** alpha
 
         # Combine terms
         consensus = correctness * dr_term
@@ -226,7 +265,10 @@ class ConsensusMechanism():
         # 3) Calculate correctness and consensus scores
         correctness_score, new_ema_nis = self.get_correctness_score(obs_record,
                                                                     mean_nis_per_satellite)
-        dof_score = self.calculate_dof_score(obs_record.dof)
+        print("BCP1 %s", obs_record.vector)
+        # TODO - need to add args and fix. Maybe also make numpy bit for adding LOS vector faster in filter.py
+        # Also need to keep track of previous vectors so I can use EMA of ones before that for previous??
+        dof_score = self.calculate_dof_score(obs_record.dof, obs_record.vector,)
         consensus_score = self.calculate_consensus_score(correctness_score,
                                                          dof_score,
                                                          sat_node.reputation)
