@@ -267,7 +267,7 @@ class ConsensusMechanism():
                                                                     mean_nis_per_satellite)
         print("BCP1 %s", obs_record.vector)
         # TODO - need to add args and fix. Maybe also make numpy bit for adding LOS vector faster in filter.py
-        # Also need to keep track of previous vectors so I can use EMA of ones before that for previous??
+        # Also need to keep track of previous vector for my maths. might need to kepe track of this in satellite node. just current and previous vector.
         dof_score = self.calculate_dof_score(obs_record.dof, obs_record.vector,)
         consensus_score = self.calculate_consensus_score(correctness_score,
                                                          dof_score,
