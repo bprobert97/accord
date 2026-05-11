@@ -1,4 +1,4 @@
-# pylint: disable=too-many-return-statements too-many-branches too-many-arguments too-many-positional-arguments
+# pylint: disable=too-many-return-statements too-many-branches too-many-arguments too-many-positional-arguments, too-many-locals
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -166,37 +166,30 @@ class ConsensusMechanism():
         # Calculate base score of (k-1)/2
         # dof = 1 returns 0, dof = 2 returns 0.5 and dof = 3 returns 1.
         base_score = (dof - 1) / 2
-        logger.info("BCP1")
 
         if previous_vector is None or delta_t is None:
             return base_score
 
-        logger.info("BCP2")
         # 1. Pure Python calculations for dot product and squared norms
         dot_prod = 0.0
         v1_sq_norm = 0.0
         v2_sq_norm = 0.0
 
-        logger.info("BCP3")
         for c, p in zip(current_vector, previous_vector):
             dot_prod += c * p
             v1_sq_norm += c * c
             v2_sq_norm += p * p
 
-        logger.info("BCP4")
         if v1_sq_norm == 0.0 or v2_sq_norm == 0.0:
             return base_score
 
-        logger.info("BCP5")
-        # 2. Normalize the dot product directly: dot(A,B) / (|A|*|B|)
+        # 2. Normalise the dot product directly: dot(A,B) / (|A|*|B|)
         mag_product = math.sqrt(v1_sq_norm * v2_sq_norm)
         normalized_dot = abs(dot_prod) / mag_product
 
-        logger.info("BCP6")
         # 3. Use standard math.exp (much faster for scalars than np.exp)
         time_decay = math.exp(-decay_rate * delta_t)
 
-        logger.info("BCP7")
         # 4. Calculate final multipliers
         pe_multiplier = 1.0 - (time_decay * normalized_dot)
 
@@ -236,7 +229,7 @@ class ConsensusMechanism():
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
                                             transaction: Transaction,
-                                            mean_nis_per_satellite: dict[int, float]
+                                            mean_nis_per_satellite: dict[int, float],
                                             ) -> tuple[bool, Optional[float]]:
         """
         Returns a bool of if consensus has been reached, and the new EMA NIS for the satellite.
@@ -262,13 +255,37 @@ class ConsensusMechanism():
             logger.info("Satellite reputation unchanged at %.2f", sat_node.reputation)
             return False, new_ema_nis
 
-        # 3) Calculate correctness and consensus scores
+        # 3) Calculate various PoISE scores
+        # 3a) Calculate correctness score
         correctness_score, new_ema_nis = self.get_correctness_score(obs_record,
                                                                     mean_nis_per_satellite)
-        print("BCP1 %s", obs_record.vector)
-        # TODO - need to add args and fix. Maybe also make numpy bit for adding LOS vector faster in filter.py
-        # Also need to keep track of previous vector for my maths. might need to kepe track of this in satellite node. just current and previous vector.
-        dof_score = self.calculate_dof_score(obs_record.dof, obs_record.vector,)
+
+        # 3b) Calculate DOF-based reward score, using the current and previous measurement vectors
+        observer_id = obs_record.observer
+        target_id = obs_record.target
+        current_vector = obs_record.vector
+        current_time = obs_record.time
+
+        previous_vector = None
+        delta_t = None
+        cache_key = (observer_id, target_id)
+
+        if cache_key in dag.vector_history_cache:
+            prev_data = dag.vector_history_cache[cache_key]
+            previous_vector = prev_data['vector']
+            delta_t = current_time - prev_data['timestamp']
+
+        dof_score = self.calculate_dof_score(obs_record.dof, current_vector,
+                                             previous_vector, delta_t,)
+
+        # Update the history cache on the DAG for this observer-target pair
+        if current_vector is not None:
+            dag.vector_history_cache[cache_key] = {
+                'vector': current_vector,
+                'time': current_time
+            }
+
+        # 3c) Calculate consensus score
         consensus_score = self.calculate_consensus_score(correctness_score,
                                                          dof_score,
                                                          sat_node.reputation)

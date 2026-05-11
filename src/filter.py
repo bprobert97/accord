@@ -62,7 +62,7 @@ class ObservationRecord:
     target: int
     nis: float
     dof: int
-    vector: List[float] = None
+    vector: List[float]
 
 # ----------------------- Dynamics ------------------------
 def two_body_f(x6: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -520,7 +520,7 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
 
             # Add unit LOS vector. Avoid division by zero.
             # rhat is an NDArray so use tolist() later to make it json serialisable.
-            rhat = rho / (max(r, 1e-8))
+            rhat = rho / (max(r, 1e-8))  # type: ignore [call-overload]
 
             obs_records.append(
                 ObservationRecord(
