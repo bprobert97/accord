@@ -68,7 +68,7 @@ DEFAULT_CONFIG = FilterConfig(
 # Logging functions
 
 def get_accord_logger() -> Logger:
-    """Helper to get or initialize the logger."""
+    """Helper to get or initialise the logger."""
     return get_logger()
 
 
