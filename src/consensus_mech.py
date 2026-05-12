@@ -1,4 +1,4 @@
-# pylint: disable=too-many-return-statements too-many-branches too-many-arguments too-many-positional-arguments, too-many-locals
+# pylint: disable=too-many-return-statements too-many-branches too-many-arguments too-many-positional-arguments, too-many-locals, too-many-statements
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -23,7 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 import math
-from typing import Optional
+from typing import List, Optional
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
@@ -137,12 +137,35 @@ class ConsensusMechanism():
 
         return score, new_ema_nis
 
+    def calc_normalised_dot(self, curr: List[float], prev: List[float]) -> float:
+        """
+        Calculates the normalised dot product between two vectors.
+
+        Args:
+        - curr: The current vector.
+        - prev: The previous vector.
+
+        Returns:
+        - A float representing the normalised dot product, which indicates
+          the change in direction of the vector.
+        """
+        dot_prod = sum(c * p for c, p in zip(curr, prev))
+        v1_sq_norm = sum(c * c for c in curr)
+        v2_sq_norm = sum(p * p for p in prev)
+
+        if v1_sq_norm == 0.0 or v2_sq_norm == 0.0:
+            return 1.0 # Fully redundant data
+
+        return abs(dot_prod) / math.sqrt(v1_sq_norm * v2_sq_norm)
 
     def calculate_dof_score(self, dof: int,
-                            current_vector: list[float],
-                            previous_vector: Optional[list[float]] = None,
+                            current_r_vector: list[float],
+                            current_v_vector: list[float],
+                            previous_r_vector: Optional[list[float]] = None,
+                            previous_v_vector: Optional[list[float]] = None,
                             delta_t: Optional[float] = None,
-                            decay_rate: float = 0.05) -> float:
+                            decay_rate: float = 0.05,
+                            velocity_weight: float = 0.5) -> float:
         """
         Estimate a relative accuracy/reward score based on measurement DOF.
         Higher DOF -> higher score (since it reduces OD computational effort).
@@ -150,13 +173,18 @@ class ConsensusMechanism():
 
         Args:
         - dof: Degrees of freedom of the measurement.
-        - current_vector: The current measurement vector (e.g., LOS unit vector).
-        - previous_vector: The previous measurement vector for the same satellite (
+        - current_r_vector: The current position measurement vector (e.g., LOS unit vector).
+        - current_v_vector: The current velocity measurement vector (e.g., LOS unit vector).
+        - previous_r_vector: The previous position measurement vector for the same satellite (
+          if available).
+        - previous_v_vector: The previous velocity measurement vector for the same satellite (
           if available).
         - delta_t: Time difference between the current and previous measurement
           (if available).
         - decay_rate: Rate at which the DOF score decays if the measurement
           direction changes significantly.
+        - velocity_weight: Weighting factor for the velocity vector in the blended
+          persistence of excitation calculation. Should be in [0,1].
 
         Returns:
         - DOF score 0 = low DOF/ highly redundant, 1+ = high DOF/novelty.
@@ -167,31 +195,18 @@ class ConsensusMechanism():
         # dof = 1 returns 0, dof = 2 returns 0.5 and dof = 3 returns 1.
         base_score = (dof - 1) / 2
 
-        if previous_vector is None or delta_t is None:
+        if previous_r_vector is None or previous_v_vector is None or delta_t is None:
             return base_score
 
-        # 1. Pure Python calculations for dot product and squared norms
-        dot_prod = 0.0
-        v1_sq_norm = 0.0
-        v2_sq_norm = 0.0
+        # Calculate persistence of excitation term
+        r_dot = self.calc_normalised_dot(current_r_vector, previous_r_vector)
+        v_dot = self.calc_normalised_dot(current_v_vector, previous_v_vector)
 
-        for c, p in zip(current_vector, previous_vector):
-            dot_prod += c * p
-            v1_sq_norm += c * c
-            v2_sq_norm += p * p
-
-        if v1_sq_norm == 0.0 or v2_sq_norm == 0.0:
-            return base_score
-
-        # 2. Normalise the dot product directly: dot(A,B) / (|A|*|B|)
-        mag_product = math.sqrt(v1_sq_norm * v2_sq_norm)
-        normalized_dot = abs(dot_prod) / mag_product
-
-        # 3. Use standard math.exp (much faster for scalars than np.exp)
+        # If velocity_weight is 0.5, a change in either position or velocity
+        # lowers the blended_dot, triggering a higher reward.
+        blended_dot = ((1.0 - velocity_weight) * r_dot) + (velocity_weight * v_dot)
         time_decay = math.exp(-decay_rate * delta_t)
-
-        # 4. Calculate final multipliers
-        pe_multiplier = 1.0 - (time_decay * normalized_dot)
+        pe_multiplier = 1.0 - (time_decay * blended_dot)
 
         return base_score * pe_multiplier
 
@@ -263,25 +278,31 @@ class ConsensusMechanism():
         # 3b) Calculate DOF-based reward score, using the current and previous measurement vectors
         observer_id = obs_record.observer
         target_id = obs_record.target
-        current_vector = obs_record.vector
+        current_r_vector = obs_record.r_vector
+        current_v_vector = obs_record.v_vector
         current_time = obs_record.time
 
-        previous_vector = None
+        previous_r_vector = None
+        previous_v_vector = None
         delta_t = None
         cache_key = (observer_id, target_id)
 
         if cache_key in dag.vector_history_cache:
             prev_data = dag.vector_history_cache[cache_key]
-            previous_vector = prev_data['vector']
-            delta_t = current_time - prev_data['timestamp']
+            previous_r_vector = prev_data['r_vector']
+            previous_v_vector = prev_data['v_vector']
+            delta_t = current_time - prev_data['time']
 
-        dof_score = self.calculate_dof_score(obs_record.dof, current_vector,
-                                             previous_vector, delta_t,)
+        dof_score = self.calculate_dof_score(obs_record.dof,
+                                             current_r_vector, current_v_vector,
+                                             previous_r_vector, previous_v_vector,
+                                             delta_t,)
 
         # Update the history cache on the DAG for this observer-target pair
-        if current_vector is not None:
+        if current_r_vector is not None and current_v_vector is not None:
             dag.vector_history_cache[cache_key] = {
-                'vector': current_vector,
+                'r_vector': current_r_vector,
+                'v_vector': current_v_vector,
                 'time': current_time
             }
 
