@@ -37,7 +37,7 @@ class ReputationManager:
                  growth_rate: float = 0.6,
                  decay_rate: float = 0.002,
                  alpha: float = 0.12,
-                 performance_ema_alpha: float = 0.05,
+                 performance_ema_alpha: float = 0.1,
                  min_drop_factor: float = 0.65,
                  max_drop_factor: float = 0.95) -> None:
         """

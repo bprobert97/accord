@@ -43,8 +43,9 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                    faulty_matrix: Optional[np.ndarray] = None,
                    honest_nis: Optional[List[float]] = None,
                    faulty_nis: Optional[List[float]] = None,
-                   detection_threshold: float = 0.4,
-                   fpr_offset_percent: float = 0.2) -> Dict[str, Any]:
+                   detection_threshold: float = 0.5,
+                   fpr_offset_percent: float = 0.2,
+                   logger: Optional[Any] = None) -> Dict[str, Any]:
     """
     Calculate Key Performance Indicators (KPIs) for a single MC simulation run.
 
@@ -62,6 +63,7 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                              "detected" as faulty.
         fpr_offset_percent: The fraction of initial steps to ignore when calculating
                             False Positives (to allow for EKF convergence).
+        logger: Optional logger to record undetected faulty nodes.
 
     Returns:
         A dictionary containing KPIs and processed matrices/NIS lists.
@@ -71,15 +73,22 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         if rep_history is None or faulty_ids is None:
             raise ValueError("Must provide either matrices OR rep_history and faulty_ids")
 
-        honest_ids = [int(sid) for sid in rep_history.keys() if int(sid) not in faulty_ids]
+        honest_ids = sorted([int(sid) for sid in rep_history.keys() if int(sid) not in faulty_ids])
+        faulty_ids_list = sorted(list(faulty_ids))
         honest_matrix = np.array([rep_history[str(sid)] for sid in honest_ids])
-        faulty_matrix = np.array([rep_history[str(sid)] for sid in faulty_ids])
+        faulty_matrix = np.array([rep_history[str(sid)] for sid in faulty_ids_list])
+    else:
+        # If matrices provided, we try to recover IDs if passed
+        honest_ids = None
+        faulty_ids_list = sorted(list(faulty_ids)) if faulty_ids is not None else None
 
     # Infer steps from the matrix shape if not explicitly provided
     if steps is None:
         steps = honest_matrix.shape[1]
 
     ttds = [] # List to store Time to Detection for each faulty node
+    undetected_ids = []
+    undetected_reps = []
     false_positives = 0
     true_positives = 0
     total_flips = 0
@@ -89,11 +98,19 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
     final_faulty_reps = faulty_matrix[:, -1]
 
     # Calculate Time to Detection (TTD) and Recall/FNR for faulty nodes
-    for history in faulty_matrix:
-        detected_at = next((i for i, rep in enumerate(history) if rep < detection_threshold), None)
+    for i, history in enumerate(faulty_matrix):
+        detected_at = next((idx for idx, rep in enumerate(history) if rep < detection_threshold), None)
         if detected_at is not None:
             ttds.append(detected_at)
             true_positives += 1
+        else:
+            # Undetected faulty node
+            sid = faulty_ids_list[i] if faulty_ids_list is not None else i
+            undetected_ids.append(sid)
+            undetected_reps.append(history)
+            if logger:
+                logger.warning("Faulty satellite %s was NOT detected (final rep: %.4f, rep history: %s)",
+                               sid, history[-1], history)
 
         # Calculate flips (stability)
         diff = np.diff((history < detection_threshold).astype(int))
@@ -141,11 +158,15 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         "honest_matrix": honest_matrix,
         "faulty_matrix": faulty_matrix,
         "honest_nis": honest_nis if honest_nis is not None else [],
-        "faulty_nis": faulty_nis if faulty_nis is not None else []
+        "faulty_nis": faulty_nis if faulty_nis is not None else [],
+        "undetected_faulty_ids": undetected_ids,
+        "undetected_faulty_reps": np.array(undetected_reps),
+        "faulty_ids": faulty_ids_list,
+        "honest_ids": honest_ids
     }
 
 def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
-                        detection_threshold: float = 0.4,
+                        detection_threshold: float = 0.5,
                         fpr_offset_percent: float = 0.2) -> List[Optional[Dict[str, Any]]]:
     """
     Recalculate KPIs for a set of Monte Carlo results using new detection parameters.
@@ -168,6 +189,7 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
         new_kpis = calculate_kpis(
             honest_matrix=res["honest_matrix"],
             faulty_matrix=res["faulty_matrix"],
+            faulty_ids=res.get("faulty_ids"),
             honest_nis=res.get("honest_nis"),
             faulty_nis=res.get("faulty_nis"),
             detection_threshold=detection_threshold,
@@ -177,7 +199,7 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
     return new_results
 
 def run_single_simulation(run_idx: int,
-                          threshold: float = 0.4,
+                          threshold: float = 0.5,
                           fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
     """
     Wrapper to run a single simulation iteration within a subprocess.
@@ -240,7 +262,8 @@ def run_single_simulation(run_idx: int,
 
         kpis = calculate_kpis(rep_history, faulty_ids, config.steps,
                               honest_nis=honest_nis, faulty_nis=faulty_nis,
-                              detection_threshold=threshold, fpr_offset_percent=fpr_offset)
+                              detection_threshold=threshold, fpr_offset_percent=fpr_offset,
+                              logger=logger)
         return kpis
     except Exception as e:
         print(f"Run {run_idx} failed: {e}")
@@ -249,14 +272,72 @@ def run_single_simulation(run_idx: int,
     finally:
         loop.close()
 
+def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
+                                threshold: float = 0.5) -> None:
+    """
+    Plot the full reputation history of every undetected faulty satellite across all runs,
+    colour-coded by satellite ID.
+
+    Args:
+        all_kpis: List of KPI dictionaries from MC runs.
+        threshold: The detection threshold used.
+    """
+    plt.figure(figsize=(12, 7))
+
+    # Identify all unique IDs that went undetected
+    unique_ids = sorted(list(set(
+        sid for kpi in all_kpis
+        for sid in kpi.get("undetected_faulty_ids", [])
+    )))
+
+    if not unique_ids:
+        plt.text(0.5, 0.5, "No undetected faulty satellites found",
+                 ha="center", va="center", transform=plt.gca().transAxes)
+        total_lines = 0
+    else:
+        # Use a colourmap to assign distinct colours to each ID
+        cmap = plt.get_cmap("tab20")
+        id_to_color = {sid: cmap(i % 20) for i, sid in enumerate(unique_ids)}
+
+        plotted_legend_ids = set()
+        total_lines = 0
+
+        for kpi in all_kpis:
+            ids = kpi.get("undetected_faulty_ids", [])
+            reps = kpi.get("undetected_faulty_reps", [])
+
+            for sid, history in zip(ids, reps):
+                color = id_to_color[sid]
+                # Only add to legend once per unique satellite ID
+                label = f"Sat {sid}" if sid not in plotted_legend_ids else None
+                plt.plot(history, color=color, alpha=0.6, linewidth=1.5, label=label)
+                plotted_legend_ids.add(sid)
+                total_lines += 1
+
+        plt.axhline(threshold, color="black", linestyle="--", label=f"Threshold ({threshold})")
+        
+        # Adjust legend position and columns based on the number of items
+        num_items = len(plotted_legend_ids)
+        if num_items > 15:
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small', ncol=2)
+            plt.tight_layout(rect=[0, 0, 0.85, 1])
+        elif num_items > 0:
+            plt.legend(loc='best', fontsize='small')
+
+    plt.title(f"Reputation Histories of Undetected Faulty Satellites ({total_lines} Instances, {len(unique_ids)} Unique)")
+    plt.xlabel("Step")
+    plt.ylabel("Reputation")
+    plt.grid(True, alpha=0.3)
+    plt.ylim(-0.05, 1.05)
+    plt.savefig(os.path.join(DATA_DIR, "mc_undetected_reps.png"))
+    plt.show()
+
 def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
     """
     Aggregate results from all Monte Carlo runs and generate summary plots.
 
-    Generates three plots:
-    1. Reputation history over time with 1 Std. Dev. spread for honest vs. faulty nodes.
-    2. Histograms of Time to Detection (TTD) and False Positive Rate (FPR).
-    3. Metrics summary for Recall, Precision, and Stability (Flips).
+    Generates summary plots for reputation spread, KPI distributions, and 
+    undetected faulty nodes.
 
     Args:
         all_kpis_raw: A list of KPI dictionaries from multiple simulation runs.
@@ -266,6 +347,11 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
     if not all_kpis:
         print("No successful runs to plot.")
         return
+        
+    # Plot undetected histories first (new addition)
+    # We try to infer the threshold from the first result if possible, 
+    # though it's typically passed via args in main.
+    plot_undetected_reputations(all_kpis)
 
     # 1. Aggregate Reputation Histories
     honest_means_list: List[np.ndarray] = []
@@ -373,7 +459,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-runs", type=int,
                         default=NUM_RUNS, help="Number of MC runs")
     parser.add_argument("--threshold", type=float,
-                        default=0.4, help="Detection threshold for KPIs")
+                        default=0.5, help="Detection threshold for KPIs")
     parser.add_argument("--fpr-offset", type=float,
                         default=0.2, help="FPR offset percent (initialisation ignored)")
     parser.add_argument("--recalculate", action="store_true",

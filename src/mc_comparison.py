@@ -26,8 +26,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Paths
-PATH_A = "sim_data/mc_results/mc_results.npz"
+PATH_A = "sim_data/mc_results_1000km/mc_results.npz"
 PATH_B = "sim_data/mc_results_2000km/mc_results.npz"
+PATH_C = "sim_data/mc_results_3000km/mc_results.npz"
+PATH_D = "sim_data/mc_results_4000km/mc_results.npz"
+PATH_E = "sim_data/mc_results_5000km/mc_results.npz"
 OUTPUT_DIR = "sim_data/comparison"
 
 def load_results(path: str) -> List[Dict[str, Any]]:
