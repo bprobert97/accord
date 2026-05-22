@@ -1,6 +1,24 @@
 # pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught, duplicate-code
 """
-Monte Carlo Simulation for the ACCORD framework.
+The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
+Author: Beth Probert
+Email: beth.probert@strath.ac.uk
+
+Copyright (C) 2025 Applied Space Technology Laboratory
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 """
 import os
 import json
@@ -15,7 +33,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from src.logger import get_logger
 from src.plotting import plot_mc_nis_boxplot
-from accord_demo import run_consensus_demo, DEFAULT_CONFIG
+from accord_demo import run_consensus_demo, DEFAULT_CONFIG, ISL_RANGE_METERS
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
 # This is needed for parallel processing using ProcessPoolExecutor.
@@ -29,6 +47,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+ISL_RANGE_KM = ISL_RANGE_METERS // 1000
 
 # --- MC Configuration ---
 NUM_RUNS = 40
@@ -36,6 +55,7 @@ NUM_PROCESSES = 4
 DATA_DIR = os.path.join("sim_data", "mc_results")
 EKF_DIR = os.path.join(DATA_DIR, "ekf")
 SIM_DIR = os.path.join(DATA_DIR, "sim")
+MC_RESULTS_PATH = os.path.join(SIM_DIR, f"mc_results_{ISL_RANGE_KM}km.npz")
 
 def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                    faulty_ids: Optional[set[int]] = None,
@@ -498,30 +518,63 @@ if __name__ == "__main__":
     os.makedirs(EKF_DIR, exist_ok=True)
     os.makedirs(SIM_DIR, exist_ok=True)
 
-    start_time = time.time()
+    results = None  # pylint: disable=invalid-name
+    if os.path.exists(MC_RESULTS_PATH):
+        print(f"Attempting to load Monte Carlo results from {MC_RESULTS_PATH}")
+        try:
+            with np.load(MC_RESULTS_PATH, allow_pickle=True) as data:
+                # results was saved as a single object (the list)
+                results = list(data['results'])
+                print(f"Successfully loaded {len(results)} MC runs.")
 
-    # Phase 1: EKF Generation
-    print(f"Phase 1: Generating EKF data for {args.num_runs} runs...")
-    runs_to_gen = [i for i in range(args.num_runs)
-                    if not os.path.exists(os.path.join(EKF_DIR, f"ekf_run_{i}.npz"))]
+            # Check if new keys are missing and auto-trigger recalculate if needed
+            NEEDS_RECALCULATE = args.recalculate
+            if results and not NEEDS_RECALCULATE:
+                sample = next((r for r in results if r is not None), None)
+                if sample and "recall" not in sample:
+                    print("New metrics missing from saved data. Auto-recalculating...")
+                    NEEDS_RECALCULATE = True
 
-    if runs_to_gen:
+            if NEEDS_RECALCULATE:
+                print(f"Calculating KPIs with threshold={args.threshold}, \
+                      fpr_offset={args.fpr_offset}")
+                results = recalculate_all_kpis(results, detection_threshold=args.threshold,
+                                               fpr_offset_percent=args.fpr_offset)
+                # Save the updated KPIs back to the file
+                print(f"Updating saved results at {MC_RESULTS_PATH}")
+                np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
+        except Exception as e:
+            print(f"Failed to load MC results: {e}. Rerunning simulation.")
+
+    if results is None:
+        start_time = time.time()
+
+        # Phase 1: EKF Generation
+        print(f"Phase 1: Generating EKF data for {args.num_runs} runs...")
+        runs_to_gen = [i for i in range(args.num_runs)
+                       if not os.path.exists(os.path.join(EKF_DIR, f"ekf_run_{i}.npz"))]
+
+        if runs_to_gen:
+            with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+                list(executor.map(run_single_ekf, runs_to_gen))
+            print(f"EKF generation completed for {len(runs_to_gen)} runs.")
+        else:
+            print("All EKF data already exists. Skipping Phase 1.")
+
+        # Phase 2: Consensus Simulation
+        print(f"Phase 2: Running Consensus simulations for {args.num_runs} runs...")
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-            list(executor.map(run_single_ekf, runs_to_gen))
-        print(f"EKF generation completed for {len(runs_to_gen)} runs.")
-    else:
-        print("All EKF data already exists. Skipping Phase 1.")
+            # Use partial to pass threshold and fpr_offset to run_single_consensus
+            sim_func = functools.partial(run_single_consensus, threshold=args.threshold,
+                                         fpr_offset=args.fpr_offset)
+            results = list(executor.map(sim_func, range(args.num_runs)))
 
-    # Phase 2: Consensus Simulation
-    print(f"Phase 2: Running Consensus simulations for {args.num_runs} runs...")
-    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-        # Use partial to pass threshold and fpr_offset to run_single_consensus
-        sim_func = functools.partial(run_single_consensus, threshold=args.threshold,
-                                        fpr_offset=args.fpr_offset)
-        results = list(executor.map(sim_func, range(args.num_runs)))
+        end_time = time.time()
+        print(f"Monte Carlo simulation completed in {end_time - start_time:.2f} seconds.")
 
-    end_time = time.time()
-    print(f"Monte Carlo simulation completed in {end_time - start_time:.2f} seconds.")
+        # Save results
+        print(f"Saving Monte Carlo results to {MC_RESULTS_PATH}")
+        np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
 
     plot_mc_results(results)
 
