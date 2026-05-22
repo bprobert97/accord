@@ -107,7 +107,9 @@ async def run_consensus_demo(config: FilterConfig,
                                 "sim_data/ekf_simulation_results.npz",
                              clear_logs: bool = True,
                              log_file: str = "app.log",
-                             save_sim_results: bool = True) -> \
+                             save_sim_results: bool = True,
+                             run_consensus: bool = True,
+                             sim_results_path: str = SIM_RESULTS_PATH) -> \
         tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
@@ -122,7 +124,9 @@ async def run_consensus_demo(config: FilterConfig,
     - clear_logs: If True, clears the app.log file at the start.
     - log_file: The file to write logs to.
     - save_sim_results: If True, saves the final consensus simulation results to
-                        SIM_RESULTS_PATH.
+                        sim_results_path.
+    - run_consensus: If False, returns early after EKF simulation phase.
+    - sim_results_path: Path to save consensus simulation results.
 
     Returns:
     - A tuple containing:
@@ -287,6 +291,11 @@ async def run_consensus_demo(config: FilterConfig,
             )
             logger.info("EKF simulation results saved successfully.")
 
+    # Early return if only EKF was requested
+    if not run_consensus:
+        logger.info("run_consensus is False. Returning early after EKF phase.")
+        return None, None, truth, None
+
     # Ensure data is available for the consensus part
     if all_obs_records is None or x_hist is None or truth is None:
         logger.error("EKF simulation data is not available after loading or running. Exiting.")
@@ -371,10 +380,10 @@ async def run_consensus_demo(config: FilterConfig,
 
         # Save Consensus Simulation results
         if save_sim_results:
-            logger.info("Saving EKF simulation results to %s", SIM_RESULTS_PATH)
-            os.makedirs(os.path.dirname(SIM_RESULTS_PATH), exist_ok=True)
+            logger.info("Saving Simulation results to %s", sim_results_path)
+            os.makedirs(os.path.dirname(sim_results_path), exist_ok=True)
             np.savez_compressed(
-                SIM_RESULTS_PATH,
+                sim_results_path,
                 dag_ledger=dag.ledger,  # type: ignore [arg-type]
                 rep_history=rep_history,  # type: ignore [arg-type]
                 truth=truth,

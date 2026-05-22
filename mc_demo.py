@@ -33,8 +33,9 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 # --- MC Configuration ---
 NUM_RUNS = 40
 NUM_PROCESSES = 4
-DATA_DIR = "sim_data\\mc_results"
-MC_RESULTS_PATH = os.path.join(DATA_DIR, "mc_results.npz")
+DATA_DIR = os.path.join("sim_data", "mc_results")
+EKF_DIR = os.path.join(DATA_DIR, "ekf")
+SIM_DIR = os.path.join(DATA_DIR, "sim")
 
 def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                    faulty_ids: Optional[set[int]] = None,
@@ -198,40 +199,68 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
         new_results.append(new_kpis)
     return new_results
 
-def run_single_simulation(run_idx: int,
-                          threshold: float = 0.5,
-                          fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
+def run_single_ekf(run_idx: int) -> bool:
     """
-    Wrapper to run a single simulation iteration within a subprocess.
-
-    Args:
-        run_idx: Index of the current Monte Carlo run.
-        threshold: Reputation threshold for detection and false positives.
-        fpr_offset: Fraction of initial steps to ignore for FPR calculation.
-
-    Returns:
-        A dictionary of KPIs if the simulation was successful, otherwise None.
+    Run the EKF phase for a single Monte Carlo iteration.
     """
-    # Create a unique log file for this run
-    log_file = os.path.join(DATA_DIR, f"run_{run_idx}.log")
+    ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
+    log_file = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.log")
 
-    # Initialise logger for this process with the unique log file
-    logger = get_logger(name="ACCORD", log_file=log_file)
+    if os.path.exists(ekf_path):
+        return True
 
-    # Create a fresh event loop for this process
+    logger = get_logger(name=f"EKF_{run_idx}", log_file=log_file)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     config = DEFAULT_CONFIG
     config.seed += run_idx
 
-    logger.info("Starting Monte Carlo Run %d with Seed %d", run_idx, config.seed)
+    logger.info("Starting EKF Generation for Run %d with Seed %d", run_idx, config.seed)
+    try:
+        loop.run_until_complete(
+            run_consensus_demo(config, save_ekf_results=True, load_ekf_results=False,
+                               ekf_results_path=ekf_path, clear_logs=True,
+                               log_file=log_file, save_sim_results=False,
+                               run_consensus=False)
+        )
+        return True
+    except Exception as e:
+        print(f"EKF Run {run_idx} failed: {e}")
+        traceback.print_exc()
+        return False
+    finally:
+        loop.close()
+
+def run_single_consensus(run_idx: int,
+                          threshold: float = 0.5,
+                          fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
+    """
+    Run the Consensus phase for a single Monte Carlo iteration.
+    """
+    ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
+    sim_path = os.path.join(SIM_DIR, f"sim_run_{run_idx}.npz")
+    log_file = os.path.join(SIM_DIR, f"sim_run_{run_idx}.log")
+
+    if not os.path.exists(ekf_path):
+        print(f"Missing EKF data for run {run_idx}. Skipping.")
+        return None
+
+    logger = get_logger(name=f"SIM_{run_idx}", log_file=log_file)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    config = DEFAULT_CONFIG
+    config.seed += run_idx
+
+    logger.info("Starting Consensus Simulation for Run %d", run_idx)
 
     try:
-        # Run the simulation
         dag, rep_history, _, faulty_ids = loop.run_until_complete(
-            run_consensus_demo(config, save_ekf_results=False, load_ekf_results=False,
-                               clear_logs=False, log_file=log_file, save_sim_results=False)
+            run_consensus_demo(config, save_ekf_results=False, load_ekf_results=True,
+                               ekf_results_path=ekf_path, clear_logs=True,
+                               log_file=log_file, save_sim_results=True,
+                               run_consensus=True, sim_results_path=sim_path)
         )
 
         if rep_history is None or dag is None:
@@ -266,7 +295,7 @@ def run_single_simulation(run_idx: int,
                               logger=logger)
         return kpis
     except Exception as e:
-        print(f"Run {run_idx} failed: {e}")
+        print(f"Consensus Run {run_idx} failed: {e}")
         traceback.print_exc()
         return None
     finally:
@@ -466,52 +495,33 @@ if __name__ == "__main__":
                         help="Recalculate KPIs from saved data")
     args = parser.parse_args()
 
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(EKF_DIR, exist_ok=True)
+    os.makedirs(SIM_DIR, exist_ok=True)
 
-    results = None  # pylint: disable=invalid-name
-    if os.path.exists(MC_RESULTS_PATH):
-        print(f"Attempting to load Monte Carlo results from {MC_RESULTS_PATH}")
-        try:
-            with np.load(MC_RESULTS_PATH, allow_pickle=True) as data:
-                # results was saved as a single object (the list)
-                results = list(data['results'])
-                print(f"Successfully loaded {len(results)} MC runs.")
+    start_time = time.time()
 
-            # Check if new keys are missing and auto-trigger recalculate if needed
-            NEEDS_RECALCULATE = args.recalculate
-            if results and not NEEDS_RECALCULATE:
-                sample = next((r for r in results if r is not None), None)
-                if sample and "recall" not in sample:
-                    print("New metrics missing from saved data. Auto-recalculating...")
-                    NEEDS_RECALCULATE = True
+    # Phase 1: EKF Generation
+    print(f"Phase 1: Generating EKF data for {args.num_runs} runs...")
+    runs_to_gen = [i for i in range(args.num_runs)
+                    if not os.path.exists(os.path.join(EKF_DIR, f"ekf_run_{i}.npz"))]
 
-            if NEEDS_RECALCULATE:
-                print(f"Calculating KPIs with threshold={args.threshold}, \
-                      fpr_offset={args.fpr_offset}")
-                results = recalculate_all_kpis(results, detection_threshold=args.threshold,
-                                               fpr_offset_percent=args.fpr_offset)
-                # Save the updated KPIs back to the file
-                print(f"Updating saved results at {MC_RESULTS_PATH}")
-                np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
-        except Exception as e:
-            print(f"Failed to load MC results: {e}. Rerunning simulation.")
-
-    if results is None:
-        start_time = time.time()
-        print(f"Starting Monte Carlo simulation with {args.num_runs} \
-              runs using {NUM_PROCESSES} processes...")
-
+    if runs_to_gen:
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-            # Use partial to pass threshold and fpr_offset to run_single_simulation
-            sim_func = functools.partial(run_single_simulation, threshold=args.threshold,
-                                         fpr_offset=args.fpr_offset)
-            results = list(executor.map(sim_func, range(args.num_runs)))
+            list(executor.map(run_single_ekf, runs_to_gen))
+        print(f"EKF generation completed for {len(runs_to_gen)} runs.")
+    else:
+        print("All EKF data already exists. Skipping Phase 1.")
 
-        end_time = time.time()
-        print(f"Monte Carlo simulation completed in {end_time - start_time:.2f} seconds.")
+    # Phase 2: Consensus Simulation
+    print(f"Phase 2: Running Consensus simulations for {args.num_runs} runs...")
+    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+        # Use partial to pass threshold and fpr_offset to run_single_consensus
+        sim_func = functools.partial(run_single_consensus, threshold=args.threshold,
+                                        fpr_offset=args.fpr_offset)
+        results = list(executor.map(sim_func, range(args.num_runs)))
 
-        # Save results
-        print(f"Saving Monte Carlo results to {MC_RESULTS_PATH}")
-        np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
+    end_time = time.time()
+    print(f"Monte Carlo simulation completed in {end_time - start_time:.2f} seconds.")
 
     plot_mc_results(results)
+

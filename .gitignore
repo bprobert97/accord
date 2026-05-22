@@ -16,11 +16,5 @@ app.log
 coverage.xml
 /sim_data/*.log
 /sim_data/*.png
-/sim_data/mc_results/*.log
-/sim_data/mc_results/*.png
-/sim_data/mc_results_1000km
-/sim_data/mc_results_2000km
-/sim_data/mc_results_3000km
-/sim_data/mc_results_4000km
-/sim_data/mc_results_5000km
+/sim_data/mc_results/*
 /sim_data/comparison
