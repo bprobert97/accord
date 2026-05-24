@@ -908,19 +908,21 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
 
     Args:
         all_kpis (List[Dict[str, Any]]): A list of KPI dictionaries, each containing
-                                         'honest_nis' and 'faulty_nis' lists.
+                                         'honest_nis_stats' and 'faulty_nis_stats' dicts.
     """
+
     all_honest_medians = []
     all_faulty_medians = []
 
     for kpi in all_kpis:
-        h_nis = kpi.get("honest_nis", [])
-        f_nis = kpi.get("faulty_nis", [])
+        h_stats = kpi.get("honest_nis_stats", {})
+        f_stats = kpi.get("faulty_nis_stats", {})
 
-        if h_nis:
-            all_honest_medians.append(np.median(h_nis))
-        if f_nis:
-            all_faulty_medians.append(np.median(f_nis))
+        # Extract the median directly
+        if "median" in h_stats:
+            all_honest_medians.append(h_stats["median"])
+        if "median" in f_stats:
+            all_faulty_medians.append(f_stats["median"])
 
     if not all_honest_medians and not all_faulty_medians:
         print("No MC NIS data available to plot.")
@@ -945,14 +947,9 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     # Reference lines (assuming DOF=2)
     dof = 2
     expected_median = chi2.ppf(0.5, df=dof)
-    # chi2_lower = chi2.ppf(0.025, df=dof)
-    # chi2_upper = chi2.ppf(0.975, df=dof)
 
     ax.axhline(expected_median, color='black', linestyle=':',
                 label=f'Expected Median ({expected_median:.3f})')
-    # ax.axhline(chi2_lower, color='red', linestyle='--', alpha=0.5,
-    #             label='95% Confidence Interval Bounds')
-    # ax.axhline(chi2_upper, color='red', linestyle='--', alpha=0.5)
 
     ax.set_ylabel("Median NIS per Run [-]", fontsize=20)
     ax.set_yscale("log")
