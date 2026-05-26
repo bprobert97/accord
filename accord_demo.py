@@ -44,7 +44,7 @@ from src.satellite_node import SatelliteNode
 
 #------------------
 # Constants
-ISL_RANGE_METERS = 1000e3  # 1000 km
+ISL_RANGE_METERS = 1000e3
 
 CLUSTER_SIZE = 10
 

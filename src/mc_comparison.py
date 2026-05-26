@@ -21,16 +21,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 import os
+import argparse
 from typing import Dict, List, Any
 import numpy as np
 import matplotlib.pyplot as plt
 
 # Paths
-PATH_A = "sim_data/mc_results_1000km/mc_results.npz"
-PATH_B = "sim_data/mc_results_2000km/mc_results.npz"
-PATH_C = "sim_data/mc_results_3000km/mc_results.npz"
-PATH_D = "sim_data/mc_results_4000km/mc_results.npz"
-PATH_E = "sim_data/mc_results_5000km/mc_results.npz"
+PATH_A = "sim_data/mc_results/sim_1000km/mc_results_1000.0km.npz"
+PATH_B = "sim_data/mc_results/sim_2000km/mc_results_2000.0km.npz"
 OUTPUT_DIR = "sim_data/comparison"
 
 def load_results(path: str) -> List[Dict[str, Any]]:
@@ -75,13 +73,17 @@ def get_aggregated_reps(results: List[Dict[str, Any]]) -> tuple[np.ndarray,
 
 
 def plot_reputation_comparison(results_a: List[Dict[str, Any]],
-                               results_b: List[Dict[str, Any]]) -> None:
+                               results_b: List[Dict[str, Any]],
+                               start_step_a: int = 0,
+                               start_step_b: int = 0) -> None:
     """
     Plots reputation history for both datasets on the same graph.
 
     Args:
         results_a: Dataset A
         results_b: Dataset B
+        start_step_a: Step to start plotting from for dataset A.
+        start_step_b: Step to start plotting from for dataset B.
 
     Returns:
         None. Saves MatPlotLib figures in OUTPUT_DIR.
@@ -90,7 +92,11 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
 
     if results_a:
         h_a, f_a = get_aggregated_reps(results_a)
-        steps_a = np.arange(h_a.shape[1])
+        
+        # Slice results based on start_step_a
+        h_a = h_a[:, start_step_a:]
+        f_a = f_a[:, start_step_a:]
+        steps_a = np.arange(start_step_a, start_step_a + h_a.shape[1])
 
         h_mean_a = np.mean(h_a, axis=0)
         h_std_a = np.std(h_a, axis=0)
@@ -106,7 +112,11 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
 
     if results_b:
         h_b, f_b = get_aggregated_reps(results_b)
-        steps_b = np.arange(h_b.shape[1])
+        
+        # Slice results based on start_step_b
+        h_b = h_b[:, start_step_b:]
+        f_b = f_b[:, start_step_b:]
+        steps_b = np.arange(start_step_b, start_step_b + h_b.shape[1])
 
         h_mean_b = np.mean(h_b, axis=0)
         h_std_b = np.std(h_b, axis=0)
@@ -216,6 +226,13 @@ def main():
     To run this file in a terminal, execute:
     python src/mc_comparison.py
     """
+    parser = argparse.ArgumentParser(description="Compare Monte Carlo results.")
+    parser.add_argument("--start-step-a", type=int, default=210,
+                        help="Step to start plotting from for dataset A (1000km).")
+    parser.add_argument("--start-step-b", type=int, default=125,
+                        help="Step to start plotting from for dataset B (2000km).")
+    args = parser.parse_args()
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print("Loading 1000km results...")
@@ -229,7 +246,9 @@ def main():
 
     print(f"Comparing {len(res_a)} runs (1000km) vs {len(res_b)} runs (2000km)")
 
-    plot_reputation_comparison(res_a, res_b)
+    plot_reputation_comparison(res_a, res_b,
+                               start_step_a=args.start_step_a,
+                               start_step_b=args.start_step_b)
     plot_kpi_comparison(res_a, res_b)
 
     # Also print summary

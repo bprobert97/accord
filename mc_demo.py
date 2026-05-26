@@ -118,7 +118,7 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
     final_honest_reps = honest_matrix[:, -1]
     final_faulty_reps = faulty_matrix[:, -1]
 
-    # Calculate Time to Detection (TTD) and Recall/FNR for faulty nodes
+    # Calculate Time to Detection (TTD) and Recall/FNR for faulty and honest nodes
     for i, history in enumerate(faulty_matrix):
         detected_at = next((idx for idx, rep in enumerate(history) if rep < detection_threshold), None)
         if detected_at is not None:
@@ -152,6 +152,21 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
     num_honest = len(honest_matrix)
     num_faulty = len(faulty_matrix)
 
+    def get_nis_stats(nis_list):
+        arr = np.array(nis_list) if nis_list else np.array([])
+        if len(arr) == 0:
+            return {"min": 0, "q1": 0, "median": 0, "q3": 0, "max": 0}
+        return {
+            "min": float(np.min(arr)),
+            "q1": float(np.percentile(arr, 25)),
+            "median": float(np.median(arr)),
+            "q3": float(np.percentile(arr, 75)),
+            "max": float(np.max(arr))
+        }
+
+    honest_nis_stats = get_nis_stats(honest_nis)
+    faulty_nis_stats = get_nis_stats(faulty_nis)
+
     fpr = (false_positives / num_honest) * 100 if num_honest > 0 else 0
     recall = (true_positives / num_faulty) * 100 if num_faulty > 0 else 0
     fnr = 100 - recall
@@ -178,8 +193,8 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         "flips": total_flips,
         "honest_matrix": honest_matrix,
         "faulty_matrix": faulty_matrix,
-        "honest_nis": honest_nis if honest_nis is not None else [],
-        "faulty_nis": faulty_nis if faulty_nis is not None else [],
+        "honest_nis_stats": honest_nis_stats,
+        "faulty_nis_stats": faulty_nis_stats,
         "undetected_faulty_ids": undetected_ids,
         "undetected_faulty_reps": np.array(undetected_reps),
         "faulty_ids": faulty_ids_list,
@@ -279,8 +294,8 @@ def run_single_consensus(run_idx: int,
         dag, rep_history, _, faulty_ids = loop.run_until_complete(
             run_consensus_demo(config, save_ekf_results=False, load_ekf_results=True,
                                ekf_results_path=ekf_path, clear_logs=True,
-                               log_file=log_file, save_sim_results=True,
-                               run_consensus=True, sim_results_path=sim_path)
+                               log_file=log_file, save_sim_results=False,
+                               run_consensus=True)
         )
 
         if rep_history is None or dag is None:
@@ -322,7 +337,8 @@ def run_single_consensus(run_idx: int,
         loop.close()
 
 def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
-                                threshold: float = 0.5) -> None:
+                                threshold: float = 0.5,
+                                start_step: int = 0) -> None:
     """
     Plot the full reputation history of every undetected faulty satellite across all runs,
     colour-coded by satellite ID.
@@ -330,6 +346,7 @@ def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
     Args:
         all_kpis: List of KPI dictionaries from MC runs.
         threshold: The detection threshold used.
+        start_step: The step to start plotting from.
     """
     plt.figure(figsize=(12, 7))
 
@@ -359,7 +376,10 @@ def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
                 color = id_to_color[sid]
                 # Only add to legend once per unique satellite ID
                 label = f"Sat {sid}" if sid not in plotted_legend_ids else None
-                plt.plot(history, color=color, alpha=0.6, linewidth=1.5, label=label)
+                
+                # Plot from start_step onwards
+                steps = np.arange(start_step, len(history))
+                plt.plot(steps, history[start_step:], color=color, alpha=0.6, linewidth=1.5, label=label)
                 plotted_legend_ids.add(sid)
                 total_lines += 1
 
@@ -381,7 +401,8 @@ def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
     plt.savefig(os.path.join(DATA_DIR, "mc_undetected_reps.png"))
     plt.show()
 
-def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
+def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]],
+                    start_step: int = 0) -> None:
     """
     Aggregate results from all Monte Carlo runs and generate summary plots.
 
@@ -390,6 +411,7 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
 
     Args:
         all_kpis_raw: A list of KPI dictionaries from multiple simulation runs.
+        start_step: The step to start plotting from.
     """
     # Filter out failed runs
     all_kpis: List[Dict[str, Any]] = [k for k in all_kpis_raw if k is not None]
@@ -400,7 +422,7 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
     # Plot undetected histories first (new addition)
     # We try to infer the threshold from the first result if possible, 
     # though it's typically passed via args in main.
-    plot_undetected_reputations(all_kpis)
+    plot_undetected_reputations(all_kpis, start_step=start_step)
 
     # 1. Aggregate Reputation Histories
     honest_means_list: List[np.ndarray] = []
@@ -413,7 +435,10 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
     all_honest_means = np.array(honest_means_list)
     all_faulty_means = np.array(faulty_means_list)
 
-    steps = np.arange(all_honest_means.shape[1])
+    # Slice data based on start_step
+    all_honest_means = all_honest_means[:, start_step:]
+    all_faulty_means = all_faulty_means[:, start_step:]
+    steps = np.arange(start_step, start_step + all_honest_means.shape[1])
 
     plt.figure(figsize=(10, 6))
 
@@ -511,6 +536,8 @@ if __name__ == "__main__":
                         default=0.5, help="Detection threshold for KPIs")
     parser.add_argument("--fpr-offset", type=float,
                         default=0.2, help="FPR offset percent (initialisation ignored)")
+    parser.add_argument("--start-step", type=int,
+                        default=0, help="Step to start plotting from (convergence)")
     parser.add_argument("--recalculate", action="store_true",
                         help="Recalculate KPIs from saved data")
     args = parser.parse_args()
@@ -576,5 +603,5 @@ if __name__ == "__main__":
         print(f"Saving Monte Carlo results to {MC_RESULTS_PATH}")
         np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
 
-    plot_mc_results(results)
+    plot_mc_results(results, start_step=args.start_step)
 
