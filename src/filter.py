@@ -30,7 +30,7 @@ from scipy.stats import chi2
 from scipy.linalg import expm
 from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
 from src.logger import get_logger
-from src.simulation import generate_random_keplerian_elements, keplerian_to_cartesian
+from src.simulation import generate_random_keplerian_elements, keplerian_to_cartesian, generate_walker_delta_constellation
 
 logger = get_logger()
 
@@ -337,7 +337,8 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
 # ----------------------- Truth + measurement sim ----------
 def simulate_truth_and_meas(N: int, steps: int, dt: float,
                             sig_r: float, sig_rdot: float,
-                            seed: int) -> tuple[NDArray[np.float64],
+                            seed: int,
+                            walker_delta: bool = False) -> tuple[NDArray[np.float64],
                                                 NDArray[np.float64]]:
     """
     Simulates the true satellite trajectories and generates noisy
@@ -350,6 +351,7 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
     - sig_r: Standard deviation of range measurement noise.
     - sig_rdot: Standard deviation of range-rate measurement noise.
     - seed: An integer seed for reproducibility.
+    - walker_delta: If True, generates a Walker Delta constellation instead of random orbits.
 
     Returns:
     - A tuple containing:
@@ -358,13 +360,19 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
     """
 
     x0 = []
-    logger.info("Generating random satellite constellation with %s satellites", N)
+    if walker_delta:
+        logger.info("Generating walker_delta satellite constellation with %s satellites", N)
 
-    for n in range(N):
-        a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=seed + n)
-        state = keplerian_to_cartesian(a, e, i, raan, argp, ta)
-        x0.append(state)
-    x0_stack = np.concatenate(x0)
+        x0_list = generate_walker_delta_constellation(t=N, p=5, f=1, a=Re+500e3, i=np.radians(53)).sort(key=lambda x: x[0])
+        x0_stack = np.array(x0_list)
+    else:
+        logger.info("Generating random satellite constellation with %s satellites", N)
+
+        for n in range(N):
+            a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=seed + n)
+            state = keplerian_to_cartesian(a, e, i, raan, argp, ta)
+            x0.append(state)
+        x0_stack = np.concatenate(x0)
 
     logger.info("Propagating truth states")
     truth = propagate_truth_kepler(x0_stack, steps, dt)
