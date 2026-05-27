@@ -122,10 +122,18 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
         pos_hist = truth[:, i*6:i*6+3]
 
         # Plot orbit path
-        ax.plot(pos_hist[:, 0], pos_hist[:, 1], pos_hist[:, 2], label=f'Sat {i}')
+        ax.plot(pos_hist[:, 0], pos_hist[:, 1], pos_hist[:, 2], color='black', alpha=0.3)
 
         # Plot final position
-        ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2], s=30) # type: ignore [misc]
+        ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2], color='black', s=10) # type: ignore [misc]
+
+    # Custom legend
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', label='Satellite',
+               markerfacecolor='black', markersize=8),
+        Line2D([0], [0], color='black', lw=1.5, label='Simulated Orbit')
+    ]
+    ax.legend(handles=legend_elements, loc='upper right')
 
     # Set plot labels
     ax.set_xlabel("X (m)")
@@ -143,7 +151,6 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     ax.set_ylim(mid_y - max_range, mid_y + max_range)
     ax.set_zlim(mid_z - max_range, mid_z + max_range) # type: ignore [attr-defined]
 
-    ax.legend()
     plt.show()
 
 
@@ -165,9 +172,13 @@ def plot_reputation(rep_history: dict[str, list[float]]) -> None:
     steps = list(range(max_len))
 
     # Plot reputation histories
-    for node_id, history in rep_history.items():
+    cmap = plt.get_cmap('viridis')
+    node_ids = sorted(rep_history.keys(), key=lambda x: int(x) if x.isdigit() else x)
+    for i, node_id in enumerate(node_ids):
+        history = rep_history[node_id]
+        color = cmap(i / max(1, len(node_ids) - 1))
         plt.plot(range(len(history)), history, marker="o", \
-                 markersize=2, label=f"Sat_{node_id} Reputation")
+                 markersize=2, color=color, label=f"Sat_{node_id} Reputation")
 
     # Plot target curve ONCE (using max length)
     if max_len > 0:
@@ -368,10 +379,13 @@ def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
     chi2_lower = chi2.ppf((1 - 0.95) / 2, df=2)
     chi2_upper = chi2.ppf((1 + 0.95) / 2, df=2)
 
+    cmap = plt.get_cmap('viridis')
+    color_bound = cmap(0.1) # Dark Purple for bounds
+
     # Plot the horizontal lines for the confidence interval bounds
-    ax.axhline(chi2_lower, color='red', linestyle='--', alpha=0.7, \
+    ax.axhline(chi2_lower, color=color_bound, linestyle='--', alpha=0.7, \
         label='95% Confidence Interval Bounds')
-    ax.axhline(chi2_upper, color='red', linestyle='--', alpha=0.7)
+    ax.axhline(chi2_upper, color=color_bound, linestyle='--', alpha=0.7)
 
     ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median (1.386)')
 
@@ -393,7 +407,7 @@ def calculate_median_percentiles(dof: int = 2) -> None:
     Calculates the chi-squared CDF percentiles for given median values
     and determines their absolute distance from the ideal 50th percentile.
     """
-    median_values: list[float] = [1.386, 1.707, 2.678]
+    median_values: list[float] = [1.386, 1.703, 1.836, 1.447, 1.330]
     print(f"--- Chi-Squared CDF Percentiles (DOF={dof}) ---")
     print(f"{'Median Value':<15} | {'Percentile (CDF)':<20} | {'Distance from 0.5':<20}")
     print("-" * 60)
@@ -646,18 +660,21 @@ def plot_aggregated_reputation(
         return
 
     plt.figure(figsize=(10, 6))
+    cmap = plt.get_cmap('viridis')
+    color_h = cmap(0.5)  # Honest (Greenish)
+    color_f = cmap(0.05) # Faulty (Dark Purple)
 
     # Plot Honest Satellites
     if len(honest_matrix) > 0:
         honest_mean = np.mean(honest_matrix, axis=0)
         honest_std = np.std(honest_matrix, axis=0)
 
-        plt.plot(steps, honest_mean, color="green", linewidth=2, label="Honest Mean")
+        plt.plot(steps, honest_mean, color=color_h, linewidth=2, label="Honest Mean")
         plt.fill_between(
             steps,
             honest_mean - honest_std,
             honest_mean + honest_std,
-            color="green",
+            color=color_h,
             alpha=0.2,
             label="Honest Spread (1 std. dev.)",
         )
@@ -667,12 +684,12 @@ def plot_aggregated_reputation(
         faulty_mean = np.mean(faulty_matrix, axis=0)
         faulty_std = np.std(faulty_matrix, axis=0)
 
-        plt.plot(steps, faulty_mean, color="red", linewidth=2, label="Faulty Mean")
+        plt.plot(steps, faulty_mean, color=color_f, linewidth=2, label="Faulty Mean")
         plt.fill_between(
             steps,
             faulty_mean - faulty_std,
             faulty_mean + faulty_std,
-            color="red",
+            color=color_f,
             alpha=0.2,
             label="Faulty Spread (1 std. dev.)",
         )
@@ -751,14 +768,16 @@ def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
                 lw=lw, zorder=zorder)
 
         # Plot current/final position
-        ax.scatter(lon[-1], lat[-1], color=color, s=30,
+        ax.scatter(lon[-1], lat[-1], color=color, s=20,
                    edgecolor='white', linewidth=0.5, zorder=zorder+1)
 
     # --- PART 3: Styling ---
 
     # Custom legend
     handles = [
-        Line2D([0], [0], color='black', lw=2, label='Simulated Satellite Orbits')
+        Line2D([0], [0], marker='o', color='w', label='Satellite',
+               markerfacecolor='black', markersize=10),
+        Line2D([0], [0], color='black', lw=2, label='Simulated Orbit')
     ]
     leg = ax.legend(handles=handles, loc='upper right', framealpha=0.7, facecolor='white',
                     fontsize=16)
@@ -850,7 +869,18 @@ def plot_ground_tracks_plotly(truth: np.ndarray, n: int) -> go.Figure:
         ))
 
     # --- PART 3: Custom Legend ---
-    # Add a dummy trace to represent the legend entry
+    # Add dummy traces to represent the legend entries
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='markers',
+        marker={
+            "size": 10,
+            "color": "black",
+            "line": {"width": 0.5, "color": "white"}
+        },
+        name='Satellite'
+    ))
+
     fig.add_trace(go.Scatter(
         x=[None], y=[None],
         mode='lines',
@@ -915,14 +945,13 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     all_faulty_medians = []
 
     for kpi in all_kpis:
-        h_stats = kpi.get("honest_nis_stats", {})
-        f_stats = kpi.get("faulty_nis_stats", {})
+        h_stats = kpi.get("honest_nis", {})
+        f_stats = kpi.get("faulty_nis", {})
 
-        # Extract the median directly
-        if "median" in h_stats:
-            all_honest_medians.append(h_stats["median"])
-        if "median" in f_stats:
-            all_faulty_medians.append(f_stats["median"])
+        if h_stats:
+            all_honest_medians.append(np.median(h_stats))
+        if f_stats:
+            all_faulty_medians.append(np.median(f_stats))
 
     if not all_honest_medians and not all_faulty_medians:
         print("No MC NIS data available to plot.")
@@ -940,9 +969,15 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     _, ax = plt.subplots(figsize=(10, 6))
 
     # Create box plot for the medians
-    ax.boxplot(plot_data, label=labels, patch_artist=True,
-               boxprops={"facecolor": 'lightblue', "alpha": 0.5},
+    cmap = plt.get_cmap('viridis')
+    colors = [cmap(0.5), cmap(0.05)] # Honest, Faulty
+    
+    bp = ax.boxplot(plot_data, label=labels, patch_artist=True,
                medianprops={"color": 'black', "linewidth": 2})
+
+    for patch, color in zip(bp['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.6)
 
     # Reference lines (assuming DOF=2)
     dof = 2
@@ -983,41 +1018,53 @@ def generate_constellation_df(num_sats: int, seed: int) -> pd.DataFrame:
 
     return df
 
-def generate_corner_plot() -> None:
+def generate_corner_plot(num_sats_per_run: int = 400, num_runs: int = 40, base_seed: int = 42) -> None:
     """
-    Generates a corner plot of the Keplerian elements for a LEO constellation.
-    """
-    # 1. Generate the 400 satellites
-    df_sats = generate_constellation_df(num_sats=400, seed=42)
+    Generates a corner plot of the Keplerian elements aggregated across multiple
+    Monte Carlo runs to show the full distribution of the sampled space.
 
-    # 2. Set up the visual style (reduced font_scale slightly for better fit)
+    Args:
+        num_sats_per_run: Number of satellites in each simulation run.
+        num_runs: Total number of Monte Carlo iterations.
+        base_seed: The starting seed used in the simulation.
+    """
+    # 1. Aggregate satellites across all runs
+    all_dfs = []
+    print(f"Aggregating distributions for {num_runs} runs...")
+    
+    for run_idx in range(num_runs):
+        # Match mc_demo.py seeding logic: config.seed += run_idx
+        run_seed = base_seed + run_idx
+        df_run = generate_constellation_df(num_sats=num_sats_per_run, seed=run_seed)
+        all_dfs.append(df_run)
+    
+    df_sats = pd.concat(all_dfs, ignore_index=True)
+    print(f"Total satellites in distribution: {len(df_sats)}")
+
+    # 2. Set up the visual style
     sns.set_theme(style="ticks", context="paper", font_scale=1.0)
 
     # 3. Create the Corner Plot
-    # Use 'height' to set the size of EACH subplot (in inches).
-    # height=2.2 makes a nice, large figure that gives the labels breathing room.
+    cmap = plt.get_cmap('viridis')
+    color_main = cmap(0.3)
+    color_scatter = cmap(0.1)
+
     g = sns.PairGrid(df_sats, corner=True, diag_sharey=False, height=2.2)
 
-    g.map_diag(sns.histplot, kde=True, color="steelblue", element="step")
-    g.map_lower(sns.scatterplot, s=10, alpha=0.5, color="darkblue")
+    g.map_diag(sns.histplot, kde=True, color=color_main, element="step")
+    # Higher alpha (lower transparency) for 16,000 points to show density
+    g.map_lower(sns.scatterplot, s=1, alpha=0.1, color=color_scatter)
 
     # 4. Fix overlapping labels and ticks
     for ax in g.axes.flatten():
         if ax is not None:
-            # Rotate x-axis numbers by 45 degrees so they don't crash into each other
             ax.tick_params(axis='x', rotation=45)
-
-            # Explicitly control the axis label font size and padding
             if ax.get_xlabel():
                 ax.set_xlabel(ax.get_xlabel(), fontsize=10, labelpad=5)
             if ax.get_ylabel():
                 ax.set_ylabel(ax.get_ylabel(), fontsize=10, labelpad=5)
 
-    # Align labels across the grid to ensure they are even
     g.figure.align_labels()
-
-    # 5. Force matplotlib to respect the margins
-    # top=0.92 leaves space for the suptitle. wspace/hspace control gaps between plots.
     plt.subplots_adjust(top=0.92, bottom=0.08, wspace=0.15, hspace=0.15)
 
     # Save and show

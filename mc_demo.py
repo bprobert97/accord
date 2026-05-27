@@ -32,7 +32,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import matplotlib.pyplot as plt
 from src.logger import get_logger
-from src.plotting import plot_mc_nis_boxplot
+from src.plotting import plot_mc_nis_boxplot, generate_corner_plot
 from accord_demo import run_consensus_demo, DEFAULT_CONFIG, ISL_RANGE_METERS
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
@@ -604,4 +604,5 @@ if __name__ == "__main__":
         np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
 
     plot_mc_results(results, start_step=args.start_step)
+    generate_corner_plot()
 

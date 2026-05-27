@@ -338,7 +338,7 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
 def simulate_truth_and_meas(N: int, steps: int, dt: float,
                             sig_r: float, sig_rdot: float,
                             seed: int,
-                            walker_delta: bool = False) -> tuple[NDArray[np.float64],
+                            walker_delta: bool = True) -> tuple[NDArray[np.float64],
                                                 NDArray[np.float64]]:
     """
     Simulates the true satellite trajectories and generates noisy
@@ -363,8 +363,15 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
     if walker_delta:
         logger.info("Generating walker_delta satellite constellation with %s satellites", N)
 
-        x0_list = generate_walker_delta_constellation(t=N, p=5, f=1, a=Re+500e3, i=np.radians(53)).sort(key=lambda x: x[0])
-        x0_stack = np.array(x0_list)
+        # Generate elements and convert to Cartesian
+        elements = generate_walker_delta_constellation(t=N, p=5, f=1, a=Re+500e3, i=np.radians(53))
+        # Sort for deterministic node ordering (e.g. by RAAN then True Anomaly)
+        elements.sort(key=lambda x: (x[3], x[5]))
+
+        for el in elements:
+            state = keplerian_to_cartesian(*el)
+            x0.append(state)
+        x0_stack = np.concatenate(x0)
     else:
         logger.info("Generating random satellite constellation with %s satellites", N)
 

@@ -89,6 +89,9 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
         None. Saves MatPlotLib figures in OUTPUT_DIR.
     """
     plt.figure(figsize=(12, 7))
+    cmap = plt.get_cmap('viridis')
+    color_a = cmap(0.25)  # 1000km
+    color_b = cmap(0.85) # 2000km
 
     if results_a:
         h_a, f_a = get_aggregated_reps(results_a)
@@ -100,15 +103,16 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
 
         h_mean_a = np.mean(h_a, axis=0)
         h_std_a = np.std(h_a, axis=0)
-        plt.plot(steps_a, h_mean_a, color="green", label="Honest (1000km ISL)")
+        plt.plot(steps_a, h_mean_a, color=color_a, label="Honest (1000km ISL)")
         plt.fill_between(steps_a, h_mean_a - h_std_a,
-                         h_mean_a + h_std_a, color="green", alpha=0.1)
+                         h_mean_a + h_std_a, color=color_a, alpha=0.1)
 
         f_mean_a = np.mean(f_a, axis=0)
         f_std_a = np.std(f_a, axis=0)
-        plt.plot(steps_a, f_mean_a, color="red", label="Faulty (1000km ISL)")
+        plt.plot(steps_a, f_mean_a, color=color_a, linestyle="--",
+                 label="Faulty (1000km ISL)")
         plt.fill_between(steps_a, f_mean_a - f_std_a,
-                         f_mean_a + f_std_a, color="red", alpha=0.1)
+                         f_mean_a + f_std_a, color=color_a, alpha=0.1)
 
     if results_b:
         h_b, f_b = get_aggregated_reps(results_b)
@@ -120,17 +124,17 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
 
         h_mean_b = np.mean(h_b, axis=0)
         h_std_b = np.std(h_b, axis=0)
-        plt.plot(steps_b, h_mean_b, color="green",
-                 linestyle="--", label="Honest (2000km ISL)")
+        plt.plot(steps_b, h_mean_b, color=color_b,
+                 label="Honest (2000km ISL)")
         plt.fill_between(steps_b, h_mean_b - h_std_b,
-                         h_mean_b + h_std_b, color="green", alpha=0.1)
+                         h_mean_b + h_std_b, color=color_b, alpha=0.1)
 
         f_mean_b = np.mean(f_b, axis=0)
         f_std_b = np.std(f_b, axis=0)
-        plt.plot(steps_b, f_mean_b, color="red", linestyle="--",
+        plt.plot(steps_b, f_mean_b, color=color_b, linestyle="--",
                  label="Faulty (2000km ISL)")
         plt.fill_between(steps_b, f_mean_b - f_std_b,
-                         f_mean_b + f_std_b, color="red", alpha=0.1)
+                         f_mean_b + f_std_b, color=color_b, alpha=0.1)
 
     plt.axhline(0.5, color="gray", linestyle=":", label="Neutral")
     plt.xlabel("Timestep [-]", fontsize=14)
@@ -177,14 +181,20 @@ def plot_kpi_comparison(results_a: List[Dict[str, Any]],
     width = 0.35
 
     _, ax = plt.subplots(figsize=(12, 6))
-    ax.bar(x - width/2, means_a, width, label='1000km ISL', color='skyblue')
-    ax.bar(x + width/2, means_b, width, label='2000km ISL', color='salmon')
+    
+    # Use viridis for color-blind friendly comparisons
+    cmap = plt.get_cmap('viridis')
+    color_a = cmap(0.25) # Deep teal/blue
+    color_b = cmap(0.85) # Bright yellow/green
+
+    ax.bar(x - width/2, means_a, width, label='1000km ISL', color=color_a)
+    ax.bar(x + width/2, means_b, width, label='2000km ISL', color=color_b)
 
     ax.set_ylabel('Percentage [%]')
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.legend()
-    ax.grid(axis='y', alpha=0.3)
+    ax.grid(axis='y', alpha=0.1)
     ax.set_ylim(0, 105) # Metrics are percentages
 
     plt.tight_layout()
@@ -208,8 +218,18 @@ def plot_kpi_comparison(results_a: List[Dict[str, Any]],
 
         # Reduce gap by setting positions closer and increasing widths
         positions = [1, 1.5]
-        plt.boxplot(data_to_plot, tick_labels=labels_ttd,
-                    positions=positions[:len(data_to_plot)], widths=0.35)
+
+        cmap = plt.get_cmap('viridis')
+        colors = [cmap(0.25), cmap(0.85)]
+
+        bp = plt.boxplot(data_to_plot, tick_labels=labels_ttd,
+                    positions=positions[:len(data_to_plot)], widths=0.35,
+                    patch_artist=True)
+
+        for patch, color in zip(bp['boxes'], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.6)
+
         plt.xlim(0.5, 2.0)
         plt.ylabel("Time to Detection  [Timesteps]")
         plt.grid(axis='y', alpha=0.3)
