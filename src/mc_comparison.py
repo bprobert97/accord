@@ -95,7 +95,7 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
 
     if results_a:
         h_a, f_a = get_aggregated_reps(results_a)
-        
+
         # Slice results based on start_step_a
         h_a = h_a[:, start_step_a:]
         f_a = f_a[:, start_step_a:]
@@ -116,7 +116,7 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
 
     if results_b:
         h_b, f_b = get_aggregated_reps(results_b)
-        
+
         # Slice results based on start_step_b
         h_b = h_b[:, start_step_b:]
         f_b = f_b[:, start_step_b:]
@@ -181,7 +181,7 @@ def plot_kpi_comparison(results_a: List[Dict[str, Any]],
     width = 0.35
 
     _, ax = plt.subplots(figsize=(12, 6))
-    
+
     # Use viridis for color-blind friendly comparisons
     cmap = plt.get_cmap('viridis')
     color_a = cmap(0.25) # Deep teal/blue

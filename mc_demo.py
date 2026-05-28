@@ -101,7 +101,8 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
     else:
         # If matrices provided, we try to recover IDs if passed
         honest_ids = None
-        faulty_ids_list = sorted(list(faulty_ids)) if faulty_ids is not None else None
+        faulty_ids_list = sorted(list(faulty_ids)) \
+            if faulty_ids is not None else None  # type: ignore [assignment]
 
     # Infer steps from the matrix shape if not explicitly provided
     if steps is None:
@@ -120,7 +121,8 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
 
     # Calculate Time to Detection (TTD) and Recall/FNR for faulty and honest nodes
     for i, history in enumerate(faulty_matrix):
-        detected_at = next((idx for idx, rep in enumerate(history) if rep < detection_threshold), None)
+        detected_at = next((idx for idx, rep in enumerate(history) \
+                            if rep < detection_threshold), None)
         if detected_at is not None:
             ttds.append(detected_at)
             true_positives += 1
@@ -130,7 +132,8 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
             undetected_ids.append(sid)
             undetected_reps.append(history)
             if logger:
-                logger.warning("Faulty satellite %s was NOT detected (final rep: %.4f, rep history: %s)",
+                logger.warning("Faulty satellite %s was NOT detected \
+                               (final rep: %.4f, rep history: %s)",
                                sid, history[-1], history)
 
         # Calculate flips (stability)
@@ -274,7 +277,6 @@ def run_single_consensus(run_idx: int,
     Run the Consensus phase for a single Monte Carlo iteration.
     """
     ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
-    sim_path = os.path.join(SIM_DIR, f"sim_run_{run_idx}.npz")
     log_file = os.path.join(SIM_DIR, f"sim_run_{run_idx}.log")
 
     if not os.path.exists(ekf_path):
@@ -376,24 +378,24 @@ def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
                 color = id_to_color[sid]
                 # Only add to legend once per unique satellite ID
                 label = f"Sat {sid}" if sid not in plotted_legend_ids else None
-                
+
                 # Plot from start_step onwards
                 steps = np.arange(start_step, len(history))
-                plt.plot(steps, history[start_step:], color=color, alpha=0.6, linewidth=1.5, label=label)
+                plt.plot(steps, history[start_step:], color=color,
+                alpha=0.6, linewidth=1.5, label=label)
                 plotted_legend_ids.add(sid)
                 total_lines += 1
 
         plt.axhline(threshold, color="black", linestyle="--", label=f"Threshold ({threshold})")
-        
+
         # Adjust legend position and columns based on the number of items
         num_items = len(plotted_legend_ids)
         if num_items > 15:
             plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small', ncol=2)
-            plt.tight_layout(rect=[0, 0, 0.85, 1])
+            plt.tight_layout(rect=[0, 0, 0.85, 1])  # type: ignore [arg-type]
         elif num_items > 0:
             plt.legend(loc='best', fontsize='small')
 
-    plt.title(f"Reputation Histories of Undetected Faulty Satellites ({total_lines} Instances, {len(unique_ids)} Unique)")
     plt.xlabel("Step")
     plt.ylabel("Reputation")
     plt.grid(True, alpha=0.3)
@@ -418,9 +420,9 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]],
     if not all_kpis:
         print("No successful runs to plot.")
         return
-        
+
     # Plot undetected histories first (new addition)
-    # We try to infer the threshold from the first result if possible, 
+    # We try to infer the threshold from the first result if possible,
     # though it's typically passed via args in main.
     plot_undetected_reputations(all_kpis, start_step=start_step)
 
@@ -605,4 +607,3 @@ if __name__ == "__main__":
 
     plot_mc_results(results, start_step=args.start_step)
     generate_corner_plot()
-

@@ -125,7 +125,8 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
         ax.plot(pos_hist[:, 0], pos_hist[:, 1], pos_hist[:, 2], color='black', alpha=0.3)
 
         # Plot final position
-        ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2], color='black', s=10) # type: ignore [misc]
+        ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2],
+                   color='black', s=10) # type: ignore [misc]
 
     # Custom legend
     legend_elements = [
@@ -971,7 +972,7 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     # Create box plot for the medians
     cmap = plt.get_cmap('viridis')
     colors = [cmap(0.5), cmap(0.05)] # Honest, Faulty
-    
+
     bp = ax.boxplot(plot_data, label=labels, patch_artist=True,
                medianprops={"color": 'black', "linewidth": 2})
 
@@ -1018,7 +1019,8 @@ def generate_constellation_df(num_sats: int, seed: int) -> pd.DataFrame:
 
     return df
 
-def generate_corner_plot(num_sats_per_run: int = 400, num_runs: int = 40, base_seed: int = 42) -> None:
+def generate_corner_plot(num_sats_per_run: int = 400, num_runs: int = 40,
+                         base_seed: int = 42) -> None:
     """
     Generates a corner plot of the Keplerian elements aggregated across multiple
     Monte Carlo runs to show the full distribution of the sampled space.
@@ -1031,13 +1033,13 @@ def generate_corner_plot(num_sats_per_run: int = 400, num_runs: int = 40, base_s
     # 1. Aggregate satellites across all runs
     all_dfs = []
     print(f"Aggregating distributions for {num_runs} runs...")
-    
+
     for run_idx in range(num_runs):
         # Match mc_demo.py seeding logic: config.seed += run_idx
         run_seed = base_seed + run_idx
         df_run = generate_constellation_df(num_sats=num_sats_per_run, seed=run_seed)
         all_dfs.append(df_run)
-    
+
     df_sats = pd.concat(all_dfs, ignore_index=True)
     print(f"Total satellites in distribution: {len(df_sats)}")
 

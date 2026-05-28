@@ -30,7 +30,8 @@ from scipy.stats import chi2
 from scipy.linalg import expm
 from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
 from src.logger import get_logger
-from src.simulation import generate_random_keplerian_elements, keplerian_to_cartesian, generate_walker_delta_constellation
+from src.simulation import generate_random_keplerian_elements, \
+    keplerian_to_cartesian, generate_walker_delta_constellation
 
 logger = get_logger()
 
@@ -339,7 +340,7 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
 def simulate_truth_and_meas(N: int, steps: int, dt: float,
                             sig_r: float, sig_rdot: float,
                             seed: int,
-                            walker_delta: bool = True) -> tuple[NDArray[np.float64],
+                            walker_delta: bool = False) -> tuple[NDArray[np.float64],
                                                 NDArray[np.float64]]:
     """
     Simulates the true satellite trajectories and generates noisy

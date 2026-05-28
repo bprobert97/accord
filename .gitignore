@@ -18,3 +18,4 @@ coverage.xml
 /sim_data/*.png
 /sim_data/mc_results/*
 /sim_data/comparison
+/sim_data/*.npz
