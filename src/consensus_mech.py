@@ -1,4 +1,4 @@
-# pylint: disable=too-many-return-statements too-many-branches too-many-arguments too-many-positional-arguments
+# pylint: disable=too-many-return-statements too-many-branches too-many-arguments too-many-positional-arguments, too-many-locals, too-many-statements
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -22,13 +22,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import json
-from typing import Optional
+import math
+from typing import List, Optional
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
 from .filter import ObservationRecord
 from .logger import get_logger
-from .reputation import MAX_REPUTATION
 from .satellite_node import SatelliteNode
 from .transaction import Transaction
 
@@ -137,8 +137,35 @@ class ConsensusMechanism():
 
         return score, new_ema_nis
 
+    def calc_normalised_dot(self, curr: List[float], prev: List[float]) -> float:
+        """
+        Calculates the normalised dot product between two vectors.
 
-    def calculate_dof_score(self, dof: int) -> float:
+        Args:
+        - curr: The current vector.
+        - prev: The previous vector.
+
+        Returns:
+        - A float representing the normalised dot product, which indicates
+          the change in direction of the vector.
+        """
+        dot_prod = sum(c * p for c, p in zip(curr, prev))
+        v1_sq_norm = sum(c * c for c in curr)
+        v2_sq_norm = sum(p * p for p in prev)
+
+        if v1_sq_norm == 0.0 or v2_sq_norm == 0.0:
+            return 1.0 # Fully redundant data
+
+        return abs(dot_prod) / math.sqrt(v1_sq_norm * v2_sq_norm)
+
+    def calculate_dof_score(self, dof: int,
+                            current_r_vector: list[float],
+                            current_v_vector: list[float],
+                            previous_r_vector: Optional[list[float]] = None,
+                            previous_v_vector: Optional[list[float]] = None,
+                            delta_t: Optional[float] = None,
+                            decay_rate: float = 0.05,
+                            velocity_weight: float = 0.5) -> float:
         """
         Estimate a relative accuracy/reward score based on measurement DOF.
         Higher DOF -> higher score (since it reduces OD computational effort).
@@ -146,14 +173,42 @@ class ConsensusMechanism():
 
         Args:
         - dof: Degrees of freedom of the measurement.
+        - current_r_vector: The current position measurement vector (e.g., LOS unit vector).
+        - current_v_vector: The current velocity measurement vector (e.g., LOS unit vector).
+        - previous_r_vector: The previous position measurement vector for the same satellite (
+          if available).
+        - previous_v_vector: The previous velocity measurement vector for the same satellite (
+          if available).
+        - delta_t: Time difference between the current and previous measurement
+          (if available).
+        - decay_rate: Rate at which the DOF score decays if the measurement
+          direction changes significantly.
+        - velocity_weight: Weighting factor for the velocity vector in the blended
+          persistence of excitation calculation. Should be in [0,1].
 
         Returns:
-        - DOF score in [0,1]. 0 = low accuracy, 1 = high accuracy.
+        - DOF score 0 = low DOF/ highly redundant, 1+ = high DOF/novelty.
+        - Note: assumed to be bounded in [0,1] where max k is assumed to be 3.
         """
 
-        # Normalise DOF
-        # dof = 1 returns 0.33, dof = 2 returns 0.66, dof of 3 returns 1.0.
-        return min(1.0, dof / self.max_dof)
+        # Calculate base score of (k-1)/2
+        # dof = 1 returns 0, dof = 2 returns 0.5 and dof = 3 returns 1.
+        base_score = (dof - 1) / 2
+
+        if previous_r_vector is None or previous_v_vector is None or delta_t is None:
+            return base_score
+
+        # Calculate persistence of excitation term
+        r_dot = self.calc_normalised_dot(current_r_vector, previous_r_vector)
+        v_dot = self.calc_normalised_dot(current_v_vector, previous_v_vector)
+
+        # If velocity_weight is 0.5, a change in either position or velocity
+        # lowers the blended_dot, triggering a higher reward.
+        blended_dot = ((1.0 - velocity_weight) * r_dot) + (velocity_weight * v_dot)
+        time_decay = math.exp(-decay_rate * delta_t)
+        pe_multiplier = 1.0 - (time_decay * blended_dot)
+
+        return base_score * pe_multiplier
 
     def calculate_consensus_score(self, correctness: float,
                                   dof_reward: float, reputation: float,
@@ -171,20 +226,12 @@ class ConsensusMechanism():
         Returns:
         - Consensus score in [0,1]. Higher is better.
         """
-        # Normalise reputation
-        rep_norm = min(max(reputation / MAX_REPUTATION, 0.0), 1.0)
-
-        # Normalise each variable relative to its threshold point
         # Min acceptable correctness for consensus = 0.5
-        # Min DOF score = 0.33
+        # Min DOF score = 0
         # Min reputation = 0
 
-        # Relative to baselines
-        d_rel = max(min((dof_reward - (1/3)) / (2/3), 1.0), 0.0)      # [0,1] with baseline at 0
-        r_rel = rep_norm                                            # [0,1] with baseline at 0
-
         # Cooperative DOF–reputation term (no weights, monotonic, bounded)
-        dr_term = (1 - (1 - d_rel) * (1 - r_rel)) ** alpha
+        dr_term = (1 - (1 - dof_reward) * (1 - reputation)) ** alpha
 
         # Combine terms
         consensus = correctness * dr_term
@@ -197,14 +244,15 @@ class ConsensusMechanism():
     def proof_of_inter_satellite_evaluation(self, dag: DAG,
                                             sat_node: SatelliteNode,
                                             transaction: Transaction,
-                                            mean_nis_per_satellite: dict[int, float]
+                                            mean_nis_per_satellite: dict[int, float],
                                             ) -> tuple[bool, Optional[float]]:
         """
         Returns a bool of if consensus has been reached, and the new EMA NIS for the satellite.
         NOTE: Assume one witnessed satellite per transaction
         """
         new_ema_nis: Optional[float] = None
-        # 1) If the transaction is empty, penalise and reject
+        # 1) Check for valid data
+        # 1a) If the transaction is empty, penalise and reject
         if not transaction.tx_data:
             # Reduce node reputation for providing no or invalid data
             sat_node.reputation, sat_node.exp_pos, \
@@ -213,9 +261,27 @@ class ConsensusMechanism():
                 )
             return False, new_ema_nis
 
-        # 2) Add transaction to the DAG and check for BFT quorum
         transaction_data: dict = json.loads(transaction.tx_data)
         obs_record = ObservationRecord(**transaction_data)
+
+        # 1b) Check if the DOF is impossible (i.e. > 6 or < 1)
+        if obs_record.dof > 6 or obs_record.dof < 1:
+            logger.info("Invalid DOF of %d in transaction. Penalising reputation.",
+                        obs_record.dof)
+
+            # Instantly apply a negative penalty to the satellite
+            sat_node.reputation, sat_node.exp_pos, \
+                sat_node.performance_ema = sat_node.rep_manager.apply_negative(
+                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
+            )
+
+            # Reject the transaction before it contaminates the DAG
+            transaction.metadata.consensus_reached = False
+            transaction.metadata.is_rejected = True
+            return False, new_ema_nis
+
+
+        # 2) Add transaction to the DAG and check for BFT quorum
         dag.add_tx(transaction)
 
         if not dag.has_bft_quorum():
@@ -223,10 +289,43 @@ class ConsensusMechanism():
             logger.info("Satellite reputation unchanged at %.2f", sat_node.reputation)
             return False, new_ema_nis
 
-        # 3) Calculate correctness and consensus scores
+        # 3) Calculate various PoISE scores
+        # 3a) Calculate correctness score
         correctness_score, new_ema_nis = self.get_correctness_score(obs_record,
                                                                     mean_nis_per_satellite)
-        dof_score = self.calculate_dof_score(obs_record.dof)
+
+        # 3b) Calculate DOF-based reward score, using the current and previous measurement vectors
+        observer_id = obs_record.observer
+        target_id = obs_record.target
+        current_r_vector = obs_record.r_vector
+        current_v_vector = obs_record.v_vector
+        current_time = obs_record.time
+
+        previous_r_vector = None
+        previous_v_vector = None
+        delta_t = None
+        cache_key = (observer_id, target_id)
+
+        if cache_key in dag.vector_history_cache:
+            prev_data = dag.vector_history_cache[cache_key]
+            previous_r_vector = prev_data['r_vector']
+            previous_v_vector = prev_data['v_vector']
+            delta_t = current_time - prev_data['time']
+
+        dof_score = self.calculate_dof_score(obs_record.dof,
+                                             current_r_vector, current_v_vector,
+                                             previous_r_vector, previous_v_vector,
+                                             delta_t,)
+
+        # Update the history cache on the DAG for this observer-target pair
+        if current_r_vector is not None and current_v_vector is not None:
+            dag.vector_history_cache[cache_key] = {
+                'r_vector': current_r_vector,
+                'v_vector': current_v_vector,
+                'time': current_time
+            }
+
+        # 3c) Calculate consensus score
         consensus_score = self.calculate_consensus_score(correctness_score,
                                                          dof_score,
                                                          sat_node.reputation)

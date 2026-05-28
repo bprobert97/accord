@@ -31,7 +31,8 @@ def test_load_sensor_data(mock_queue):
     Test that sensor data is loaded correctly.
     """
     node = SatelliteNode(node_id=1, queue=mock_queue)
-    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2)
+    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
+                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
 
     assert node.sensor_data is None
     node.load_sensor_data(obs_record)
@@ -55,7 +56,8 @@ async def test_submit_transaction_success():
     # Arrange
     queue = asyncio.Queue() # Use a real queue instead of a mock
     node = SatelliteNode(node_id=1, queue=queue)
-    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2)
+    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
+                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     node.load_sensor_data(obs_record)
 
     # This task simulates the consumer (the DAG's listen loop)

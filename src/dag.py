@@ -1,3 +1,4 @@
+# pylint: disable=too-many-instance-attributes
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -62,6 +63,11 @@ class DAG():
         self.mean_nis_per_satellite: dict[int, float] = {}
         self.nis_sums: dict[int, float] = {}
         self.nis_counts: dict[int, int] = {}
+
+        # History cache for Persistence of Excitation
+        # Key: (observer_id, target_id)
+        # Value: {'vector': list[float], 'timestamp': float}
+        self.vector_history_cache: dict[tuple[int, int], dict] = {}
 
     async def listen(self) -> None:
         """

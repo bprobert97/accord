@@ -1,6 +1,24 @@
 # pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught, duplicate-code
 """
-Monte Carlo Simulation for the ACCORD framework.
+The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
+Author: Beth Probert
+Email: beth.probert@strath.ac.uk
+
+Copyright (C) 2025 Applied Space Technology Laboratory
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 """
 import os
 import json
@@ -14,8 +32,8 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import matplotlib.pyplot as plt
 from src.logger import get_logger
-from src.plotting import plot_mc_nis_boxplot
-from accord_demo import run_consensus_demo, DEFAULT_CONFIG
+from src.plotting import plot_mc_nis_boxplot, generate_corner_plot
+from accord_demo import run_consensus_demo, DEFAULT_CONFIG, ISL_RANGE_METERS
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
 # This is needed for parallel processing using ProcessPoolExecutor.
@@ -29,12 +47,15 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+ISL_RANGE_KM = ISL_RANGE_METERS // 1000
 
 # --- MC Configuration ---
 NUM_RUNS = 40
 NUM_PROCESSES = 4
-DATA_DIR = "sim_data\\mc_results"
-MC_RESULTS_PATH = os.path.join(DATA_DIR, "mc_results.npz")
+DATA_DIR = os.path.join("sim_data", "mc_results")
+EKF_DIR = os.path.join(DATA_DIR, "ekf")
+SIM_DIR = os.path.join(DATA_DIR, "sim")
+MC_RESULTS_PATH = os.path.join(SIM_DIR, f"mc_results_{ISL_RANGE_KM}km.npz")
 
 def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                    faulty_ids: Optional[set[int]] = None,
@@ -43,8 +64,9 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                    faulty_matrix: Optional[np.ndarray] = None,
                    honest_nis: Optional[List[float]] = None,
                    faulty_nis: Optional[List[float]] = None,
-                   detection_threshold: float = 0.4,
-                   fpr_offset_percent: float = 0.2) -> Dict[str, Any]:
+                   detection_threshold: float = 0.5,
+                   fpr_offset_percent: float = 0.2,
+                   logger: Optional[Any] = None) -> Dict[str, Any]:
     """
     Calculate Key Performance Indicators (KPIs) for a single MC simulation run.
 
@@ -62,6 +84,7 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
                              "detected" as faulty.
         fpr_offset_percent: The fraction of initial steps to ignore when calculating
                             False Positives (to allow for EKF convergence).
+        logger: Optional logger to record undetected faulty nodes.
 
     Returns:
         A dictionary containing KPIs and processed matrices/NIS lists.
@@ -71,15 +94,23 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         if rep_history is None or faulty_ids is None:
             raise ValueError("Must provide either matrices OR rep_history and faulty_ids")
 
-        honest_ids = [int(sid) for sid in rep_history.keys() if int(sid) not in faulty_ids]
+        honest_ids = sorted([int(sid) for sid in rep_history.keys() if int(sid) not in faulty_ids])
+        faulty_ids_list = sorted(list(faulty_ids))
         honest_matrix = np.array([rep_history[str(sid)] for sid in honest_ids])
-        faulty_matrix = np.array([rep_history[str(sid)] for sid in faulty_ids])
+        faulty_matrix = np.array([rep_history[str(sid)] for sid in faulty_ids_list])
+    else:
+        # If matrices provided, we try to recover IDs if passed
+        honest_ids = None
+        faulty_ids_list = sorted(list(faulty_ids)) \
+            if faulty_ids is not None else None  # type: ignore [assignment]
 
     # Infer steps from the matrix shape if not explicitly provided
     if steps is None:
         steps = honest_matrix.shape[1]
 
     ttds = [] # List to store Time to Detection for each faulty node
+    undetected_ids = []
+    undetected_reps = []
     false_positives = 0
     true_positives = 0
     total_flips = 0
@@ -88,12 +119,22 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
     final_honest_reps = honest_matrix[:, -1]
     final_faulty_reps = faulty_matrix[:, -1]
 
-    # Calculate Time to Detection (TTD) and Recall/FNR for faulty nodes
-    for history in faulty_matrix:
-        detected_at = next((i for i, rep in enumerate(history) if rep < detection_threshold), None)
+    # Calculate Time to Detection (TTD) and Recall/FNR for faulty and honest nodes
+    for i, history in enumerate(faulty_matrix):
+        detected_at = next((idx for idx, rep in enumerate(history) \
+                            if rep < detection_threshold), None)
         if detected_at is not None:
             ttds.append(detected_at)
             true_positives += 1
+        else:
+            # Undetected faulty node
+            sid = faulty_ids_list[i] if faulty_ids_list is not None else i
+            undetected_ids.append(sid)
+            undetected_reps.append(history)
+            if logger:
+                logger.warning("Faulty satellite %s was NOT detected \
+                               (final rep: %.4f, rep history: %s)",
+                               sid, history[-1], history)
 
         # Calculate flips (stability)
         diff = np.diff((history < detection_threshold).astype(int))
@@ -113,6 +154,21 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
     # Normalise Metrics
     num_honest = len(honest_matrix)
     num_faulty = len(faulty_matrix)
+
+    def get_nis_stats(nis_list):
+        arr = np.array(nis_list) if nis_list else np.array([])
+        if len(arr) == 0:
+            return {"min": 0, "q1": 0, "median": 0, "q3": 0, "max": 0}
+        return {
+            "min": float(np.min(arr)),
+            "q1": float(np.percentile(arr, 25)),
+            "median": float(np.median(arr)),
+            "q3": float(np.percentile(arr, 75)),
+            "max": float(np.max(arr))
+        }
+
+    honest_nis_stats = get_nis_stats(honest_nis)
+    faulty_nis_stats = get_nis_stats(faulty_nis)
 
     fpr = (false_positives / num_honest) * 100 if num_honest > 0 else 0
     recall = (true_positives / num_faulty) * 100 if num_faulty > 0 else 0
@@ -140,12 +196,16 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         "flips": total_flips,
         "honest_matrix": honest_matrix,
         "faulty_matrix": faulty_matrix,
-        "honest_nis": honest_nis if honest_nis is not None else [],
-        "faulty_nis": faulty_nis if faulty_nis is not None else []
+        "honest_nis_stats": honest_nis_stats,
+        "faulty_nis_stats": faulty_nis_stats,
+        "undetected_faulty_ids": undetected_ids,
+        "undetected_faulty_reps": np.array(undetected_reps),
+        "faulty_ids": faulty_ids_list,
+        "honest_ids": honest_ids
     }
 
 def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
-                        detection_threshold: float = 0.4,
+                        detection_threshold: float = 0.5,
                         fpr_offset_percent: float = 0.2) -> List[Optional[Dict[str, Any]]]:
     """
     Recalculate KPIs for a set of Monte Carlo results using new detection parameters.
@@ -168,6 +228,7 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
         new_kpis = calculate_kpis(
             honest_matrix=res["honest_matrix"],
             faulty_matrix=res["faulty_matrix"],
+            faulty_ids=res.get("faulty_ids"),
             honest_nis=res.get("honest_nis"),
             faulty_nis=res.get("faulty_nis"),
             detection_threshold=detection_threshold,
@@ -176,40 +237,67 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
         new_results.append(new_kpis)
     return new_results
 
-def run_single_simulation(run_idx: int,
-                          threshold: float = 0.4,
-                          fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
+def run_single_ekf(run_idx: int) -> bool:
     """
-    Wrapper to run a single simulation iteration within a subprocess.
-
-    Args:
-        run_idx: Index of the current Monte Carlo run.
-        threshold: Reputation threshold for detection and false positives.
-        fpr_offset: Fraction of initial steps to ignore for FPR calculation.
-
-    Returns:
-        A dictionary of KPIs if the simulation was successful, otherwise None.
+    Run the EKF phase for a single Monte Carlo iteration.
     """
-    # Create a unique log file for this run
-    log_file = os.path.join(DATA_DIR, f"run_{run_idx}.log")
+    ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
+    log_file = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.log")
 
-    # Initialise logger for this process with the unique log file
-    logger = get_logger(name="ACCORD", log_file=log_file)
+    if os.path.exists(ekf_path):
+        return True
 
-    # Create a fresh event loop for this process
+    logger = get_logger(name=f"EKF_{run_idx}", log_file=log_file)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     config = DEFAULT_CONFIG
     config.seed += run_idx
 
-    logger.info("Starting Monte Carlo Run %d with Seed %d", run_idx, config.seed)
+    logger.info("Starting EKF Generation for Run %d with Seed %d", run_idx, config.seed)
+    try:
+        loop.run_until_complete(
+            run_consensus_demo(config, save_ekf_results=True, load_ekf_results=False,
+                               ekf_results_path=ekf_path, clear_logs=True,
+                               log_file=log_file, save_sim_results=False,
+                               run_consensus=False)
+        )
+        return True
+    except Exception as e:
+        print(f"EKF Run {run_idx} failed: {e}")
+        traceback.print_exc()
+        return False
+    finally:
+        loop.close()
+
+def run_single_consensus(run_idx: int,
+                          threshold: float = 0.5,
+                          fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
+    """
+    Run the Consensus phase for a single Monte Carlo iteration.
+    """
+    ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
+    log_file = os.path.join(SIM_DIR, f"sim_run_{run_idx}.log")
+
+    if not os.path.exists(ekf_path):
+        print(f"Missing EKF data for run {run_idx}. Skipping.")
+        return None
+
+    logger = get_logger(name=f"SIM_{run_idx}", log_file=log_file)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    config = DEFAULT_CONFIG
+    config.seed += run_idx
+
+    logger.info("Starting Consensus Simulation for Run %d", run_idx)
 
     try:
-        # Run the simulation
         dag, rep_history, _, faulty_ids = loop.run_until_complete(
-            run_consensus_demo(config, save_ekf_results=False, load_ekf_results=False,
-                               clear_logs=False, log_file=log_file, save_sim_results=False)
+            run_consensus_demo(config, save_ekf_results=False, load_ekf_results=True,
+                               ekf_results_path=ekf_path, clear_logs=True,
+                               log_file=log_file, save_sim_results=False,
+                               run_consensus=True)
         )
 
         if rep_history is None or dag is None:
@@ -240,32 +328,103 @@ def run_single_simulation(run_idx: int,
 
         kpis = calculate_kpis(rep_history, faulty_ids, config.steps,
                               honest_nis=honest_nis, faulty_nis=faulty_nis,
-                              detection_threshold=threshold, fpr_offset_percent=fpr_offset)
+                              detection_threshold=threshold, fpr_offset_percent=fpr_offset,
+                              logger=logger)
         return kpis
     except Exception as e:
-        print(f"Run {run_idx} failed: {e}")
+        print(f"Consensus Run {run_idx} failed: {e}")
         traceback.print_exc()
         return None
     finally:
         loop.close()
 
-def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
+def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
+                                threshold: float = 0.5,
+                                start_step: int = 0) -> None:
+    """
+    Plot the full reputation history of every undetected faulty satellite across all runs,
+    colour-coded by satellite ID.
+
+    Args:
+        all_kpis: List of KPI dictionaries from MC runs.
+        threshold: The detection threshold used.
+        start_step: The step to start plotting from.
+    """
+    plt.figure(figsize=(12, 7))
+
+    # Identify all unique IDs that went undetected
+    unique_ids = sorted(list(set(
+        sid for kpi in all_kpis
+        for sid in kpi.get("undetected_faulty_ids", [])
+    )))
+
+    if not unique_ids:
+        plt.text(0.5, 0.5, "No undetected faulty satellites found",
+                 ha="center", va="center", transform=plt.gca().transAxes)
+        total_lines = 0
+    else:
+        # Use a colourmap to assign distinct colours to each ID
+        cmap = plt.get_cmap("tab20")
+        id_to_color = {sid: cmap(i % 20) for i, sid in enumerate(unique_ids)}
+
+        plotted_legend_ids = set()
+        total_lines = 0
+
+        for kpi in all_kpis:
+            ids = kpi.get("undetected_faulty_ids", [])
+            reps = kpi.get("undetected_faulty_reps", [])
+
+            for sid, history in zip(ids, reps):
+                color = id_to_color[sid]
+                # Only add to legend once per unique satellite ID
+                label = f"Sat {sid}" if sid not in plotted_legend_ids else None
+
+                # Plot from start_step onwards
+                steps = np.arange(start_step, len(history))
+                plt.plot(steps, history[start_step:], color=color,
+                alpha=0.6, linewidth=1.5, label=label)
+                plotted_legend_ids.add(sid)
+                total_lines += 1
+
+        plt.axhline(threshold, color="black", linestyle="--", label=f"Threshold ({threshold})")
+
+        # Adjust legend position and columns based on the number of items
+        num_items = len(plotted_legend_ids)
+        if num_items > 15:
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small', ncol=2)
+            plt.tight_layout(rect=[0, 0, 0.85, 1])  # type: ignore [arg-type]
+        elif num_items > 0:
+            plt.legend(loc='best', fontsize='small')
+
+    plt.xlabel("Step")
+    plt.ylabel("Reputation")
+    plt.grid(True, alpha=0.3)
+    plt.ylim(-0.05, 1.05)
+    plt.savefig(os.path.join(DATA_DIR, "mc_undetected_reps.png"))
+    plt.show()
+
+def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]],
+                    start_step: int = 0) -> None:
     """
     Aggregate results from all Monte Carlo runs and generate summary plots.
 
-    Generates three plots:
-    1. Reputation history over time with 1 Std. Dev. spread for honest vs. faulty nodes.
-    2. Histograms of Time to Detection (TTD) and False Positive Rate (FPR).
-    3. Metrics summary for Recall, Precision, and Stability (Flips).
+    Generates summary plots for reputation spread, KPI distributions, and 
+    undetected faulty nodes.
 
     Args:
         all_kpis_raw: A list of KPI dictionaries from multiple simulation runs.
+        start_step: The step to start plotting from.
     """
     # Filter out failed runs
     all_kpis: List[Dict[str, Any]] = [k for k in all_kpis_raw if k is not None]
     if not all_kpis:
         print("No successful runs to plot.")
         return
+
+    # Plot undetected histories first (new addition)
+    # We try to infer the threshold from the first result if possible,
+    # though it's typically passed via args in main.
+    plot_undetected_reputations(all_kpis, start_step=start_step)
 
     # 1. Aggregate Reputation Histories
     honest_means_list: List[np.ndarray] = []
@@ -278,7 +437,10 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]]) -> None:
     all_honest_means = np.array(honest_means_list)
     all_faulty_means = np.array(faulty_means_list)
 
-    steps = np.arange(all_honest_means.shape[1])
+    # Slice data based on start_step
+    all_honest_means = all_honest_means[:, start_step:]
+    all_faulty_means = all_faulty_means[:, start_step:]
+    steps = np.arange(start_step, start_step + all_honest_means.shape[1])
 
     plt.figure(figsize=(10, 6))
 
@@ -373,14 +535,17 @@ if __name__ == "__main__":
     parser.add_argument("--num-runs", type=int,
                         default=NUM_RUNS, help="Number of MC runs")
     parser.add_argument("--threshold", type=float,
-                        default=0.4, help="Detection threshold for KPIs")
+                        default=0.5, help="Detection threshold for KPIs")
     parser.add_argument("--fpr-offset", type=float,
                         default=0.2, help="FPR offset percent (initialisation ignored)")
+    parser.add_argument("--start-step", type=int,
+                        default=0, help="Step to start plotting from (convergence)")
     parser.add_argument("--recalculate", action="store_true",
                         help="Recalculate KPIs from saved data")
     args = parser.parse_args()
 
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(EKF_DIR, exist_ok=True)
+    os.makedirs(SIM_DIR, exist_ok=True)
 
     results = None  # pylint: disable=invalid-name
     if os.path.exists(MC_RESULTS_PATH):
@@ -412,12 +577,24 @@ if __name__ == "__main__":
 
     if results is None:
         start_time = time.time()
-        print(f"Starting Monte Carlo simulation with {args.num_runs} \
-              runs using {NUM_PROCESSES} processes...")
 
+        # Phase 1: EKF Generation
+        print(f"Phase 1: Generating EKF data for {args.num_runs} runs...")
+        runs_to_gen = [i for i in range(args.num_runs)
+                       if not os.path.exists(os.path.join(EKF_DIR, f"ekf_run_{i}.npz"))]
+
+        if runs_to_gen:
+            with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+                list(executor.map(run_single_ekf, runs_to_gen))
+            print(f"EKF generation completed for {len(runs_to_gen)} runs.")
+        else:
+            print("All EKF data already exists. Skipping Phase 1.")
+
+        # Phase 2: Consensus Simulation
+        print(f"Phase 2: Running Consensus simulations for {args.num_runs} runs...")
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-            # Use partial to pass threshold and fpr_offset to run_single_simulation
-            sim_func = functools.partial(run_single_simulation, threshold=args.threshold,
+            # Use partial to pass threshold and fpr_offset to run_single_consensus
+            sim_func = functools.partial(run_single_consensus, threshold=args.threshold,
                                          fpr_offset=args.fpr_offset)
             results = list(executor.map(sim_func, range(args.num_runs)))
 
@@ -428,4 +605,5 @@ if __name__ == "__main__":
         print(f"Saving Monte Carlo results to {MC_RESULTS_PATH}")
         np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
 
-    plot_mc_results(results)
+    plot_mc_results(results, start_step=args.start_step)
+    generate_corner_plot()

@@ -76,11 +76,37 @@ def test_calculate_dof_score(consensus_mech):
     """
     Test the DOF-based scoring.
     """
-    assert consensus_mech.calculate_dof_score(1) == pytest.approx(1/3)
-    assert consensus_mech.calculate_dof_score(2) == pytest.approx(2/3)
-    assert consensus_mech.calculate_dof_score(3) == 1.0
-    # Should cap at 1.0
-    assert consensus_mech.calculate_dof_score(10) == 1.0
+    current_r_vector=[1.0, 2.0, 3.0]
+    current_v_vector=[0.1, 0.2, 0.3]
+    # Test base score - no previous vector or delta_t
+    assert consensus_mech.calculate_dof_score(1, current_r_vector, current_v_vector) == 0
+    assert consensus_mech.calculate_dof_score(2, current_r_vector, current_v_vector) == 0.5
+    assert consensus_mech.calculate_dof_score(3, current_r_vector, current_v_vector) == 1.0
+
+    # Test with previous vector and delta_t
+    previous_r_vector = [0.5, 1.5, 2.5]
+    previous_v_vector = [0.05, 0.15, 0.25]
+    delta_t = 10.0
+    score_1 = consensus_mech.calculate_dof_score(
+        dof=3,
+        current_r_vector=current_r_vector,
+        current_v_vector=current_v_vector,
+        previous_r_vector=previous_r_vector,
+        previous_v_vector=previous_v_vector,
+        delta_t=delta_t
+    )
+    assert score_1 == pytest.approx(0.4, 0.01)
+
+    # Expect unchanged vectros to score worse
+    score_2 = consensus_mech.calculate_dof_score(
+        dof=3,
+        current_r_vector=current_r_vector,
+        current_v_vector=current_v_vector,
+        previous_r_vector=current_r_vector,
+        previous_v_vector=current_v_vector,
+        delta_t=delta_t
+    )
+    assert score_1 > score_2
 
 def test_calculate_consensus_score(consensus_mech):
     """
@@ -139,7 +165,8 @@ def test_poise_no_bft_quorum(consensus_mech, mock_dag, mock_sat_node):
     Test PoISE when BFT quorum is not met.
     """
     mock_dag.has_bft_quorum.return_value = False
-    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2)
+    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
+                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
     tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
 
@@ -161,7 +188,8 @@ def test_poise_consensus_reached(mock_chi2, consensus_mech, mock_dag, mock_sat_n
     # Mock chi2 to ensure NIS is within bounds
     mock_chi2.ppf.side_effect = [0.1, 5.0] # lower, upper bounds
 
-    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2)
+    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
+                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
     tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
 
@@ -186,7 +214,8 @@ def test_poise_consensus_failed(mock_chi2, consensus_mech, mock_dag, mock_sat_no
     # Mock chi2 to ensure NIS is outside bounds
     mock_chi2.ppf.side_effect = [0.1, 5.0]
 
-    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=10.0, dof=2)
+    obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=10.0, dof=2,
+                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
     tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
 
