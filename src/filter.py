@@ -193,6 +193,7 @@ def propagate_truth_kepler(x0_stack: NDArray[np.float64],
 def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[np.float64]:
     """
     Calculates the expected range and range-rate measurement between an observer and a target.
+    This is what fixes the DOF to 2.
 
     Args:
     - target: The 6-element state vector of the target satellite.

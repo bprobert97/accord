@@ -251,7 +251,8 @@ class ConsensusMechanism():
         NOTE: Assume one witnessed satellite per transaction
         """
         new_ema_nis: Optional[float] = None
-        # 1) If the transaction is empty, penalise and reject
+        # 1) Check for valid data
+        # 1a) If the transaction is empty, penalise and reject
         if not transaction.tx_data:
             # Reduce node reputation for providing no or invalid data
             sat_node.reputation, sat_node.exp_pos, \
@@ -260,9 +261,27 @@ class ConsensusMechanism():
                 )
             return False, new_ema_nis
 
-        # 2) Add transaction to the DAG and check for BFT quorum
         transaction_data: dict = json.loads(transaction.tx_data)
         obs_record = ObservationRecord(**transaction_data)
+
+        # 1b) Check if the DOF is impossible (i.e. > 6 or < 1)
+        if obs_record.dof > 6 or obs_record.dof < 1:
+            logger.info("Invalid DOF of %d in transaction. Penalising reputation.",
+                        obs_record.dof)
+
+            # Instantly apply a negative penalty to the satellite
+            sat_node.reputation, sat_node.exp_pos, \
+                sat_node.performance_ema = sat_node.rep_manager.apply_negative(
+                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
+            )
+
+            # Reject the transaction before it contaminates the DAG
+            transaction.metadata.consensus_reached = False
+            transaction.metadata.is_rejected = True
+            return False, new_ema_nis
+
+
+        # 2) Add transaction to the DAG and check for BFT quorum
         dag.add_tx(transaction)
 
         if not dag.has_bft_quorum():
