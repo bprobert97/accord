@@ -970,15 +970,7 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     _, ax = plt.subplots(figsize=(10, 6))
 
     # Create box plot for the medians
-    cmap = plt.get_cmap('viridis')
-    colors = [cmap(0.5), cmap(0.05)] # Honest, Faulty
-
-    bp = ax.boxplot(plot_data, label=labels, patch_artist=True,
-               medianprops={"color": 'black', "linewidth": 2})
-
-    for patch, color in zip(bp['boxes'], colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.6)
+    ax.boxplot(plot_data)
 
     # Reference lines (assuming DOF=2)
     dof = 2
