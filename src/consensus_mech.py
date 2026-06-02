@@ -263,6 +263,7 @@ class ConsensusMechanism():
 
         transaction_data: dict = json.loads(transaction.tx_data)
         obs_record = ObservationRecord(**transaction_data)
+        transaction.metadata.observer_id = obs_record.observer
 
         # 1b) Check if the DOF is impossible (i.e. > 6 or < 1)
         if obs_record.dof > 6 or obs_record.dof < 1:
