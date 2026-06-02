@@ -14,8 +14,4 @@ app.log
 /tests/__pycache__
 .coverage
 coverage.xml
-/sim_data/*.log
-/sim_data/*.png
-/sim_data/mc_results/*
-/sim_data/comparison
-/sim_data/*.npz
+/sim_data
