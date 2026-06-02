@@ -22,13 +22,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import numpy as np
 from numpy.typing import NDArray
 from src.logger import get_logger
-from src.filter import ObservationRecord
+from src.filter import ObservationRecord, MU_EARTH, Re
 
 logger = get_logger()
 
-# ----------------------- Constants -----------------------
-MU_EARTH = 3.986004418e14  # m^3/s^2
-RE = 6378e3
 # ---------------------------------------------------------
 
 def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
@@ -45,7 +42,7 @@ def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
     rng = np.random.default_rng(seed)
 
     altitude = rng.uniform(180e3, 2000e3)
-    a = RE + altitude
+    a = Re + altitude
 
     e = rng.uniform(0, 0.05)
     i = rng.uniform(0, np.pi) # inclination in radians
