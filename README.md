@@ -125,11 +125,3 @@ To run the Monte Carlo Simulation:
    * `--fpr-offset`: False Palsitive Rate offset percent to ignore initialisation effects of the Extended Kalman Filter (default: 0.2)
    * `--recalculate`: Recalculate KPIs from saved data stored in `./sim_data/mc_results/mc_results.npz`
    * Example: `py mc_demo.py --num-runs 10 --threshold 0.2`
-
-
-## StreamLit App
-The key results from the ACCORD simulations are hosted online at: https://accord-demo.streamlit.app/
-
-If you would like to run strreamlit locally, in your terminal run:
-`streamlit run streamlit_app.py `
-
