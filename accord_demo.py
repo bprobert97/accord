@@ -51,7 +51,7 @@ EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 DEFAULT_CONFIG = FilterConfig(
-        N=100,
+        N=400,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
@@ -285,6 +285,7 @@ async def run_consensus_demo(config: FilterConfig,
                 config_sig_rdot=config.sig_rdot,
                 config_q_acc_target=config.q_acc_target,
                 config_seed=config.seed,
+                config_ISL_range_m=config.ISL_range_m,
                 truth=truth,
                 z_hist=z_hist,
                 all_obs_records=np.array(all_obs_records, dtype=object), # Save as object array
