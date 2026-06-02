@@ -637,18 +637,3 @@ class JointEKF:
         y = _ekf_update(self.ekf, z_k, self.config.N)
         return _log_nis(y, self.ekf, self.config.N, k, self.config.dt,
                         self.config.sig_r, self.config.sig_rdot)
-
-def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
-    """
-    Calculates the lower and upper bounds for a chi-squared distribution.
-
-    Args:
-    - dof: Degrees of freedom for the chi-squared distribution.
-    - alpha: The confidence level (e.g., 0.95 for 95% confidence).
-
-    Returns:
-    - A tuple containing the lower and upper bounds.
-    """
-    lo = chi2.ppf((1 - alpha) / 2.0, dof)
-    hi = chi2.ppf(1 - (1 - alpha) / 2.0, dof)
-    return float(lo), float(hi)

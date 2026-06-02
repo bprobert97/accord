@@ -159,14 +159,3 @@ def test_initialise_state_and_cov():
     for i in range(N):
         block = P0[STATE_DIM*i:STATE_DIM*(i+1), STATE_DIM*i:STATE_DIM*(i+1)]
         assert np.count_nonzero(block - np.diag(np.diagonal(block))) == 0
-
-def test_chi2_bounds():
-    """
-    Test the chi2_bounds function.
-    """
-    lo, hi = chi2_bounds(dof=2, alpha=0.95)
-    assert lo > 0
-    assert hi > lo
-    # For 2 DOF, 95% confidence, bounds are approx 0.05 and 7.38
-    assert np.isclose(lo, 0.05, atol=0.01)
-    assert np.isclose(hi, 7.38, atol=0.01)
