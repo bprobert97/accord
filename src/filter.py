@@ -572,6 +572,7 @@ class FilterConfig:
     Configuration parameters for the Extended Kalman Filter simulation.
 
     Attributes:
+    - ISL_range_m: The range for inter-satellite link observations in metres.
     - N: Number of satellites in the constellation.
     - steps: Number of simulation steps.
     - dt: Time step size in seconds.
@@ -580,6 +581,7 @@ class FilterConfig:
     - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
     - seed: Random seed for reproducibility.
     """
+    ISL_range_m: int
     N: int = 10
     steps: int = 3000
     dt: float = 60.0

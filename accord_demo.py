@@ -43,8 +43,6 @@ from src.logger import get_logger
 from src.satellite_node import SatelliteNode
 #------------------
 # Constants
-ISL_RANGE_METERS = 1000e3
-
 CLUSTER_SIZE = 10
 
 DATA_DIR = "sim_data"
@@ -61,6 +59,7 @@ DEFAULT_CONFIG = FilterConfig(
         sig_rdot=0.2,
         q_acc_target=1e-5,
         seed=42,
+        ISL_range_m=1000e3
     )
 #------------------
 # Helper functions
@@ -76,11 +75,12 @@ def clear_log(log_file_path: str = "app.log") -> None:
         get_logger().info("Cleared %s at the start of accord_demo.py", log_file_path)
 
 
-def is_in_isl_range(sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
+def is_in_isl_range(isl_range: int, sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
     """
     Checks if two satellites are within ISL range of each other.
 
     Args:
+    - isl_range: The range for inter-satellite communication in metres.
     - sat1: The first SatelliteNode.
     - sat2: The second SatelliteNode.
 
@@ -92,7 +92,7 @@ def is_in_isl_range(sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
         (sat1.y - sat2.y)**2 +
         (sat1.z - sat2.z)**2
     )
-    return distance <= ISL_RANGE_METERS
+    return distance <= isl_range
 
 #------------------
 # Main demo function
@@ -333,7 +333,7 @@ async def run_consensus_demo(config: FilterConfig,
                     if sid == other_sid:
                         continue
 
-                    if is_in_isl_range(sat, other_sat):
+                    if is_in_isl_range(config.ISL_range_m, sat, other_sat):
                         # Find the corresponding observation record
                         obs_to_submit = None
                         for obs in obs_by_step.get(k, []):

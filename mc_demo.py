@@ -33,7 +33,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from src.logger import get_logger
 from src.plotting import plot_mc_nis_boxplot, generate_corner_plot
-from accord_demo import run_consensus_demo, DEFAULT_CONFIG, ISL_RANGE_METERS
+from accord_demo import run_consensus_demo, DEFAULT_CONFIG
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
 # This is needed for parallel processing using ProcessPoolExecutor.
@@ -47,7 +47,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-ISL_RANGE_KM = ISL_RANGE_METERS // 1000
+ISL_RANGE_KM = DEFAULT_CONFIG.ISL_range_m // 1000
 
 # --- MC Configuration ---
 NUM_RUNS = 40
