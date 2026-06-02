@@ -403,6 +403,7 @@ if __name__ == "__main__":
         accord_logger.info("Attempting to load simulation results from %s", SIM_RESULTS_PATH)
         try:
             with np.load(SIM_RESULTS_PATH, allow_pickle=True) as simulated_data:
+                # pylint: disable=no-member
                 # Check if the number of satellites in the saved data matches the current config
                 saved_N = int(simulated_data['truth'].shape[1] / 6)
                 if saved_N == DEFAULT_CONFIG.N:
