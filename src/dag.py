@@ -1,4 +1,3 @@
-# pylint: disable=too-many-instance-attributes
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -28,6 +27,7 @@ import asyncio
 import json
 import random
 import bisect
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 from .logger import get_logger
@@ -37,6 +37,11 @@ if TYPE_CHECKING:
     from .consensus_mech import ConsensusMechanism
 
 logger = get_logger()
+
+@dataclass
+class MockDAG():
+    """A mock DAG object that only holds a ledger for plotting."""
+    ledger: dict
 
 class DAG():
     """

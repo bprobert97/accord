@@ -1,4 +1,3 @@
-# pylint: disable=protected-access, too-many-locals, too-many-positional-arguments, too-many-arguments
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert

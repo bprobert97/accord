@@ -1,4 +1,3 @@
-# pylint: disable=too-many-arguments, too-many-positional-arguments, too-many-instance-attributes
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert

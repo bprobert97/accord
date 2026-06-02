@@ -1,4 +1,3 @@
-# pylint: disable=too-many-locals, too-many-statements, no-member
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -82,6 +81,7 @@ def visualise_orbits(data_path='sim_data/sim_results.npz',
     viz_n = min(n_sats, 50)
     viz_indices = np.random.choice(range(n_sats), viz_n, replace=False)
 
+    # pylint: disable=no-member
     colors = plt.cm.viridis(np.linspace(0, 1, viz_n)) # type: ignore [attr-defined]
 
     for i in range(viz_n):

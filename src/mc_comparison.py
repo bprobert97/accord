@@ -1,4 +1,3 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught, duplicate-code
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -48,8 +47,15 @@ def load_results(path: str) -> List[Dict[str, Any]]:
         with np.load(path, allow_pickle=True) as data:
             results = list(data['results'])
             return [res for res in results if res is not None]
-    except Exception as e:
-        print(f"Error loading {path}: {e}")
+
+    except (OSError, ValueError) as e:
+        # Catches file read errors or corrupted/invalid .npz formats
+        print(f"Data error loading {path}: {e}")
+        return []
+
+    except KeyError as e:
+        # Catches the specific case where the file loaded, but 'results' is missing
+        print(f"Missing key in {path}: {e}")
         return []
 
 def get_aggregated_reps(results: List[Dict[str, Any]]) -> tuple[np.ndarray,

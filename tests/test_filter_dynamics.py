@@ -1,4 +1,3 @@
-# pylint: disable=protected-access, duplicate-code, invalid-name
 """
 Unit tests for the filter dynamics and measurement model functions.
 """

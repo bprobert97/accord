@@ -1,4 +1,3 @@
-# pylint: disable=redefined-outer-name
 """
 Unit tests for the SatelliteNode class.
 """

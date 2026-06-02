@@ -1,4 +1,3 @@
-# pylint: disable=redefined-outer-name, invalid-name
 """
 Unit and integration tests for the JointEKF class and related functions in src/filter.py.
 """

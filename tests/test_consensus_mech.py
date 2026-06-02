@@ -1,4 +1,3 @@
-# pylint: disable=protected-access, duplicate-code, redefined-outer-name
 """
 Unit tests for the ConsensusMechanism class.
 """

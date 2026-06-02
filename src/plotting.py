@@ -1,4 +1,3 @@
-# pylint: disable=too-many-locals, too-many-statements, protected-access, broad-exception-caught, too-many-branches, too-many-lines
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -24,7 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import json
 import os
 import re
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Iterator, Tuple
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -32,7 +31,7 @@ import numpy as np
 from scipy.stats import chi2
 import seaborn as sns
 from src.simulation import generate_random_keplerian_elements
-from src.dag import DAG
+from src.dag import DAG, MockDAG
 from src.reputation import ReputationManager, MAX_REPUTATION
 
 # === Configuration ===
@@ -41,6 +40,22 @@ FILENAME = "sim_data/app.log"  # your log file path
 THRESHOLD = 0.5                # consensus threshold
 CMAP = "viridis"               # color map for correctness
 REP_MGR = ReputationManager()
+
+def extract_nis_transactions(dag: Any) -> Iterator[Tuple[Any, dict]]:
+    """
+    Generator that iterates through a DAG ledger and yields
+    transactions (and their parsed JSON) that contain NIS metadata.
+    """
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "nis"):
+                continue
+
+            try:
+                tx_data = json.loads(tx.tx_data)
+                yield tx, tx_data
+            except (json.JSONDecodeError, TypeError):
+                continue
 
 def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
     """
@@ -152,13 +167,13 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
 
     plt.show()
 
-def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
+def plot_nis_boxplot(dag: DAG | MockDAG, faulty_ids: set[int],
                     convergence_index: Optional[int] = None) -> None:
     """
     Generates a grouped box plot for NIS values, separating honest and faulty satellites.
 
     Args:
-        dag (DAG): The DAG object containing transaction data.
+        dag (DAG | MockDAG): The DAG or mock DAG object containing transaction data.
         faulty_ids (set[int]): A set of IDs for faulty satellites.
         convergence_index (int): Optional index to only plot data
                                  after filter convergence.
@@ -170,26 +185,17 @@ def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
     faulty_nis = []
     start_index = convergence_index if convergence_index is not None else 0
 
-    for _, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            if not hasattr(tx.metadata, "nis"):
-                continue
+    for tx, tx_data in extract_nis_transactions(dag):
+        sid = tx_data.get("observer")
+        nis = getattr(tx.metadata, "nis", None)
 
-            try:
-                tx_data = json.loads(tx.tx_data)
-            except Exception:
-                continue
+        if sid is None or nis is None:
+            continue
 
-            sid = tx_data.get("observer")
-            nis = getattr(tx.metadata, "nis", None)
-
-            if sid is None or nis is None:
-                continue
-
-            if int(sid) in faulty_ids:
-                faulty_nis.append(nis)
-            else:
-                honest_nis.append(nis)
+        if int(sid) in faulty_ids:
+            faulty_nis.append(nis)
+        else:
+            honest_nis.append(nis)
 
     if not honest_nis and not faulty_nis:
         print("No NIS data available to create a box plot.")
@@ -268,7 +274,7 @@ def calculate_median_percentiles(dof: int = 2) -> None:
         print(f"{val:<15.3f} | {percentile:<20.4f} | {distance_from_ideal:<20.4f}")
 
 
-def check_consensus_outcomes(dag: DAG, consensus_threshold: float = 0.5) -> bool:
+def check_consensus_outcomes(dag: DAG | MockDAG, consensus_threshold: float = 0.5) -> bool:
     """
     Checks if transaction consensus outcomes (confirmed/rejected) are consistent
     with their consensus scores and reports any discrepancies.
@@ -279,7 +285,7 @@ def check_consensus_outcomes(dag: DAG, consensus_threshold: float = 0.5) -> bool
     2. Transactions with a score < threshold are marked as 'rejected'.
 
     Args:
-        dag (DAG): The DAG containing transaction data.
+        dag (DAG | MockDAG): The DAG or mock DAG containing transaction data.
         consensus_threshold (float): The consensus threshold used in the simulation.
 
     Returns:
@@ -372,7 +378,7 @@ def calculate_convergence_index(
 
 
 def calculate_nis_convergence_index(
-    dag: DAG,
+    dag: DAG | MockDAG,
     faulty_ids: set[int],
     confidence: float = 0.95,
     window_size: int = 5
@@ -382,7 +388,7 @@ def calculate_nis_convergence_index(
     satellites enter and stay within the expected chi-squared consistency bounds.
 
     Args:
-        dag (DAG): The DAG object containing transactions with NIS metadata.
+        dag (DAG | MockDAG): The DAG or mock DAG object containing transactions with NIS metadata.
         faulty_ids (set[int]): Set of faulty satellite IDs to exclude.
         confidence (float): Confidence level for chi-square bounds (default=0.95).
         window_size (int): Number of consecutive steps NIS must be within bounds.
@@ -776,9 +782,9 @@ def main() -> None:
     """Main function to parse log and generate plots."""
     # === Step 1: Parse the log file ===
     pattern = re.compile(
-        r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), consensus_score=([0-9.]+),\s*reputation=([0-9.]+)" # pylint: disable=line-too-long
-    )
-
+    r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), "
+    r"consensus_score=([0-9.]+),\s*reputation=([0-9.]+)"
+)
     data = []
     try:
         with open(FILENAME, "r", encoding="utf-8") as f:

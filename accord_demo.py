@@ -1,4 +1,3 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches, too-few-public-methods, no-member, too-many-arguments, too-many-positional-arguments
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -35,7 +34,7 @@ from src.plotting import  \
                     calculate_median_percentiles, \
                         plot_constellation
 from src.consensus_mech import ConsensusMechanism
-from src.dag import DAG
+from src.dag import DAG, MockDAG
 from src.filter import FilterConfig, \
     simulate_truth_and_meas, JointEKF, ObservationRecord, \
     apply_network_faults
@@ -169,8 +168,14 @@ async def run_consensus_demo(config: FilterConfig,
                 else:
                     logger.warning("Loaded EKF config does not match current config. \
                         Rerunning EKF simulation.")
-        except Exception as e:
-            logger.error("Failed to load EKF simulation results: %s. Rerunning EKF simulation.", e)
+        except (OSError, ValueError) as e:
+            logger.error(
+                "Corrupt or unreadable EKF results file. Rerunning EKF simulation. Error: %s", e
+            )
+        except KeyError as e:
+            logger.error(
+                "EKF results file is missing expected key %s. Rerunning EKF simulation.", e
+            )
 
     # If EKF results were not loaded or loading failed, run the EKF simulation
     if truth is None or z_hist is None or all_obs_records is None or x_hist is None:
@@ -388,19 +393,10 @@ async def run_consensus_demo(config: FilterConfig,
 if __name__ == "__main__":
     accord_logger = get_logger()
 
-    FINAL_DAG: Optional[DAG] = None
+    FINAL_DAG: DAG | MockDAG | None = None
     REP_HIST: Optional[dict] = None
     TRUTH: Optional[np.ndarray] = None
     FAULTY_IDS: Optional[set[int]] = None
-
-    class MockDAG(DAG):
-        """A mock DAG object that only holds a ledger for plotting."""
-        def __init__(self, ledger: dict):  # pylint: disable=super-init-not-called
-            self.ledger = ledger
-            # We don't call super().__init__ because we don't have the
-            # runtime dependencies (queue, consensus_mech) needed.
-            # This is acceptable because loaded DAGs are only used for plotting,
-            # which only requires the .ledger attribute.
 
     # Attempt to load simulation results if they exist
     if os.path.exists(SIM_RESULTS_PATH):
@@ -422,8 +418,15 @@ if __name__ == "__main__":
                         "Rerunning simulation.",
                         saved_N, DEFAULT_CONFIG.N
                     )
-        except Exception as e:
-            accord_logger.error("Failed to load simulation results: %s. Rerunning simulation.", e)
+        except (OSError, ValueError) as e:
+            accord_logger.error(
+                "Corrupt or unreadable simulation results file. Rerunning simulation. Error: %s", e
+            )
+        except KeyError as e:
+            accord_logger.error(
+                "Simulation results file is missing expected data array %s. \
+                    Rerunning simulation.", e
+            )
 
     # If simulation results were not loaded or loading failed, run the consensus simulation
     if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
