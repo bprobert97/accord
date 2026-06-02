@@ -41,6 +41,7 @@ from src.filter import FilterConfig, \
     simulate_truth_and_meas, JointEKF, ObservationRecord
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
+from src.simulation import apply_network_faults
 
 #------------------
 # Constants
@@ -65,11 +66,7 @@ DEFAULT_CONFIG = FilterConfig(
         seed=42,
     )
 #------------------
-# Logging functions
-
-def get_accord_logger() -> Logger:
-    """Helper to get or initialise the logger."""
-    return get_logger()
+# Helper functions
 
 
 def clear_log(log_file_path: str = "app.log") -> None:
@@ -99,6 +96,9 @@ def is_in_isl_range(sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
         (sat1.z - sat2.z)**2
     )
     return distance <= ISL_RANGE_METERS
+
+#------------------
+# Main demo function
 
 async def run_consensus_demo(config: FilterConfig,
                              save_ekf_results: bool = True,
@@ -348,20 +348,8 @@ async def run_consensus_demo(config: FilterConfig,
                                 break
 
                         if obs_to_submit:
-                            # --- Inject special satellite behavior ---
-                            if sid % 10 == 1:
-                                obs_to_submit.nis = 0.01
-                                faulty_ids.add(sid)
-                            elif sid % 10 == 2 and config.N >= 7:
-                                obs_to_submit.nis = 50.0
-                                faulty_ids.add(sid)
-                            elif sid % 10 == 3 and config.N >= 10:
-                                faulty_ids.add(sid)
-                                if 200 <= k < 400:
-                                    if obs_to_submit.nis > 2.0:
-                                        obs_to_submit.nis = obs_to_submit.nis * 10
-                                    else:
-                                        obs_to_submit.nis = obs_to_submit.nis / 10
+                            # Inject dishonest behaviour profiles
+                            apply_network_faults(obs_to_submit, sid, config.N, k, faulty_ids)
 
                             sat.load_sensor_data(obs_to_submit)
                             logger.info("Satellite %s: submitting transaction \
