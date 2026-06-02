@@ -129,11 +129,11 @@ To run the Monte Carlo Simulation:
 
 ## Configuration & Execution
 
-Before executing any simulations, the environment parameters must be defined via the `FilterConfig` dataclass.
+Before executing any simulations, the environment parameters must be defined via the `FilterConfig` dataclass. If any of these parameters change between runs, all data will be collected again from scratch and existing data will be overwritten. if none of the default config has changed, the simulation will load pre-existing saved data where possible.
 
 **Setting the ISL Distance**
 The maximum Inter-Satellite Link (ISL) distance is the core constraint that dictates network topology, observation frequency, and DAG formation.
 
-1. Locate the `DEFAULT_CONFIG` instantiation in the simulation script (e.g., `accord_demo.py` or `mc_demo.py`).
-2. Update the `ISL_range_m` parameter to reflect your desired communication threshold (e.g., 1000e3m or 2000e3m).
+1. Locate the `DEFAULT_CONFIG` instantiation in the simulation script (`accord_demo.py`). Note: you must do this for a single run with `accord_demo.py` or multiple runs with `mc_demo.py`.
+2. Update the `ISL_range_m` parameter to reflect your desired communication threshold (e.g., 1000e3m or 2000e3m). This goes up to a maximum as defined in `src/filter.py` by the `MAX_ISL_RANGE` parameter.
 3. Ensure your Monte Carlo random seeds are set within this config to guarantee deterministic and reproducible runs.
