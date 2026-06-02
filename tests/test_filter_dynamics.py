@@ -11,22 +11,22 @@ from src.filter import (
     _initialise_state_and_cov,
     rk4_step,
     H_blocks_target_obs,
-    chi2_bounds,
     MU_EARTH,
-    Re,
     STATE_DIM,
 )
+
+from src.simulation import RE
 
 def test_two_body_f():
     """
     Test the two-body dynamics function.
     """
     # Satellite in a circular orbit at Re altitude
-    x = np.array([Re, 0, 0, 0, np.sqrt(MU_EARTH / Re), 0])
+    x = np.array([RE, 0, 0, 0, np.sqrt(MU_EARTH / RE), 0])
     x_dot = two_body_f(x)
 
     # Expected acceleration is purely in the -x direction
-    expected_a = -MU_EARTH / Re**2
+    expected_a = -MU_EARTH / RE**2
 
     # Check velocity part of derivative
     assert np.allclose(x_dot[:3], x[3:])
@@ -40,7 +40,7 @@ def test_rk4_step():
     Test the RK4 integration step.
     """
     # Start with satellite at rest far away, it should fall towards Earth
-    x = np.array([2 * Re, 0, 0, 0, 0, 0])
+    x = np.array([2 * RE, 0, 0, 0, 0, 0])
     dt = 1.0
     x_next = rk4_step(x, dt)
 
@@ -76,8 +76,8 @@ def test_h_blocks_target_obs():
     """
     Test the measurement Jacobian calculation.
     """
-    obs_state = np.array([Re, 0, 0, 0, 0, 0])
-    target_state = np.array([Re + 1000, 0, 0, 0, 10, 0])
+    obs_state = np.array([RE, 0, 0, 0, 0, 0])
+    target_state = np.array([RE + 1000, 0, 0, 0, 10, 0])
 
     Ht, Ho = H_blocks_target_obs(target_state, obs_state)
 
@@ -103,7 +103,7 @@ def test_f_jacobian_6():
     This is a simple sanity check. A full validation would require
     numerical differentiation.
     """
-    x = np.array([Re, 0, 0, 0, 7600, 0])
+    x = np.array([RE, 0, 0, 0, 7600, 0])
     F = F_jacobian_6(x)
 
     # Check shape

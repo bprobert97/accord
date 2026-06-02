@@ -26,7 +26,6 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
 from numpy.typing import NDArray
-from scipy.stats import chi2
 from scipy.linalg import expm
 from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
 from src.logger import get_logger
@@ -581,7 +580,7 @@ class FilterConfig:
     - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
     - seed: Random seed for reproducibility.
     """
-    ISL_range_m: int
+    ISL_range_m: float
     N: int = 10
     steps: int = 3000
     dt: float = 60.0
@@ -637,7 +636,8 @@ class JointEKF:
                         self.config.sig_r, self.config.sig_rdot)
 
 
-def apply_network_faults(obs_to_submit: ObservationRecord, sid: int, n_sats: int, k: int, faulty_ids: set) -> None:
+def apply_network_faults(obs_to_submit: ObservationRecord, sid: int, n_sats: int,
+                         k: int, faulty_ids: set) -> None:
     """Injects deterministic faulty NIS values based on satellite ID for testing.
 
     Args:

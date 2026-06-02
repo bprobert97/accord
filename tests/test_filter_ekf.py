@@ -17,7 +17,7 @@ from src.filter import (
 def filter_config():
     """Provides a default FilterConfig for tests, using a small constellation."""
     # Use a small N and few steps for speed
-    return FilterConfig(N=3, steps=2, dt=1.0, seed=42)
+    return FilterConfig(N=3, steps=2, dt=1.0, seed=42, ISL_range_m=1000e3)
 
 @pytest.fixture
 def ekf(filter_config: FilterConfig):

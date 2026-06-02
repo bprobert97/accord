@@ -33,7 +33,7 @@ from scipy.stats import chi2
 import seaborn as sns
 from src.simulation import generate_random_keplerian_elements
 from src.dag import DAG
-from src.reputation import MAX_REPUTATION, ReputationManager
+from src.reputation import ReputationManager
 
 # === Configuration ===
 DATA_DIR = "sim_data"

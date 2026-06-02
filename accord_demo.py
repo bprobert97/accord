@@ -75,7 +75,7 @@ def clear_log(log_file_path: str = "app.log") -> None:
         get_logger().info("Cleared %s at the start of accord_demo.py", log_file_path)
 
 
-def is_in_isl_range(isl_range: int, sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
+def is_in_isl_range(isl_range: float, sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
     """
     Checks if two satellites are within ISL range of each other.
 
@@ -154,7 +154,8 @@ async def run_consensus_demo(config: FilterConfig,
                     sig_r=data['config_sig_r'],
                     sig_rdot=data['config_sig_rdot'],
                     q_acc_target=data['config_q_acc_target'],
-                    seed=data['config_seed']
+                    seed=data['config_seed'],
+                    ISL_range_m=data['config_ISL_range_m']
                 )
 
                 # Check if loaded config matches current config
@@ -200,7 +201,8 @@ async def run_consensus_demo(config: FilterConfig,
                 sig_r=config.sig_r,
                 sig_rdot=config.sig_rdot,
                 q_acc_target=config.q_acc_target,
-                seed=config.seed + i # Use different seed for each cluster
+                seed=config.seed + i, # Use different seed for each cluster
+                ISL_range_m=config.ISL_range_m
             )
 
             # Extract initial truth state for this cluster
@@ -295,7 +297,7 @@ async def run_consensus_demo(config: FilterConfig,
         logger.error("EKF simulation data is not available after loading or running. Exiting.")
         return None, None, None, None
 
-    faulty_ids = set()
+    faulty_ids: set[int] = set()
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
