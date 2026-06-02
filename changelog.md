@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.1] - 2026-05
+
+### Summary
+This release introduces minor changes ahead of writing a journal paper about ACCORD.
+
+### Added
+- Script to visualise orbits in a gif
+- Walker delta simulation ability
+- Persistence of excitation term
+- Ability to identify which falty satellites go undetected
+- More specific file name for MC data
+- Colourblind friendly palettes for figure generation
+- Max and Min DOF checks in consensus
+---
+
 ## [3.0] - 2026-03
 
 ### Summary
