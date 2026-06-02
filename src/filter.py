@@ -26,7 +26,7 @@ from typing import List, Tuple
 import numpy as np
 from numpy.typing import NDArray
 from scipy.linalg import expm
-from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
+from filterpy.kalman import ExtendedKalmanFilter
 from src.logger import get_logger
 from src.simulation import generate_random_keplerian_elements, \
     keplerian_to_cartesian, generate_walker_delta_constellation, \
@@ -204,7 +204,7 @@ def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[n
     po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
     rho = pt - po
     r = np.linalg.norm(rho)
-    r = max(r, 1e-8) # type: ignore
+    r = np.maximum(r, 1e-8)
     vrel = vt - vo
     rdot = float(rho.dot(vrel) / r)
     return np.array([r, rdot])
@@ -229,7 +229,7 @@ def H_blocks_target_obs(target: NDArray[np.float64],
     po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
     rho = pt - po
     r = np.linalg.norm(rho)
-    r = max(r, 1e-8) # type: ignore
+    r = np.maximum(r, 1e-8)
     rhat = rho / r
     I3 = np.eye(POS_VEL_DIM)
     vrel = vt - vo
@@ -549,11 +549,11 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
 
             # Add unit LOS vector. Avoid division by zero.
             # rhat is an NDArray so use tolist() later to make it json serialisable.
-            rhat = rho / (max(r, 1e-8))  # type: ignore [call-overload]
+            rhat = rho / (np.maximum(r, 1e-8))
 
             # Add unit LOS velocity vector. Avoid division by zero.
             # vhat is an NDArray so use tolist() later to make it json serialisable.
-            vhat = vrel / (max(np.linalg.norm(vrel), 1e-8))  # type: ignore [call-overload]
+            vhat = vrel / (np.maximum(np.linalg.norm(vrel), 1e-8))
 
             obs_records.append(
                 ObservationRecord(

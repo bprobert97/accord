@@ -1,3 +1,4 @@
+# mypy: disable-error-code="attr-defined"
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -96,7 +97,8 @@ def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
     # Adjust legend to handle the transparency gracefully
     leg = ax.legend(fontsize=20)
     for lh in leg.legend_handles:
-        lh.set_alpha(1)  # type: ignore [union-attr]
+        if lh is not None:
+            lh.set_alpha(1)
 
     ax.grid(True, linestyle=":", alpha=0.7)
 
@@ -125,9 +127,9 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     x_earth = r_e * np.outer(np.cos(u), np.sin(v))
     y_earth = r_e * np.outer(np.sin(u), np.sin(v))
     z_earth = r_e * np.outer(np.ones(np.size(u)), np.cos(v))
-    ax.plot_surface(x_earth, y_earth, z_earth, # type: ignore [attr-defined]
+    ax.plot_surface(x_earth, y_earth, z_earth,
                     color='blue', alpha=0.3,
-                    rstride=4, cstride=4)  # type: ignore [attr-defined]
+                    rstride=4, cstride=4)
 
     # Plot satellite orbits
     for i in range(n):
@@ -139,7 +141,7 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
 
         # Plot final position
         ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2],
-                   color='black', s=10) # type: ignore [misc]
+                   color='black', s=10)  # type: ignore[misc]
 
     # Custom legend
     legend_elements = [
@@ -152,18 +154,18 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     # Set plot labels
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
-    ax.set_zlabel("Z (m)") # type: ignore [attr-defined]
+    ax.set_zlabel("Z (m)")
 
     # Make axes equal to avoid distortion
     max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(),
-                               ax.get_zlim()]) # type: ignore [attr-defined]
+                               ax.get_zlim()])
     max_range = np.ptp(max_range_temp).max() / 2.0
     mid_x = np.mean(ax.get_xlim())
     mid_y = np.mean(ax.get_ylim())
-    mid_z = np.mean(ax.get_zlim()) # type: ignore [attr-defined]
+    mid_z = np.mean(ax.get_zlim())
     ax.set_xlim(mid_x - max_range, mid_x + max_range)
     ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_zlim(mid_z - max_range, mid_z + max_range) # type: ignore [attr-defined]
+    ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
     plt.show()
 
@@ -217,7 +219,11 @@ def plot_nis_boxplot(dag: DAG | MockDAG, faulty_ids: set[int],
     _, ax = plt.subplots(figsize=(10, 6))
 
     # Create box plot
-    parts = ax.boxplot(plot_data, labels=labels) # type: ignore [call-arg]
+    parts = ax.boxplot(plot_data)
+
+    # Apply the labels manually
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels)
 
     for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
         if partname in parts:
@@ -488,8 +494,8 @@ def plot_aggregated_reputation(
         else:
             honest_matrix.append(padded_history)
 
-    honest_matrix = np.array(honest_matrix)  # type: ignore [assignment]
-    faulty_matrix = np.array(faulty_matrix)  # type: ignore [assignment]
+    honest_arr = np.array(honest_matrix)
+    faulty_arr = np.array(faulty_matrix)
 
     start_index = 0
     if start_at_full_constellation:
@@ -502,10 +508,12 @@ def plot_aggregated_reputation(
 
     # Slice data for plotting
     steps = np.arange(max_len)[start_index:]
-    if len(honest_matrix) > 0:
-        honest_matrix = honest_matrix[:, start_index:]  # type: ignore [call-overload]
-    if len(faulty_matrix) > 0:
-        faulty_matrix = faulty_matrix[:, start_index:]  # type: ignore [call-overload]
+    if len(honest_arr) > 0:
+        honest_array = np.array(honest_arr)
+        honest_array = honest_array[:, start_index:]
+    if len(faulty_arr) > 0:
+        faulty_array = np.array(faulty_arr)
+        faulty_array = faulty_array[:, start_index:]
 
     if not steps.size:
         print("No data points to plot after filtering.")

@@ -69,8 +69,8 @@ def visualise_orbits(data_path='sim_data/sim_results.npz',
     x_earth = r_e * np.outer(np.cos(u), np.sin(v))
     y_earth = r_e * np.outer(np.sin(u), np.sin(v))
     z_earth = r_e * np.outer(np.ones(np.size(u)), np.cos(v))
-    ax.plot_surface(x_earth, y_earth, z_earth, color='blue', # type: ignore [attr-defined]
-                    alpha=0.1, rstride=2, cstride=2) # type: ignore [attr-defined]
+    ax.plot_surface(x_earth, y_earth, z_earth, color='blue',  # type: ignore[attr-defined]
+                    alpha=0.1, rstride=2, cstride=2)
 
     # Initialise satellite markers
     dots = []
@@ -82,7 +82,7 @@ def visualise_orbits(data_path='sim_data/sim_results.npz',
     viz_indices = np.random.choice(range(n_sats), viz_n, replace=False)
 
     # pylint: disable=no-member
-    colors = plt.cm.viridis(np.linspace(0, 1, viz_n)) # type: ignore [attr-defined]
+    colors = plt.cm.viridis(np.linspace(0, 1, viz_n))  # type: ignore[attr-defined]
 
     for i in range(viz_n):
         dot, = ax.plot([], [], [], 'o', color=colors[i], markersize=4)
@@ -91,10 +91,10 @@ def visualise_orbits(data_path='sim_data/sim_results.npz',
         trails.append(trail)
 
     # Add text overlays
-    _ = ax.text2D(0.05, 0.95, f"Satellites shown: {viz_n} / {n_sats}", # type: ignore [attr-defined]
+    _ = ax.text2D(0.05, 0.95, f"Satellites shown: {viz_n} / {n_sats}",  # type: ignore[attr-defined]
                            transform=ax.transAxes, fontsize=12, fontweight='bold')
-    step_text = ax.text2D(0.05, 0.90, "", transform=ax.transAxes, # type: ignore [attr-defined]
-                          fontsize=12) # type: ignore [attr-defined]
+    step_text = ax.text2D(0.05, 0.90, "", transform=ax.transAxes, # type: ignore[attr-defined]
+                          fontsize=12)
 
     # Set plot limits
     # Calculate limits from first step positions to ensure Earth and orbits are visible
@@ -103,10 +103,10 @@ def visualise_orbits(data_path='sim_data/sim_results.npz',
 
     ax.set_xlim(-limit, limit)
     ax.set_ylim(-limit, limit)
-    ax.set_zlim(-limit, limit) # type: ignore [attr-defined]
+    ax.set_zlim(-limit, limit)  # type: ignore[attr-defined]
     ax.set_xlabel('X (m)')
     ax.set_ylabel('Y (m)')
-    ax.set_zlabel('Z (m)') # type: ignore [attr-defined]
+    ax.set_zlabel('Z (m)')  # type: ignore[attr-defined]
     ax.set_title('Satellite Constellation Animation', fontsize=16)
 
     def init():

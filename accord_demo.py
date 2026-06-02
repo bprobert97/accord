@@ -373,8 +373,8 @@ async def run_consensus_demo(config: FilterConfig,
             os.makedirs(os.path.dirname(sim_results_path), exist_ok=True)
             np.savez_compressed(
                 sim_results_path,
-                dag_ledger=dag.ledger,  # type: ignore [arg-type]
-                rep_history=rep_history,  # type: ignore [arg-type]
+                dag_ledger=dag.ledger, # type: ignore[arg-type]
+                rep_history=rep_history, # type: ignore[arg-type]
                 truth=truth,
                 faulty_ids=np.array(list(faulty_ids))
             )

@@ -101,7 +101,7 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         # If matrices provided, we try to recover IDs if passed
         honest_ids = None
         faulty_ids_list = sorted(list(faulty_ids)) \
-            if faulty_ids is not None else None  # type: ignore [assignment]
+            if faulty_ids is not None else []
 
     # Infer steps from the matrix shape if not explicitly provided
     if steps is None:
@@ -388,7 +388,7 @@ def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
         num_items = len(plotted_legend_ids)
         if num_items > 15:
             plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small', ncol=2)
-            plt.tight_layout(rect=[0, 0, 0.85, 1])  # type: ignore [arg-type]
+            plt.tight_layout(rect=(0, 0, 0.85, 1))
         elif num_items > 0:
             plt.legend(loc='best', fontsize='small')
 
