@@ -33,7 +33,7 @@ from scipy.stats import chi2
 import seaborn as sns
 from src.simulation import generate_random_keplerian_elements
 from src.dag import DAG
-from src.reputation import ReputationManager
+from src.reputation import ReputationManager, MAX_REPUTATION
 
 # === Configuration ===
 DATA_DIR = "sim_data"
@@ -541,7 +541,7 @@ def plot_aggregated_reputation(
         )
 
     # Formatting
-    plt.axhline(0.5, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
+    plt.axhline(MAX_REPUTATION/2, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
 
     if convergence_index is not None and not start_at_full_constellation:
         plt.axvline(x=convergence_index, color="black", linestyle="--",\
