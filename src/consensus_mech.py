@@ -1,4 +1,3 @@
-# pylint: disable=too-many-return-statements too-many-branches too-many-arguments too-many-positional-arguments, too-many-locals, too-many-statements
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -263,6 +262,7 @@ class ConsensusMechanism():
 
         transaction_data: dict = json.loads(transaction.tx_data)
         obs_record = ObservationRecord(**transaction_data)
+        transaction.metadata.observer_id = obs_record.observer
 
         # 1b) Check if the DOF is impossible (i.e. > 6 or < 1)
         if obs_record.dof > 6 or obs_record.dof < 1:

@@ -1,4 +1,4 @@
-# pylint: disable=too-many-locals, too-many-statements, protected-access, broad-exception-caught, too-many-branches, too-many-lines
+# mypy: disable-error-code="attr-defined"
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -21,21 +21,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
-import base64
 import json
 import os
 import re
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Iterator, Tuple
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
-import plotly.graph_objects as go
 from scipy.stats import chi2
 import seaborn as sns
 from src.simulation import generate_random_keplerian_elements
-from src.dag import DAG
-from src.reputation import MAX_REPUTATION, ReputationManager
+from src.dag import DAG, MockDAG
+from src.reputation import ReputationManager, MAX_REPUTATION
 
 # === Configuration ===
 DATA_DIR = "sim_data"
@@ -43,6 +41,22 @@ FILENAME = "sim_data/app.log"  # your log file path
 THRESHOLD = 0.5                # consensus threshold
 CMAP = "viridis"               # color map for correctness
 REP_MGR = ReputationManager()
+
+def extract_nis_transactions(dag: Any) -> Iterator[Tuple[Any, dict]]:
+    """
+    Generator that iterates through a DAG ledger and yields
+    transactions (and their parsed JSON) that contain NIS metadata.
+    """
+    for _, tx_list in dag.ledger.items():
+        for tx in tx_list:
+            if not hasattr(tx.metadata, "nis"):
+                continue
+
+            try:
+                tx_data = json.loads(tx.tx_data)
+                yield tx, tx_data
+            except (json.JSONDecodeError, TypeError):
+                continue
 
 def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
     """
@@ -83,7 +97,8 @@ def plot_nis_vs_consensus(df: pd.DataFrame) -> None:
     # Adjust legend to handle the transparency gracefully
     leg = ax.legend(fontsize=20)
     for lh in leg.legend_handles:
-        lh.set_alpha(1)  # type: ignore [union-attr]
+        if lh is not None:
+            lh.set_alpha(1)
 
     ax.grid(True, linestyle=":", alpha=0.7)
 
@@ -112,9 +127,9 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     x_earth = r_e * np.outer(np.cos(u), np.sin(v))
     y_earth = r_e * np.outer(np.sin(u), np.sin(v))
     z_earth = r_e * np.outer(np.ones(np.size(u)), np.cos(v))
-    ax.plot_surface(x_earth, y_earth, z_earth, # type: ignore [attr-defined]
+    ax.plot_surface(x_earth, y_earth, z_earth,
                     color='blue', alpha=0.3,
-                    rstride=4, cstride=4)  # type: ignore [attr-defined]
+                    rstride=4, cstride=4)
 
     # Plot satellite orbits
     for i in range(n):
@@ -126,7 +141,7 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
 
         # Plot final position
         ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2],
-                   color='black', s=10) # type: ignore [misc]
+                   color='black', s=10)  # type: ignore[misc]
 
     # Custom legend
     legend_elements = [
@@ -139,181 +154,28 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     # Set plot labels
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
-    ax.set_zlabel("Z (m)") # type: ignore [attr-defined]
+    ax.set_zlabel("Z (m)")
 
     # Make axes equal to avoid distortion
     max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(),
-                               ax.get_zlim()]) # type: ignore [attr-defined]
+                               ax.get_zlim()])
     max_range = np.ptp(max_range_temp).max() / 2.0
     mid_x = np.mean(ax.get_xlim())
     mid_y = np.mean(ax.get_ylim())
-    mid_z = np.mean(ax.get_zlim()) # type: ignore [attr-defined]
+    mid_z = np.mean(ax.get_zlim())
     ax.set_xlim(mid_x - max_range, mid_x + max_range)
     ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_zlim(mid_z - max_range, mid_z + max_range) # type: ignore [attr-defined]
+    ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
     plt.show()
 
-
-def plot_reputation(rep_history: dict[str, list[float]]) -> None:
-    """
-    Plot the reputation history of satellite nodes.
-
-    Args:
-        rep_history (dict[str, list[float]]): A dictionary where keys are node IDs and
-                                              values are lists of reputation scores over time.
-
-    Returns:
-        None: Displays a plot of reputation over time for each node.
-    """
-    neutral_level: float = MAX_REPUTATION / 2
-    plt.figure(figsize=(8, 5))
-
-    max_len = max((len(h) for h in rep_history.values()), default=0)
-    steps = list(range(max_len))
-
-    # Plot reputation histories
-    cmap = plt.get_cmap('viridis')
-    node_ids = sorted(rep_history.keys(), key=lambda x: int(x) if x.isdigit() else x)
-    for i, node_id in enumerate(node_ids):
-        history = rep_history[node_id]
-        color = cmap(i / max(1, len(node_ids) - 1))
-        plt.plot(range(len(history)), history, marker="o", \
-                 markersize=2, color=color, label=f"Sat_{node_id} Reputation")
-
-    # Plot target curve ONCE (using max length)
-    if max_len > 0:
-        # Simulate the max reputation trajectory (all positives, with decay)
-        exp_pos = 0
-        rep = MAX_REPUTATION / 2
-        target_curve = []
-        for _ in steps:
-            rep = REP_MGR.decay(rep)
-            gompertz_target = REP_MGR._gompertz_target(exp_pos)
-            rep = rep + REP_MGR.alpha * (gompertz_target - rep)
-            target_curve.append(rep)
-            exp_pos += 1
-        target_curve = np.array(target_curve) # type: ignore [assignment]
-
-        plt.plot(steps, target_curve, linestyle="--",
-                 color="orange", linewidth=2, label="Target curve")
-
-    # Neutral line
-    plt.axhline(neutral_level, color="gray", linestyle=":", label=f"Neutral ({neutral_level})")
-
-    plt.xlabel("Chronological Transaction Index [-]", fontsize=14)
-    plt.ylabel("Reputation Score [-]", fontsize=14)
-    plt.tick_params(axis='x', labelsize=14)
-    plt.tick_params(axis='y', labelsize=14)
-    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.,
-               fontsize=14)
-    plt.grid(True, linestyle=":")
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_nis_consistency_by_satellite(dag: DAG, confidence: float = 0.95) -> None:
-    """
-    Plots Normalised Innovation Squared (NIS) values for each satellite individually,
-    comparing them to expected chi-squared consistency bounds. Each satellite
-    is displayed in a separate plot window.
-
-    Args:
-        dag (DAG): The final DAG object containing transactions (with NIS + DOF metadata).
-        confidence (float): Confidence level for chi-square bounds (default=0.95).
-
-    Returns:
-        None: Displays NIS plots with statistical consistency regions for each satellite.
-    """
-    # Collect data by satellite
-    data_by_sat: dict[str, list] = {}
-    for _, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            if not hasattr(tx.metadata, "nis") or not hasattr(tx.metadata, "dof"):
-                continue
-
-            try:
-                tx_data = json.loads(tx.tx_data)
-            except Exception:
-                continue
-
-            sid = tx_data.get("observer")
-            if sid is None:
-                continue
-
-            nis = getattr(tx.metadata, "nis", None)
-            dof = getattr(tx.metadata, "dof", None)
-            if nis is None or dof is None:
-                continue
-
-            data_by_sat.setdefault(str(sid), []).append({
-                "nis": nis,
-                "dof": dof,
-            })
-
-    # Filter out satellites with no data
-    data_by_sat = {sid: vals for sid, vals in data_by_sat.items() if vals}
-    if not data_by_sat:
-        print("No NIS/DOF data available to plot.")
-        return
-
-    # Sort by satellite ID for consistent plot order
-    sorted_sats = sorted(data_by_sat.items(), key=lambda item: int(item[0]))
-
-    for sid, records in sorted_sats:
-        # Create a new figure for each satellite
-        plt.figure(figsize=(12, 6))
-        ax = plt.gca()
-
-        nis_vals = np.array([r["nis"] for r in records])
-        dof_vals = np.array([r["dof"] for r in records])
-
-        if len(nis_vals) == 0:
-            continue
-
-        mean_dof = np.mean(dof_vals)
-
-        # Compute chi-square confidence bounds
-        chi2_lower = chi2.ppf((1 - confidence) / 2, df=mean_dof)
-        chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
-        expected_mean = mean_dof
-
-        # Plot NIS sequence
-        steps = np.arange(len(nis_vals))
-        ax.plot(steps, nis_vals, "o", color="black",
-                label=f"NIS (Sat_{sid})")
-
-        # Expected mean and confidence region
-        ax.axhline(expected_mean, color="blue", linestyle="--",
-                    label=f"Expected mean (DOF={mean_dof:.1f})")
-        ax.fill_between(
-            steps,
-            chi2_lower,
-            chi2_upper,
-            color="green",
-            alpha=0.1,
-            label=f"{int(confidence*100)}% confidence region"
-        )
-
-        ax.set_ylabel("Normalised Innovation Squared", fontsize=24)
-        ax.set_yscale("symlog")
-        ax.grid(True, linestyle=":")
-        ax.legend(loc="upper right", fontsize=20)
-        ax.set_xlabel("Transaction Index", fontsize=24)
-        ax.tick_params(axis='x', labelsize=24)
-        ax.tick_params(axis='y', labelsize=24)
-        plt.tight_layout()
-
-    plt.show()
-
-
-def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
+def plot_nis_boxplot(dag: DAG | MockDAG, faulty_ids: set[int],
                     convergence_index: Optional[int] = None) -> None:
     """
     Generates a grouped box plot for NIS values, separating honest and faulty satellites.
 
     Args:
-        dag (DAG): The DAG object containing transaction data.
+        dag (DAG | MockDAG): The DAG or mock DAG object containing transaction data.
         faulty_ids (set[int]): A set of IDs for faulty satellites.
         convergence_index (int): Optional index to only plot data
                                  after filter convergence.
@@ -325,26 +187,17 @@ def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
     faulty_nis = []
     start_index = convergence_index if convergence_index is not None else 0
 
-    for _, tx_list in dag.ledger.items():
-        for tx in tx_list:
-            if not hasattr(tx.metadata, "nis"):
-                continue
+    for tx, tx_data in extract_nis_transactions(dag):
+        sid = tx_data.get("observer")
+        nis = getattr(tx.metadata, "nis", None)
 
-            try:
-                tx_data = json.loads(tx.tx_data)
-            except Exception:
-                continue
+        if sid is None or nis is None:
+            continue
 
-            sid = tx_data.get("observer")
-            nis = getattr(tx.metadata, "nis", None)
-
-            if sid is None or nis is None:
-                continue
-
-            if int(sid) in faulty_ids:
-                faulty_nis.append(nis)
-            else:
-                honest_nis.append(nis)
+        if int(sid) in faulty_ids:
+            faulty_nis.append(nis)
+        else:
+            honest_nis.append(nis)
 
     if not honest_nis and not faulty_nis:
         print("No NIS data available to create a box plot.")
@@ -366,7 +219,11 @@ def plot_nis_boxplot(dag: DAG, faulty_ids: set[int],
     _, ax = plt.subplots(figsize=(10, 6))
 
     # Create box plot
-    parts = ax.boxplot(plot_data, labels=labels) # type: ignore [call-arg]
+    parts = ax.boxplot(plot_data)
+
+    # Apply the labels manually
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels)
 
     for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
         if partname in parts:
@@ -423,7 +280,7 @@ def calculate_median_percentiles(dof: int = 2) -> None:
         print(f"{val:<15.3f} | {percentile:<20.4f} | {distance_from_ideal:<20.4f}")
 
 
-def check_consensus_outcomes(dag: DAG, consensus_threshold: float = 0.5) -> bool:
+def check_consensus_outcomes(dag: DAG | MockDAG, consensus_threshold: float = 0.5) -> bool:
     """
     Checks if transaction consensus outcomes (confirmed/rejected) are consistent
     with their consensus scores and reports any discrepancies.
@@ -434,7 +291,7 @@ def check_consensus_outcomes(dag: DAG, consensus_threshold: float = 0.5) -> bool
     2. Transactions with a score < threshold are marked as 'rejected'.
 
     Args:
-        dag (DAG): The DAG containing transaction data.
+        dag (DAG | MockDAG): The DAG or mock DAG containing transaction data.
         consensus_threshold (float): The consensus threshold used in the simulation.
 
     Returns:
@@ -527,7 +384,7 @@ def calculate_convergence_index(
 
 
 def calculate_nis_convergence_index(
-    dag: DAG,
+    dag: DAG | MockDAG,
     faulty_ids: set[int],
     confidence: float = 0.95,
     window_size: int = 5
@@ -537,7 +394,7 @@ def calculate_nis_convergence_index(
     satellites enter and stay within the expected chi-squared consistency bounds.
 
     Args:
-        dag (DAG): The DAG object containing transactions with NIS metadata.
+        dag (DAG | MockDAG): The DAG or mock DAG object containing transactions with NIS metadata.
         faulty_ids (set[int]): Set of faulty satellite IDs to exclude.
         confidence (float): Confidence level for chi-square bounds (default=0.95).
         window_size (int): Number of consecutive steps NIS must be within bounds.
@@ -637,8 +494,8 @@ def plot_aggregated_reputation(
         else:
             honest_matrix.append(padded_history)
 
-    honest_matrix = np.array(honest_matrix)  # type: ignore [assignment]
-    faulty_matrix = np.array(faulty_matrix)  # type: ignore [assignment]
+    honest_arr = np.array(honest_matrix)
+    faulty_arr = np.array(faulty_matrix)
 
     start_index = 0
     if start_at_full_constellation:
@@ -651,10 +508,12 @@ def plot_aggregated_reputation(
 
     # Slice data for plotting
     steps = np.arange(max_len)[start_index:]
-    if len(honest_matrix) > 0:
-        honest_matrix = honest_matrix[:, start_index:]  # type: ignore [call-overload]
-    if len(faulty_matrix) > 0:
-        faulty_matrix = faulty_matrix[:, start_index:]  # type: ignore [call-overload]
+    if len(honest_arr) > 0:
+        honest_array = np.array(honest_arr)
+        honest_array = honest_array[:, start_index:]
+    if len(faulty_arr) > 0:
+        faulty_array = np.array(faulty_arr)
+        faulty_array = faulty_array[:, start_index:]
 
     if not steps.size:
         print("No data points to plot after filtering.")
@@ -696,7 +555,7 @@ def plot_aggregated_reputation(
         )
 
     # Formatting
-    plt.axhline(0.5, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
+    plt.axhline(MAX_REPUTATION/2, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
 
     if convergence_index is not None and not start_at_full_constellation:
         plt.axvline(x=convergence_index, color="black", linestyle="--",\
@@ -792,145 +651,6 @@ def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
 
     plt.tight_layout()
     plt.savefig(os.path.join(DATA_DIR, "orbit_map.png"))
-
-def plot_ground_tracks_plotly(truth: np.ndarray, n: int) -> go.Figure:
-    """
-    Plots an interactive 2D ground track map using Plotly with an Earth background.
-    
-    Args:
-        truth (np.ndarray): The history of true stacked state vectors.
-        n (int): The number of satellites.
-        
-    Returns:
-        go.Figure: A Plotly figure object.
-    """
-    fig = go.Figure()
-
-    # --- PART 1: Background Image ---
-    img_path = "images/1024px-Land_ocean_ice_2048.jpg"
-    if os.path.exists(img_path):
-        with open(img_path, "rb") as f:
-            encoded_string = base64.b64encode(f.read()).decode()
-        img_source = f"data:image/jpeg;base64,{encoded_string}"
-
-        fig.add_layout_image(
-            {
-                "source": img_source,
-                "xref": "x",
-                "yref": "y",
-                "x": -180,
-                "y": 90,
-                "sizex": 360,
-                "sizey": 180,
-                "sizing": "stretch",
-                "opacity": 0.2,
-                "layer": "below"
-            }
-        )
-
-    # --- PART 2: Data ---
-    for i in range(n):
-        pos_hist = truth[:, i*6:i*6+3]
-
-        # Convert Cartesian X,Y,Z to Lat, Lon
-        r = np.linalg.norm(pos_hist, axis=1)
-        lat = np.degrees(np.arcsin(np.clip(pos_hist[:, 2] / r, -1, 1)))
-        lon = np.degrees(np.arctan2(pos_hist[:, 1], pos_hist[:, 0]))
-
-        # Handle wraparound (insert NaNs)
-        lon_diff = np.abs(np.diff(lon))
-        wrap_idx = np.where(lon_diff > 180)[0]
-        lon_plot = np.insert(lon, wrap_idx + 1, np.nan)
-        lat_plot = np.insert(lat, wrap_idx + 1, np.nan)
-
-        # Track line
-        fig.add_trace(go.Scatter(
-            x=lon_plot, y=lat_plot,
-            mode='lines',
-            line={"width": 1.2, "color": "black"},
-            opacity=0.1,
-            name=f"Sat {i} Track",
-            showlegend=False,
-            hoverinfo='skip'
-        ))
-
-        # Current position
-        fig.add_trace(go.Scatter(
-            x=[lon[-1]], y=[lat[-1]],
-            mode='markers',
-            marker={
-                "size": 10,
-                "color": "black",
-                "line": {"width": 0.5, "color": "white"}
-            },
-            name=f"Sat {i}",
-            text=f"Satellite {i}<br>Lat: {lat[-1]:.2f}<br>Lon: {lon[-1]:.2f}",
-            hoverinfo='text',
-            showlegend=False
-        ))
-
-    # --- PART 3: Custom Legend ---
-    # Add dummy traces to represent the legend entries
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='markers',
-        marker={
-            "size": 10,
-            "color": "black",
-            "line": {"width": 0.5, "color": "white"}
-        },
-        name='Satellite'
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='lines',
-        line={"width": 2, "color": "black"},
-        name='Simulated Satellite Orbits'
-    ))
-
-    # --- PART 4: Styling ---
-    fig.update_xaxes(
-        range=[-180, 180],
-        title={"text": "Longitude [Degrees]", "font": {"size": 20}},
-        gridcolor='rgba(255,255,255,0.4)',
-        gridwidth=1,
-        zeroline=False,
-        tickfont={"size": 16}
-    )
-    fig.update_yaxes(
-        range=[-90, 90],
-        title={"text": "Latitude [Degrees]", "font": {"size": 20}},
-        gridcolor='rgba(255,255,255,0.4)',
-        gridwidth=1,
-        zeroline=False,
-        tickfont={"size": 16}
-    )
-
-    fig.update_layout(
-        template="plotly_white",
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        margin={"l": 60, "r": 40, "t": 40, "b": 60},
-        height=500,
-        showlegend=True,
-        legend={
-            "x": 0.98, "y": 0.98,
-            "xanchor": "right", "yanchor": "top",
-            "bgcolor": "rgba(255,255,255,0.7)",
-            "bordercolor": "rgba(0,0,0,0.1)",
-            "borderwidth": 1,
-            "font": {"size": 14, "color": "black"}
-        }
-    )
-
-    # Force axis labels and ticks to be black for visibility on white background
-    fig.update_xaxes(showgrid=True, gridcolor='rgba(0,0,0,0.1)', tickfont={"color": "black"},
-                     title_font={"color": "black"})
-    fig.update_yaxes(showgrid=True, gridcolor='rgba(0,0,0,0.1)', tickfont={"color": "black"},
-                     title_font={"color": "black"})
-
-    return fig
 
 def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     """
@@ -1070,9 +790,9 @@ def main() -> None:
     """Main function to parse log and generate plots."""
     # === Step 1: Parse the log file ===
     pattern = re.compile(
-        r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), consensus_score=([0-9.]+),\s*reputation=([0-9.]+)" # pylint: disable=line-too-long
-    )
-
+    r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), "
+    r"consensus_score=([0-9.]+),\s*reputation=([0-9.]+)"
+)
     data = []
     try:
         with open(FILENAME, "r", encoding="utf-8") as f:

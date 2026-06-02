@@ -1,4 +1,3 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught, duplicate-code
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -48,8 +47,15 @@ def load_results(path: str) -> List[Dict[str, Any]]:
         with np.load(path, allow_pickle=True) as data:
             results = list(data['results'])
             return [res for res in results if res is not None]
-    except Exception as e:
-        print(f"Error loading {path}: {e}")
+
+    except (OSError, ValueError) as e:
+        # Catches file read errors or corrupted/invalid .npz formats
+        print(f"Data error loading {path}: {e}")
+        return []
+
+    except KeyError as e:
+        # Catches the specific case where the file loaded, but 'results' is missing
+        print(f"Missing key in {path}: {e}")
         return []
 
 def get_aggregated_reps(results: List[Dict[str, Any]]) -> tuple[np.ndarray,
@@ -93,48 +99,26 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
     color_a = cmap(0.25)  # 1000km
     color_b = cmap(0.85) # 2000km
 
-    if results_a:
-        h_a, f_a = get_aggregated_reps(results_a)
+    datasets = [
+    (results_a, start_step_a, color_a, "1000km"),
+    (results_b, start_step_b, color_b, "2000km")
+    ]
 
-        # Slice results based on start_step_a
-        h_a = h_a[:, start_step_a:]
-        f_a = f_a[:, start_step_a:]
-        steps_a = np.arange(start_step_a, start_step_a + h_a.shape[1])
+    for res, start_step, color, label in datasets:
+        if res:
+            h, f = get_aggregated_reps(res)
+            h, f = h[:, start_step:], f[:, start_step:]
+            steps = np.arange(start_step, start_step + h.shape[1])
 
-        h_mean_a = np.mean(h_a, axis=0)
-        h_std_a = np.std(h_a, axis=0)
-        plt.plot(steps_a, h_mean_a, color=color_a, label="Honest (1000km ISL)")
-        plt.fill_between(steps_a, h_mean_a - h_std_a,
-                         h_mean_a + h_std_a, color=color_a, alpha=0.1)
+            # Plot Honest
+            h_mean, h_std = np.mean(h, axis=0), np.std(h, axis=0)
+            plt.plot(steps, h_mean, color=color, label=f"Honest ({label} ISL)")
+            plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color=color, alpha=0.1)
 
-        f_mean_a = np.mean(f_a, axis=0)
-        f_std_a = np.std(f_a, axis=0)
-        plt.plot(steps_a, f_mean_a, color=color_a, linestyle="--",
-                 label="Faulty (1000km ISL)")
-        plt.fill_between(steps_a, f_mean_a - f_std_a,
-                         f_mean_a + f_std_a, color=color_a, alpha=0.1)
-
-    if results_b:
-        h_b, f_b = get_aggregated_reps(results_b)
-
-        # Slice results based on start_step_b
-        h_b = h_b[:, start_step_b:]
-        f_b = f_b[:, start_step_b:]
-        steps_b = np.arange(start_step_b, start_step_b + h_b.shape[1])
-
-        h_mean_b = np.mean(h_b, axis=0)
-        h_std_b = np.std(h_b, axis=0)
-        plt.plot(steps_b, h_mean_b, color=color_b,
-                 label="Honest (2000km ISL)")
-        plt.fill_between(steps_b, h_mean_b - h_std_b,
-                         h_mean_b + h_std_b, color=color_b, alpha=0.1)
-
-        f_mean_b = np.mean(f_b, axis=0)
-        f_std_b = np.std(f_b, axis=0)
-        plt.plot(steps_b, f_mean_b, color=color_b, linestyle="--",
-                 label="Faulty (2000km ISL)")
-        plt.fill_between(steps_b, f_mean_b - f_std_b,
-                         f_mean_b + f_std_b, color=color_b, alpha=0.1)
+            # Plot Faulty
+            f_mean, f_std = np.mean(f, axis=0), np.std(f, axis=0)
+            plt.plot(steps, f_mean, color=color, linestyle="--", label=f"Faulty ({label} ISL)")
+            plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color=color, alpha=0.1)
 
     plt.axhline(0.5, color="gray", linestyle=":", label="Neutral")
     plt.xlabel("Timestep [-]", fontsize=14)

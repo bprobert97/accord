@@ -1,5 +1,4 @@
-# pylint: disable=protected-access, duplicate-code
-# pylint: disable=redefined-outer-name
+# pylint: disable=protected-access
 """
 Unit tests for the ReputationManager class.
 """

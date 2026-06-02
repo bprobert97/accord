@@ -1,5 +1,4 @@
 
-# pylint: disable= invalid-name, too-many-locals, too-many-arguments, too-many-positional-arguments, too-many-instance-attributes
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -26,18 +25,16 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
 from numpy.typing import NDArray
-from scipy.stats import chi2
 from scipy.linalg import expm
-from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
+from filterpy.kalman import ExtendedKalmanFilter
 from src.logger import get_logger
 from src.simulation import generate_random_keplerian_elements, \
-    keplerian_to_cartesian, generate_walker_delta_constellation
+    keplerian_to_cartesian, generate_walker_delta_constellation, \
+    MU_EARTH, RE
 
 logger = get_logger()
 
 # ----------------------- Constants -----------------------
-MU_EARTH = 3.986004418e14  # m^3/s^2
-Re = 6378e3
 STATE_DIM = 6 # State vector dimension (position and velocity)
 POS_VEL_DIM = 3 # Position or velocity dimension
 MAX_ISL_RANGE = 5000e3 # Maximum range for ISL observation records (5000km)
@@ -207,7 +204,7 @@ def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[n
     po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
     rho = pt - po
     r = np.linalg.norm(rho)
-    r = max(r, 1e-8) # type: ignore
+    r = np.maximum(r, 1e-8)
     vrel = vt - vo
     rdot = float(rho.dot(vrel) / r)
     return np.array([r, rdot])
@@ -232,7 +229,7 @@ def H_blocks_target_obs(target: NDArray[np.float64],
     po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
     rho = pt - po
     r = np.linalg.norm(rho)
-    r = max(r, 1e-8) # type: ignore
+    r = np.maximum(r, 1e-8)
     rhat = rho / r
     I3 = np.eye(POS_VEL_DIM)
     vrel = vt - vo
@@ -299,7 +296,7 @@ def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
 
 # ----------------------- EKF predict ----------------------
 def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
-                      q_acc_target: float, _unused: float) -> None:
+                      q_acc_target: float) -> None:
     """
     Performs the prediction step for the joint Extended Kalman Filter.
     Propagates the state and covariance of all satellites forward in time.
@@ -309,7 +306,7 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
     - dt: The time step for prediction.
     - N: The number of satellites.
     - q_acc_target: The continuous-time process noise acceleration magnitude for targets.
-    - _unused: An unused parameter, kept for signature compatibility.
+
     """
     x_prev = ekf.x.copy()
     dim = STATE_DIM*N
@@ -366,7 +363,7 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
         logger.info("Generating walker_delta satellite constellation with %s satellites", N)
 
         # Generate elements and convert to Cartesian
-        elements = generate_walker_delta_constellation(t=N, p=5, f=1, a=Re+500e3, i=np.radians(53))
+        elements = generate_walker_delta_constellation(t=N, p=5, f=1, a=RE+500e3, i=np.radians(53))
         # Sort for deterministic node ordering (e.g. by RAAN then True Anomaly)
         elements.sort(key=lambda x: (x[3], x[5]))
 
@@ -552,11 +549,11 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
 
             # Add unit LOS vector. Avoid division by zero.
             # rhat is an NDArray so use tolist() later to make it json serialisable.
-            rhat = rho / (max(r, 1e-8))  # type: ignore [call-overload]
+            rhat = rho / (np.maximum(r, 1e-8))
 
             # Add unit LOS velocity vector. Avoid division by zero.
             # vhat is an NDArray so use tolist() later to make it json serialisable.
-            vhat = vrel / (max(np.linalg.norm(vrel), 1e-8))  # type: ignore [call-overload]
+            vhat = vrel / (np.maximum(np.linalg.norm(vrel), 1e-8))
 
             obs_records.append(
                 ObservationRecord(
@@ -573,23 +570,22 @@ class FilterConfig:
     Configuration parameters for the Extended Kalman Filter simulation.
 
     Attributes:
+    - ISL_range_m: The range for inter-satellite link observations in metres.
     - N: Number of satellites in the constellation.
     - steps: Number of simulation steps.
     - dt: Time step size in seconds.
     - sig_r: Standard deviation of range measurement noise in meters.
     - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
     - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
-    - q_acc_obs: Continuous-time process noise acceleration magnitude for
-      observer satellites (kept for compatibility).
     - seed: Random seed for reproducibility.
     """
+    ISL_range_m: float
     N: int = 10
     steps: int = 3000
     dt: float = 60.0
     sig_r: float = 10.0
     sig_rdot: float = 0.02
     q_acc_target: float = 1e-6
-    q_acc_obs: float = 1e-6
     seed: int = 42
 
 
@@ -621,7 +617,7 @@ class JointEKF:
         Performs the prediction step of the EKF.
         """
         ekf_predict_joint(self.ekf, self.config.dt, self.config.N,
-                          self.config.q_acc_target, self.config.q_acc_obs)
+                          self.config.q_acc_target)
 
     def update(self, z_k: np.ndarray, k: int) -> List[ObservationRecord]:
         """
@@ -638,17 +634,32 @@ class JointEKF:
         return _log_nis(y, self.ekf, self.config.N, k, self.config.dt,
                         self.config.sig_r, self.config.sig_rdot)
 
-def chi2_bounds(dof: int, alpha: float = 0.95) -> Tuple[float, float]:
-    """
-    Calculates the lower and upper bounds for a chi-squared distribution.
+
+def apply_network_faults(obs_to_submit: ObservationRecord, sid: int, n_sats: int,
+                         k: int, faulty_ids: set) -> None:
+    """Injects deterministic faulty NIS values based on satellite ID for testing.
 
     Args:
-    - dof: Degrees of freedom for the chi-squared distribution.
-    - alpha: The confidence level (e.g., 0.95 for 95% confidence).
+    - obs_to_submit: The observation record to potentially modify.
+    - sid: The satellite ID.
+    - n_sats: The total number of satellites in the simulation.
+    - k: The current time step or iteration count in the simulation.
+    - faulty_ids: A set to keep track of which satellite IDs have been marked as faulty.
 
     Returns:
-    - A tuple containing the lower and upper bounds.
+    - None. The function modifies obs_to_submit in place and updates faulty_ids.
+
     """
-    lo = chi2.ppf((1 - alpha) / 2.0, dof)
-    hi = chi2.ppf(1 - (1 - alpha) / 2.0, dof)
-    return float(lo), float(hi)
+    if sid % 10 == 1:
+        obs_to_submit.nis = 0.01
+        faulty_ids.add(sid)
+    elif sid % 10 == 2 and n_sats >= 7:
+        obs_to_submit.nis = 50.0
+        faulty_ids.add(sid)
+    elif sid % 10 == 3 and n_sats >= 10:
+        faulty_ids.add(sid)
+        if 200 <= k < 400:
+            if obs_to_submit.nis > 2.0:
+                obs_to_submit.nis = obs_to_submit.nis * 10
+            else:
+                obs_to_submit.nis = obs_to_submit.nis / 10

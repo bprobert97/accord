@@ -1,4 +1,3 @@
-# pylint: disable=too-many-arguments, too-many-positional-arguments, too-many-instance-attributes
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -24,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import hashlib
 from datetime import datetime
 from dataclasses import dataclass, field
+from typing import Optional
 
 @dataclass
 class TransactionMetadata:
@@ -39,6 +39,7 @@ class TransactionMetadata:
     dof: int = 0
     nis: float = 0.0
     correctness_score: float = 0.0
+    observer_id: Optional[int] = None
 
 class Transaction:
     """
@@ -55,6 +56,7 @@ class Transaction:
         self.sender_private_key = sender_private_key
         self.tx_data = tx_data
         self.metadata = metadata
+        self._hash = self.calculate_hash()
 
     def __repr__(self) -> str:
         return (f"Transaction(\n"
@@ -71,9 +73,11 @@ class Transaction:
     @property
     def hash(self):
         """
-        Define hash as a computed property, so it's always based on the current state.
+        Returns the cached hash of the transaction. The hash is calculated once
+        during initialisation and stored, so that it does not need to be recalculated
+        every time it is accessed.
         """
-        return self.calculate_hash()
+        return self._hash
 
     def calculate_hash(self) -> str:
         """

@@ -1,4 +1,3 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, too-many-arguments, too-many-positional-arguments, broad-exception-caught, duplicate-code
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -21,7 +20,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 import os
-import json
 import asyncio
 import time
 import argparse
@@ -32,8 +30,9 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import matplotlib.pyplot as plt
 from src.logger import get_logger
-from src.plotting import plot_mc_nis_boxplot, generate_corner_plot
-from accord_demo import run_consensus_demo, DEFAULT_CONFIG, ISL_RANGE_METERS
+from src.plotting import extract_nis_transactions, plot_mc_nis_boxplot, \
+    generate_corner_plot
+from accord_demo import run_consensus_demo, DEFAULT_CONFIG
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
 # This is needed for parallel processing using ProcessPoolExecutor.
@@ -47,7 +46,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-ISL_RANGE_KM = ISL_RANGE_METERS // 1000
+ISL_RANGE_KM = DEFAULT_CONFIG.ISL_range_m // 1000
 
 # --- MC Configuration ---
 NUM_RUNS = 40
@@ -102,7 +101,7 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         # If matrices provided, we try to recover IDs if passed
         honest_ids = None
         faulty_ids_list = sorted(list(faulty_ids)) \
-            if faulty_ids is not None else None  # type: ignore [assignment]
+            if faulty_ids is not None else []
 
     # Infer steps from the matrix shape if not explicitly provided
     if steps is None:
@@ -263,7 +262,9 @@ def run_single_ekf(run_idx: int) -> bool:
                                run_consensus=False)
         )
         return True
-    except Exception as e:
+    except Exception as e: # pylint: disable=broad-exception-caught
+        # We catch everything here so one failed MC iteration doesn't
+        # crash the whole pool
         print(f"EKF Run {run_idx} failed: {e}")
         traceback.print_exc()
         return False
@@ -306,32 +307,27 @@ def run_single_consensus(run_idx: int,
         # Extract NIS data from DAG
         honest_nis = []
         faulty_nis = []
-        for _, tx_list in dag.ledger.items():
-            for tx in tx_list:
-                if not hasattr(tx.metadata, "nis"):
-                    continue
+        for tx, tx_data in extract_nis_transactions(dag):
+            sid = tx_data.get("observer")
+            nis = getattr(tx.metadata, "nis")
 
-                try:
-                    tx_data = json.loads(tx.tx_data)
-                    sid = tx_data.get("observer")
-                    nis = getattr(tx.metadata, "nis")
+            if sid is None or nis is None:
+                continue
 
-                    if sid is None or nis is None:
-                        continue
+            if faulty_ids is not None and int(sid) in faulty_ids:
+                faulty_nis.append(float(nis))
+            else:
+                honest_nis.append(float(nis))
 
-                    if faulty_ids is not None and int(sid) in faulty_ids:
-                        faulty_nis.append(float(nis))
-                    else:
-                        honest_nis.append(float(nis))
-                except (json.JSONDecodeError, TypeError):
-                    continue
 
         kpis = calculate_kpis(rep_history, faulty_ids, config.steps,
                               honest_nis=honest_nis, faulty_nis=faulty_nis,
                               detection_threshold=threshold, fpr_offset_percent=fpr_offset,
                               logger=logger)
         return kpis
-    except Exception as e:
+    except Exception as e: # pylint: disable=broad-exception-caught
+        # We catch everything here so one failed MC iteration doesn't
+        # crash the whole pool
         print(f"Consensus Run {run_idx} failed: {e}")
         traceback.print_exc()
         return None
@@ -392,7 +388,7 @@ def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
         num_items = len(plotted_legend_ids)
         if num_items > 15:
             plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small', ncol=2)
-            plt.tight_layout(rect=[0, 0, 0.85, 1])  # type: ignore [arg-type]
+            plt.tight_layout(rect=(0, 0, 0.85, 1))
         elif num_items > 0:
             plt.legend(loc='best', fontsize='small')
 
@@ -547,19 +543,19 @@ if __name__ == "__main__":
     os.makedirs(EKF_DIR, exist_ok=True)
     os.makedirs(SIM_DIR, exist_ok=True)
 
-    results = None  # pylint: disable=invalid-name
+    RESULTS = None
     if os.path.exists(MC_RESULTS_PATH):
         print(f"Attempting to load Monte Carlo results from {MC_RESULTS_PATH}")
         try:
             with np.load(MC_RESULTS_PATH, allow_pickle=True) as data:
                 # results was saved as a single object (the list)
-                results = list(data['results'])
-                print(f"Successfully loaded {len(results)} MC runs.")
+                RESULTS = list(data['results'])
+                print(f"Successfully loaded {len(RESULTS)} MC runs.")
 
             # Check if new keys are missing and auto-trigger recalculate if needed
             NEEDS_RECALCULATE = args.recalculate
-            if results and not NEEDS_RECALCULATE:
-                sample = next((r for r in results if r is not None), None)
+            if RESULTS and not NEEDS_RECALCULATE:
+                sample = next((r for r in RESULTS if r is not None), None)
                 if sample and "recall" not in sample:
                     print("New metrics missing from saved data. Auto-recalculating...")
                     NEEDS_RECALCULATE = True
@@ -567,15 +563,19 @@ if __name__ == "__main__":
             if NEEDS_RECALCULATE:
                 print(f"Calculating KPIs with threshold={args.threshold}, \
                       fpr_offset={args.fpr_offset}")
-                results = recalculate_all_kpis(results, detection_threshold=args.threshold,
+                RESULTS = recalculate_all_kpis(RESULTS, detection_threshold=args.threshold,
                                                fpr_offset_percent=args.fpr_offset)
                 # Save the updated KPIs back to the file
                 print(f"Updating saved results at {MC_RESULTS_PATH}")
-                np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
-        except Exception as e:
-            print(f"Failed to load MC results: {e}. Rerunning simulation.")
+                np.savez_compressed(MC_RESULTS_PATH, results=np.array(RESULTS, dtype=object))
+        except (OSError, ValueError) as e:
+            # Catches corrupted files, permission errors, or invalid NumPy archives
+            print(f"Corrupt or unreadable MC results file: {e}. Rerunning simulation.")
+        except KeyError as e:
+            # Catches older save files that don't have the 'results' array
+            print(f"MC results file missing expected data: {e}. Rerunning simulation.")
 
-    if results is None:
+    if RESULTS is None:
         start_time = time.time()
 
         # Phase 1: EKF Generation
@@ -596,14 +596,14 @@ if __name__ == "__main__":
             # Use partial to pass threshold and fpr_offset to run_single_consensus
             sim_func = functools.partial(run_single_consensus, threshold=args.threshold,
                                          fpr_offset=args.fpr_offset)
-            results = list(executor.map(sim_func, range(args.num_runs)))
+            RESULTS = list(executor.map(sim_func, range(args.num_runs)))
 
         end_time = time.time()
         print(f"Monte Carlo simulation completed in {end_time - start_time:.2f} seconds.")
 
         # Save results
         print(f"Saving Monte Carlo results to {MC_RESULTS_PATH}")
-        np.savez_compressed(MC_RESULTS_PATH, results=np.array(results, dtype=object))
+        np.savez_compressed(MC_RESULTS_PATH, results=np.array(RESULTS, dtype=object))
 
-    plot_mc_results(results, start_step=args.start_step)
+    plot_mc_results(RESULTS, start_step=args.start_step)
     generate_corner_plot()

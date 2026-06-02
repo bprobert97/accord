@@ -1,4 +1,3 @@
-# pylint: disable=too-many-instance-attributes
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -28,6 +27,7 @@ import asyncio
 import json
 import random
 import bisect
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 from .logger import get_logger
@@ -37,6 +37,11 @@ if TYPE_CHECKING:
     from .consensus_mech import ConsensusMechanism
 
 logger = get_logger()
+
+@dataclass
+class MockDAG():
+    """A mock DAG object that only holds a ledger for plotting."""
+    ledger: dict
 
 class DAG():
     """
@@ -90,8 +95,7 @@ class DAG():
             if consensus_result and mean_ema_nis is not None:
                 try:
                     # Extract observer ID from the transaction data
-                    tx_data = json.loads(transaction.tx_data)
-                    observer_id = tx_data.get("observer")
+                    observer_id = transaction.metadata.observer_id
                     if observer_id is not None:
                         # initialise if observer_id is new
                         self.nis_sums.setdefault(observer_id, 0.0)

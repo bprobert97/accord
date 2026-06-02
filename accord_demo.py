@@ -1,4 +1,3 @@
-# pylint: disable=protected-access, too-many-locals, too-many-statements, broad-exception-caught, too-many-nested-blocks, too-many-branches, too-few-public-methods, no-member, too-many-arguments, too-many-positional-arguments
 """
 The Autonomous Cooperative Consensus Orbit Determination (ACCORD) framework.
 Author: Beth Probert
@@ -25,7 +24,6 @@ import asyncio
 import math
 import os
 import shutil
-from logging import Logger
 from typing import Optional
 import numpy as np
 from src.plotting import  \
@@ -36,16 +34,14 @@ from src.plotting import  \
                     calculate_median_percentiles, \
                         plot_constellation
 from src.consensus_mech import ConsensusMechanism
-from src.dag import DAG
+from src.dag import DAG, MockDAG
 from src.filter import FilterConfig, \
-    simulate_truth_and_meas, JointEKF, ObservationRecord
+    simulate_truth_and_meas, JointEKF, ObservationRecord, \
+    apply_network_faults
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
-
 #------------------
 # Constants
-ISL_RANGE_METERS = 1000e3
-
 CLUSTER_SIZE = 10
 
 DATA_DIR = "sim_data"
@@ -55,21 +51,17 @@ EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 DEFAULT_CONFIG = FilterConfig(
-        N=400,
+        N=100,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
         sig_rdot=0.2,
         q_acc_target=1e-5,
-        q_acc_obs=1e-5,   # kept for signature compatibility
         seed=42,
+        ISL_range_m=1000e3
     )
 #------------------
-# Logging functions
-
-def get_accord_logger() -> Logger:
-    """Helper to get or initialise the logger."""
-    return get_logger()
+# Helper functions
 
 
 def clear_log(log_file_path: str = "app.log") -> None:
@@ -82,11 +74,12 @@ def clear_log(log_file_path: str = "app.log") -> None:
         get_logger().info("Cleared %s at the start of accord_demo.py", log_file_path)
 
 
-def is_in_isl_range(sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
+def is_in_isl_range(isl_range: float, sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
     """
     Checks if two satellites are within ISL range of each other.
 
     Args:
+    - isl_range: The range for inter-satellite communication in metres.
     - sat1: The first SatelliteNode.
     - sat2: The second SatelliteNode.
 
@@ -98,7 +91,10 @@ def is_in_isl_range(sat1: SatelliteNode, sat2: SatelliteNode) -> bool:
         (sat1.y - sat2.y)**2 +
         (sat1.z - sat2.z)**2
     )
-    return distance <= ISL_RANGE_METERS
+    return distance <= isl_range
+
+#------------------
+# Main demo function
 
 async def run_consensus_demo(config: FilterConfig,
                              save_ekf_results: bool = True,
@@ -157,8 +153,8 @@ async def run_consensus_demo(config: FilterConfig,
                     sig_r=data['config_sig_r'],
                     sig_rdot=data['config_sig_rdot'],
                     q_acc_target=data['config_q_acc_target'],
-                    q_acc_obs=data['config_q_acc_obs'],
-                    seed=data['config_seed']
+                    seed=data['config_seed'],
+                    ISL_range_m=data['config_ISL_range_m']
                 )
 
                 # Check if loaded config matches current config
@@ -172,8 +168,14 @@ async def run_consensus_demo(config: FilterConfig,
                 else:
                     logger.warning("Loaded EKF config does not match current config. \
                         Rerunning EKF simulation.")
-        except Exception as e:
-            logger.error("Failed to load EKF simulation results: %s. Rerunning EKF simulation.", e)
+        except (OSError, ValueError) as e:
+            logger.error(
+                "Corrupt or unreadable EKF results file. Rerunning EKF simulation. Error: %s", e
+            )
+        except KeyError as e:
+            logger.error(
+                "EKF results file is missing expected key %s. Rerunning EKF simulation.", e
+            )
 
     # If EKF results were not loaded or loading failed, run the EKF simulation
     if truth is None or z_hist is None or all_obs_records is None or x_hist is None:
@@ -204,8 +206,8 @@ async def run_consensus_demo(config: FilterConfig,
                 sig_r=config.sig_r,
                 sig_rdot=config.sig_rdot,
                 q_acc_target=config.q_acc_target,
-                q_acc_obs=config.q_acc_obs,
-                seed=config.seed + i # Use different seed for each cluster
+                seed=config.seed + i, # Use different seed for each cluster
+                ISL_range_m=config.ISL_range_m
             )
 
             # Extract initial truth state for this cluster
@@ -282,7 +284,6 @@ async def run_consensus_demo(config: FilterConfig,
                 config_sig_r=config.sig_r,
                 config_sig_rdot=config.sig_rdot,
                 config_q_acc_target=config.q_acc_target,
-                config_q_acc_obs=config.q_acc_obs,
                 config_seed=config.seed,
                 truth=truth,
                 z_hist=z_hist,
@@ -301,7 +302,7 @@ async def run_consensus_demo(config: FilterConfig,
         logger.error("EKF simulation data is not available after loading or running. Exiting.")
         return None, None, None, None
 
-    faulty_ids = set()
+    faulty_ids: set[int] = set()
     poise = ConsensusMechanism()
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
@@ -339,7 +340,7 @@ async def run_consensus_demo(config: FilterConfig,
                     if sid == other_sid:
                         continue
 
-                    if is_in_isl_range(sat, other_sat):
+                    if is_in_isl_range(config.ISL_range_m, sat, other_sat):
                         # Find the corresponding observation record
                         obs_to_submit = None
                         for obs in obs_by_step.get(k, []):
@@ -348,20 +349,8 @@ async def run_consensus_demo(config: FilterConfig,
                                 break
 
                         if obs_to_submit:
-                            # --- Inject special satellite behavior ---
-                            if sid % 10 == 1:
-                                obs_to_submit.nis = 0.01
-                                faulty_ids.add(sid)
-                            elif sid % 10 == 2 and config.N >= 7:
-                                obs_to_submit.nis = 50.0
-                                faulty_ids.add(sid)
-                            elif sid % 10 == 3 and config.N >= 10:
-                                faulty_ids.add(sid)
-                                if 200 <= k < 400:
-                                    if obs_to_submit.nis > 2.0:
-                                        obs_to_submit.nis = obs_to_submit.nis * 10
-                                    else:
-                                        obs_to_submit.nis = obs_to_submit.nis / 10
+                            # Inject dishonest behaviour profiles
+                            apply_network_faults(obs_to_submit, sid, config.N, k, faulty_ids)
 
                             sat.load_sensor_data(obs_to_submit)
                             logger.info("Satellite %s: submitting transaction \
@@ -384,8 +373,8 @@ async def run_consensus_demo(config: FilterConfig,
             os.makedirs(os.path.dirname(sim_results_path), exist_ok=True)
             np.savez_compressed(
                 sim_results_path,
-                dag_ledger=dag.ledger,  # type: ignore [arg-type]
-                rep_history=rep_history,  # type: ignore [arg-type]
+                dag_ledger=dag.ledger, # type: ignore[arg-type]
+                rep_history=rep_history, # type: ignore[arg-type]
                 truth=truth,
                 faulty_ids=np.array(list(faulty_ids))
             )
@@ -404,25 +393,17 @@ async def run_consensus_demo(config: FilterConfig,
 if __name__ == "__main__":
     accord_logger = get_logger()
 
-    FINAL_DAG: Optional[DAG] = None
+    FINAL_DAG: DAG | MockDAG | None = None
     REP_HIST: Optional[dict] = None
     TRUTH: Optional[np.ndarray] = None
     FAULTY_IDS: Optional[set[int]] = None
-
-    class MockDAG(DAG):
-        """A mock DAG object that only holds a ledger for plotting."""
-        def __init__(self, ledger: dict):  # pylint: disable=super-init-not-called
-            self.ledger = ledger
-            # We don't call super().__init__ because we don't have the
-            # runtime dependencies (queue, consensus_mech) needed.
-            # This is acceptable because loaded DAGs are only used for plotting,
-            # which only requires the .ledger attribute.
 
     # Attempt to load simulation results if they exist
     if os.path.exists(SIM_RESULTS_PATH):
         accord_logger.info("Attempting to load simulation results from %s", SIM_RESULTS_PATH)
         try:
             with np.load(SIM_RESULTS_PATH, allow_pickle=True) as simulated_data:
+                # pylint: disable=no-member
                 # Check if the number of satellites in the saved data matches the current config
                 saved_N = int(simulated_data['truth'].shape[1] / 6)
                 if saved_N == DEFAULT_CONFIG.N:
@@ -438,8 +419,15 @@ if __name__ == "__main__":
                         "Rerunning simulation.",
                         saved_N, DEFAULT_CONFIG.N
                     )
-        except Exception as e:
-            accord_logger.error("Failed to load simulation results: %s. Rerunning simulation.", e)
+        except (OSError, ValueError) as e:
+            accord_logger.error(
+                "Corrupt or unreadable simulation results file. Rerunning simulation. Error: %s", e
+            )
+        except KeyError as e:
+            accord_logger.error(
+                "Simulation results file is missing expected data array %s. \
+                    Rerunning simulation.", e
+            )
 
     # If simulation results were not loaded or loading failed, run the consensus simulation
     if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
