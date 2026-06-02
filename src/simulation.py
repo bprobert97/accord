@@ -22,10 +22,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import numpy as np
 from numpy.typing import NDArray
 from src.logger import get_logger
-from src.filter import ObservationRecord, MU_EARTH, Re
 
 logger = get_logger()
 
+# ----------------------- Constants -----------------------
+MU_EARTH = 3.986004418e14  # m^3/s^2
+RE = 6378e3
 # ---------------------------------------------------------
 
 def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
@@ -42,7 +44,7 @@ def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
     rng = np.random.default_rng(seed)
 
     altitude = rng.uniform(180e3, 2000e3)
-    a = Re + altitude
+    a = RE + altitude
 
     e = rng.uniform(0, 0.05)
     i = rng.uniform(0, np.pi) # inclination in radians
@@ -129,31 +131,3 @@ def keplerian_to_cartesian(a: float, e: float, i: float, raan: float,
     v_eci = rot_matrix @ v_pqw
 
     return np.hstack([p_eci, v_eci])
-
-def apply_network_faults(obs_to_submit: ObservationRecord, sid: int, n_sats: int, k: int, faulty_ids: set) -> None:
-    """Injects deterministic faulty NIS values based on satellite ID for testing.
-
-    Args:
-    - obs_to_submit: The observation record to potentially modify.
-    - sid: The satellite ID.
-    - n_sats: The total number of satellites in the simulation.
-    - k: The current time step or iteration count in the simulation.
-    - faulty_ids: A set to keep track of which satellite IDs have been marked as faulty.
-
-    Returns:
-    - None. The function modifies obs_to_submit in place and updates faulty_ids.
-
-    """
-    if sid % 10 == 1:
-        obs_to_submit.nis = 0.01
-        faulty_ids.add(sid)
-    elif sid % 10 == 2 and n_sats >= 7:
-        obs_to_submit.nis = 50.0
-        faulty_ids.add(sid)
-    elif sid % 10 == 3 and n_sats >= 10:
-        faulty_ids.add(sid)
-        if 200 <= k < 400:
-            if obs_to_submit.nis > 2.0:
-                obs_to_submit.nis = obs_to_submit.nis * 10
-            else:
-                obs_to_submit.nis = obs_to_submit.nis / 10

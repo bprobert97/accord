@@ -31,13 +31,12 @@ from scipy.linalg import expm
 from filterpy.kalman import ExtendedKalmanFilter  # type: ignore
 from src.logger import get_logger
 from src.simulation import generate_random_keplerian_elements, \
-    keplerian_to_cartesian, generate_walker_delta_constellation
+    keplerian_to_cartesian, generate_walker_delta_constellation, \
+    MU_EARTH, RE
 
 logger = get_logger()
 
 # ----------------------- Constants -----------------------
-MU_EARTH = 3.986004418e14  # m^3/s^2
-Re = 6378e3
 STATE_DIM = 6 # State vector dimension (position and velocity)
 POS_VEL_DIM = 3 # Position or velocity dimension
 MAX_ISL_RANGE = 5000e3 # Maximum range for ISL observation records (5000km)
@@ -299,7 +298,7 @@ def H_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
 
 # ----------------------- EKF predict ----------------------
 def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
-                      q_acc_target: float, _unused: float) -> None:
+                      q_acc_target: float) -> None:
     """
     Performs the prediction step for the joint Extended Kalman Filter.
     Propagates the state and covariance of all satellites forward in time.
@@ -309,7 +308,7 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
     - dt: The time step for prediction.
     - N: The number of satellites.
     - q_acc_target: The continuous-time process noise acceleration magnitude for targets.
-    - _unused: An unused parameter, kept for signature compatibility.
+
     """
     x_prev = ekf.x.copy()
     dim = STATE_DIM*N
@@ -366,7 +365,7 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
         logger.info("Generating walker_delta satellite constellation with %s satellites", N)
 
         # Generate elements and convert to Cartesian
-        elements = generate_walker_delta_constellation(t=N, p=5, f=1, a=Re+500e3, i=np.radians(53))
+        elements = generate_walker_delta_constellation(t=N, p=5, f=1, a=RE+500e3, i=np.radians(53))
         # Sort for deterministic node ordering (e.g. by RAAN then True Anomaly)
         elements.sort(key=lambda x: (x[3], x[5]))
 
@@ -579,8 +578,6 @@ class FilterConfig:
     - sig_r: Standard deviation of range measurement noise in meters.
     - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
     - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
-    - q_acc_obs: Continuous-time process noise acceleration magnitude for
-      observer satellites (kept for compatibility).
     - seed: Random seed for reproducibility.
     """
     N: int = 10
@@ -589,7 +586,6 @@ class FilterConfig:
     sig_r: float = 10.0
     sig_rdot: float = 0.02
     q_acc_target: float = 1e-6
-    q_acc_obs: float = 1e-6
     seed: int = 42
 
 
@@ -621,7 +617,7 @@ class JointEKF:
         Performs the prediction step of the EKF.
         """
         ekf_predict_joint(self.ekf, self.config.dt, self.config.N,
-                          self.config.q_acc_target, self.config.q_acc_obs)
+                          self.config.q_acc_target)
 
     def update(self, z_k: np.ndarray, k: int) -> List[ObservationRecord]:
         """
@@ -637,3 +633,32 @@ class JointEKF:
         y = _ekf_update(self.ekf, z_k, self.config.N)
         return _log_nis(y, self.ekf, self.config.N, k, self.config.dt,
                         self.config.sig_r, self.config.sig_rdot)
+
+
+def apply_network_faults(obs_to_submit: ObservationRecord, sid: int, n_sats: int, k: int, faulty_ids: set) -> None:
+    """Injects deterministic faulty NIS values based on satellite ID for testing.
+
+    Args:
+    - obs_to_submit: The observation record to potentially modify.
+    - sid: The satellite ID.
+    - n_sats: The total number of satellites in the simulation.
+    - k: The current time step or iteration count in the simulation.
+    - faulty_ids: A set to keep track of which satellite IDs have been marked as faulty.
+
+    Returns:
+    - None. The function modifies obs_to_submit in place and updates faulty_ids.
+
+    """
+    if sid % 10 == 1:
+        obs_to_submit.nis = 0.01
+        faulty_ids.add(sid)
+    elif sid % 10 == 2 and n_sats >= 7:
+        obs_to_submit.nis = 50.0
+        faulty_ids.add(sid)
+    elif sid % 10 == 3 and n_sats >= 10:
+        faulty_ids.add(sid)
+        if 200 <= k < 400:
+            if obs_to_submit.nis > 2.0:
+                obs_to_submit.nis = obs_to_submit.nis * 10
+            else:
+                obs_to_submit.nis = obs_to_submit.nis / 10

@@ -25,7 +25,6 @@ import asyncio
 import math
 import os
 import shutil
-from logging import Logger
 from typing import Optional
 import numpy as np
 from src.plotting import  \
@@ -38,11 +37,10 @@ from src.plotting import  \
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG
 from src.filter import FilterConfig, \
-    simulate_truth_and_meas, JointEKF, ObservationRecord
+    simulate_truth_and_meas, JointEKF, ObservationRecord, \
+    apply_network_faults
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
-from src.simulation import apply_network_faults
-
 #------------------
 # Constants
 ISL_RANGE_METERS = 1000e3
@@ -56,13 +54,12 @@ EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 DEFAULT_CONFIG = FilterConfig(
-        N=400,
+        N=100,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
         sig_rdot=0.2,
         q_acc_target=1e-5,
-        q_acc_obs=1e-5,   # kept for signature compatibility
         seed=42,
     )
 #------------------
@@ -157,7 +154,6 @@ async def run_consensus_demo(config: FilterConfig,
                     sig_r=data['config_sig_r'],
                     sig_rdot=data['config_sig_rdot'],
                     q_acc_target=data['config_q_acc_target'],
-                    q_acc_obs=data['config_q_acc_obs'],
                     seed=data['config_seed']
                 )
 
@@ -204,7 +200,6 @@ async def run_consensus_demo(config: FilterConfig,
                 sig_r=config.sig_r,
                 sig_rdot=config.sig_rdot,
                 q_acc_target=config.q_acc_target,
-                q_acc_obs=config.q_acc_obs,
                 seed=config.seed + i # Use different seed for each cluster
             )
 
@@ -282,7 +277,6 @@ async def run_consensus_demo(config: FilterConfig,
                 config_sig_r=config.sig_r,
                 config_sig_rdot=config.sig_rdot,
                 config_q_acc_target=config.q_acc_target,
-                config_q_acc_obs=config.q_acc_obs,
                 config_seed=config.seed,
                 truth=truth,
                 z_hist=z_hist,
