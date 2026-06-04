@@ -39,6 +39,30 @@ STATE_DIM = 6 # State vector dimension (position and velocity)
 POS_VEL_DIM = 3 # Position or velocity dimension
 MAX_ISL_RANGE = 5000e3 # Maximum range for ISL observation records (5000km)
 
+@dataclass
+class FilterConfig:
+    """
+    Configuration parameters for the Extended Kalman Filter simulation.
+
+    Attributes:
+    - ISL_range_m: The range for inter-satellite link observations in metres.
+    - N: Number of satellites in the constellation.
+    - steps: Number of simulation steps.
+    - dt: Time step size in seconds.
+    - sig_r: Standard deviation of range measurement noise in meters.
+    - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
+    - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
+    - seed: Random seed for reproducibility.
+    """
+    ISL_range_m: float
+    N: int = 10
+    steps: int = 3000
+    dt: float = 60.0
+    sig_r: float = 10.0
+    sig_rdot: float = 0.02
+    q_acc_target: float = 1e-6
+    seed: int = 42
+
 # ----------------------- Result Types ---------------------
 @dataclass
 class ObservationRecord:
@@ -334,9 +358,7 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
     ekf.P = 0.5*(ekf.P + ekf.P.T)
 
 # ----------------------- Truth + measurement sim ----------
-def simulate_truth_and_meas(N: int, steps: int, dt: float,
-                            sig_r: float, sig_rdot: float,
-                            seed: int,
+def simulate_truth_and_meas(config: FilterConfig,
                             walker_delta: bool = False) -> tuple[NDArray[np.float64],
                                                 NDArray[np.float64]]:
     """
@@ -344,12 +366,9 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
     inter-satellite measurements.
 
     Args:
-    - N: The number of satellites.
-    - steps: The number of simulation steps.
-    - dt: The time step size.
-    - sig_r: Standard deviation of range measurement noise.
-    - sig_rdot: Standard deviation of range-rate measurement noise.
-    - seed: An integer seed for reproducibility.
+    - config: FilterConfig object with simulation parameters.
+    - walker_delta: If True, generates a Walker Delta constellation instead of random orbits.
+
     - walker_delta: If True, generates a Walker Delta constellation instead of random orbits.
 
     Returns:
@@ -360,10 +379,11 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
 
     x0 = []
     if walker_delta:
-        logger.info("Generating walker_delta satellite constellation with %s satellites", N)
+        logger.info("Generating walker_delta satellite constellation with %s satellites", config.N)
 
         # Generate elements and convert to Cartesian
-        elements = generate_walker_delta_constellation(t=N, p=5, f=1, a=RE+500e3, i=np.radians(53))
+        elements = generate_walker_delta_constellation(t=config.N, p=5, f=1, \
+                                                       a=RE+500e3, i=np.radians(53))
         # Sort for deterministic node ordering (e.g. by RAAN then True Anomaly)
         elements.sort(key=lambda x: (x[3], x[5]))
 
@@ -372,32 +392,32 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
             x0.append(state)
         x0_stack = np.concatenate(x0)
     else:
-        logger.info("Generating random satellite constellation with %s satellites", N)
+        logger.info("Generating random satellite constellation with %s satellites", config.N)
 
-        for n in range(N):
-            a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=seed + n)
+        for n in range(config.N):
+            a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=config.seed + n)
             state = keplerian_to_cartesian(a, e, i, raan, argp, ta)
             x0.append(state)
         x0_stack = np.concatenate(x0)
 
     logger.info("Propagating truth states")
-    truth = propagate_truth_kepler(x0_stack, steps, dt)
+    truth = propagate_truth_kepler(x0_stack, config.steps, config.dt)
 
     logger.info("Generating noisy inter-satellite measurements")
-    M = N*(N-1)
-    z_hist = np.zeros((steps, 2*M))
-    for k in range(steps):
+    M = config.N*(config.N-1)
+    z_hist = np.zeros((config.steps, 2*M))
+    for k in range(config.steps):
         xk = truth[k]
         z = []
-        for i in range(N):
+        for i in range(config.N):
             xi = xk[6*i:6*i+6]
-            for j in range(N):
+            for j in range(config.N):
                 if i != j:
                     z.append(hx_block(xk[6*j:6*j+6], xi))
         z_true = np.concatenate(z)
         noise = np.zeros(2*M)
-        noise[0::2] = np.random.normal(0,sig_r, M)
-        noise[1::2] = np.random.normal(0,sig_rdot, M)
+        noise[0::2] = np.random.normal(0,config.sig_r, M)
+        noise[1::2] = np.random.normal(0,config.sig_rdot, M)
         z_hist[k] = z_true + noise
     return truth, z_hist
 
@@ -469,29 +489,27 @@ def _ekf_update(ekf: ExtendedKalmanFilter, z_k: np.ndarray, N: int) -> np.ndarra
     ekf.P = joseph_update(ekf.P, K, H, ekf.R)
     return y
 
-def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
-             dt: float, sig_r: float, sig_rdot: float) -> List[ObservationRecord]:
+def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, k: int,
+             config: FilterConfig) -> List[ObservationRecord]:
     """
     Calculates and logs the Normalised Innovation Squared (NIS) for each observation.
 
     Args:
     - y: The innovation vector (measurement residual).
     - ekf: The EKF object.
-    - N: The number of satellites.
-    - k: The current simulation step.
-    - dt: The time step size.
-    - sig_r: Standard deviation of range measurement noise.
-    - sig_rdot: Standard deviation of range-rate measurement noise.
+    - k: The current time step.
+    - config: The filter configuration.
+
 
     Returns:
     - A list of ObservationRecord objects for the current step.
     """
     obs_records = []
-    diag_R_ij = np.diag([sig_r**2, sig_rdot**2])
+    diag_R_ij = np.diag([config.sig_r**2, config.sig_rdot**2])
     idx = 0
-    for i in range(N): # observer
+    for i in range(config.N): # observer
         xi_idx_slice = slice(STATE_DIM*i, STATE_DIM*i+STATE_DIM)
-        for j in range(N): # target
+        for j in range(config.N): # target
             if i == j:
                 continue
 
@@ -558,35 +576,11 @@ def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
             obs_records.append(
                 ObservationRecord(
                     step=k, observer=i, target=j, nis=nis, dof=yij.shape[0],
-                    time = k*dt, r_vector=rhat.tolist(), v_vector=vhat.tolist()
+                    time = k*config.dt, r_vector=rhat.tolist(), v_vector=vhat.tolist()
             ))
             # Advance index by 2 as every pair is range and range rate
             idx += 2
     return obs_records
-
-@dataclass
-class FilterConfig:
-    """
-    Configuration parameters for the Extended Kalman Filter simulation.
-
-    Attributes:
-    - ISL_range_m: The range for inter-satellite link observations in metres.
-    - N: Number of satellites in the constellation.
-    - steps: Number of simulation steps.
-    - dt: Time step size in seconds.
-    - sig_r: Standard deviation of range measurement noise in meters.
-    - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
-    - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
-    - seed: Random seed for reproducibility.
-    """
-    ISL_range_m: float
-    N: int = 10
-    steps: int = 3000
-    dt: float = 60.0
-    sig_r: float = 10.0
-    sig_rdot: float = 0.02
-    q_acc_target: float = 1e-6
-    seed: int = 42
 
 
 class JointEKF:
@@ -631,8 +625,7 @@ class JointEKF:
         - A list of ObservationRecord objects for the current step.
         """
         y = _ekf_update(self.ekf, z_k, self.config.N)
-        return _log_nis(y, self.ekf, self.config.N, k, self.config.dt,
-                        self.config.sig_r, self.config.sig_rdot)
+        return _log_nis(y, self.ekf, k, self.config)
 
 
 def apply_network_faults(obs_to_submit: ObservationRecord, sid: int, n_sats: int,

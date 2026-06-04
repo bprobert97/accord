@@ -51,7 +51,7 @@ EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 DEFAULT_CONFIG = FilterConfig(
-        N=400,
+        N=50,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
@@ -260,9 +260,7 @@ def _simulate_ekf_filter(config: FilterConfig, logger: Any) -> \
         - x_hist: The EKF state estimate history.
     """
     logger.info("Simulating satellite constellation to get truth")
-    truth, z_hist = simulate_truth_and_meas(
-        config.N, config.steps, config.dt, config.sig_r, config.sig_rdot, config.seed
-    )
+    truth, z_hist = simulate_truth_and_meas(config)
 
     # --- Start of Clustered EKF Implementation ---
     logger.info("Initialising Clustered EKF with cluster size %s", CLUSTER_SIZE)
