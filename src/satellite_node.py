@@ -20,15 +20,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
+from __future__ import annotations
 import asyncio
 import json
 import dataclasses
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import numpy as np
-from .reputation import ReputationManager, MAX_REPUTATION
-from .transaction import Transaction, TransactionMetadata
-from .filter import ObservationRecord
+from src.reputation import ReputationManager, MAX_REPUTATION
+from src.transaction import Transaction, TransactionMetadata
+from src.filter import ObservationRecord
+from src.logger import get_logger
 
+if TYPE_CHECKING:
+    from .dag import DAG
+
+logger = get_logger()
 
 class SatelliteNode():
     """
@@ -50,6 +56,9 @@ class SatelliteNode():
         self.x: float = 0.0
         self.y: float = 0.0
         self.z: float = 0.0
+
+        # Local storage for synchronised ledger data
+        self.local_ledger: dict[str, list[Transaction]] = {}
 
     def update_position(self, state_vector: np.ndarray) -> None:
         """
@@ -101,3 +110,16 @@ class SatelliteNode():
         await self.queue.put((transaction, self, future))
         # Waits until DAG sets the result
         return await future
+
+    def sync_data(self, dag: DAG) -> None:
+        """
+        Synchronises the local ledger with the global DAG ledger.
+        This mimics how a distributed ledger node would update its local state.
+
+        Args:
+        - dag: The global DAG object to sync from.
+        """
+        # In a real DLT, this would involve network communication.
+        # Here we just copy the reference or the data.
+        self.local_ledger = dag.get_ledger().copy()
+        logger.info("Satellite %d synced data from DAG. Local ledger now has %d transactions." % (self.id, len(self.local_ledger)))

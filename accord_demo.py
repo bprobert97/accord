@@ -359,6 +359,9 @@ async def run_consensus_demo(config: FilterConfig,
                             await sat.submit_transaction(recipient_address=other_sid)
                             transactions_submitted_this_step[sid] = True
 
+                        # Once observation submitted, synchronise the DAG on the satellite
+                        sat.sync_data(dag)
+
                 # If no transaction submitted, reputation decays towards neutral
                 if not transactions_submitted_this_step[sid]:
                     sat.reputation = sat.rep_manager.decay(sat.reputation)

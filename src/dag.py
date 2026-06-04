@@ -196,3 +196,12 @@ class DAG():
         real_tx_count = max(0, len(self.ledger) - 2)  # exclude genesis
         # If f=1, we need 4 real tx (3*1+1)
         return real_tx_count >= 4
+
+    def get_ledger(self) -> dict[str, list[Transaction]]:
+        """
+        Returns the current state of the DAG ledger.
+
+        Returns:
+        - A dictionary representing the ledger.
+        """
+        return self.ledger

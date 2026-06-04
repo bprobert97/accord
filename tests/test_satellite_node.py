@@ -2,7 +2,7 @@
 Unit tests for the SatelliteNode class.
 """
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 import pytest
 from src.satellite_node import SatelliteNode
 from src.filter import ObservationRecord
@@ -79,3 +79,17 @@ async def test_submit_transaction_success():
     assert queue.empty()
     # Ensure the listener task didn't have an exception
     await listener_task
+
+def test_sync_data(mock_queue):
+    """
+    Test that the satellite correctly syncs data from the DAG.
+    """
+    node = SatelliteNode(node_id=1, queue=mock_queue)
+    mock_dag = MagicMock()
+    mock_ledger = {"tx1": ["data1"], "tx2": ["data2"]}
+    mock_dag.get_ledger.return_value = mock_ledger
+
+    assert node.local_ledger == {}
+    node.sync_data(mock_dag)
+    assert node.local_ledger == mock_ledger
+    assert node.local_ledger is not mock_ledger # Should be a copy
