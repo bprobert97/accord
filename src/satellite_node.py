@@ -122,4 +122,5 @@ class SatelliteNode():
         # In a real DLT, this would involve network communication.
         # Here we just copy the reference or the data.
         self.local_ledger = dag.get_ledger().copy()
-        logger.info("Satellite %d synced data from DAG. Local ledger now has %d transactions." % (self.id, len(self.local_ledger)))
+        logger.info("Satellite %d synced data from DAG. Local ledger now \
+                    has %d transactions." , self.id, len(self.local_ledger))
