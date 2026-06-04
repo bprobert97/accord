@@ -377,13 +377,9 @@ def _run_ekf_main_loop(config: FilterConfig, clusters: list[list[int]],
             ekf.predict()
 
             # Build the measurement vector `z_k_cluster` for this cluster
-            z_k_cluster_list = []
-            for obs_id_global in cluster_sat_ids:
-                for tgt_id_global in cluster_sat_ids:
-                    if obs_id_global != tgt_id_global:
-                        z_slice = z_map.get((obs_id_global, tgt_id_global))
-                        if z_slice:
-                            z_k_cluster_list.append(z_hist[k, z_slice])
+            z_k_cluster_list = _get_cluster_measurements(
+                cluster_sat_ids, z_map, z_hist, k
+            )
 
             if not z_k_cluster_list:
                 continue
@@ -407,6 +403,30 @@ def _run_ekf_main_loop(config: FilterConfig, clusters: list[list[int]],
         logger.info("Completed EKF step %d/%d", k + 1, config.steps)
 
     return all_obs_records, x_hist
+
+
+def _get_cluster_measurements(cluster_sat_ids: list[int], z_map: dict,
+                              z_hist: np.ndarray, k: int) -> list[np.ndarray]:
+    """
+    Helper to extract the measurement vectors for a specific cluster.
+    Args:
+    - cluster_sat_ids: List of global satellite IDs in the cluster.
+    - z_map: A dictionary mapping (observer_id, target_id) to slices of the
+             z_hist array.
+    - z_hist: The measurement history array.
+    - k: The current time step.
+
+    Returns:
+    - A list of measurement vectors (as numpy arrays) for the cluster at step k.
+    """
+    z_k_cluster_list = []
+    for obs_id_global in cluster_sat_ids:
+        for tgt_id_global in cluster_sat_ids:
+            if obs_id_global != tgt_id_global:
+                z_slice = z_map.get((obs_id_global, tgt_id_global))
+                if z_slice:
+                    z_k_cluster_list.append(z_hist[k, z_slice])
+    return z_k_cluster_list
 
 
 def _save_ekf_results(ekf_results_path: str, config: FilterConfig, truth: np.ndarray,
