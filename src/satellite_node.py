@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import dataclasses
+import pickle
 from typing import Optional, TYPE_CHECKING
 import numpy as np
 from src.reputation import ReputationManager, MAX_REPUTATION
@@ -122,5 +123,7 @@ class SatelliteNode():
         # In a real DLT, this would involve network communication.
         # Here we just copy the reference or the data.
         self.local_ledger = dag.get_ledger().copy()
+        ledger_size = len(pickle.dumps(self.local_ledger))
         logger.info("Satellite %d synced data from DAG. Local ledger now \
-                    has %d transactions." , self.id, len(self.local_ledger))
+                    has %d transactions (%d bytes)." , self.id,
+                    len(self.local_ledger), ledger_size)
