@@ -460,33 +460,81 @@ def plot_aggregated_reputation(
     convergence_index: Optional[int] = None
 ) -> None:
     """
-    Plots the aggregated median reputation over time for honest vs. faulty satellites,
-    with shaded regions indicating the 10th to 90th percentile spread.
+    Plots the aggregated median reputation over time for honest vs. faulty satellites.
 
     Args:
-        rep_history (dict[str, list[float]]): A dictionary of reputation histories
-                                              for each satellite.
-        faulty_ids (set[int]): A set of IDs for faulty satellites.
-        start_at_full_constellation (bool): If True, starts plotting only after
-                                            a number of transactions equal to the
-                                            number of satellites has passed,
-                                            assuming this is when all nodes have
-                                            had a chance to submit data.
-        convergence_index (int): Optional index to plot a vertical dashed line
-                                 indicating filter convergence.
+    - rep_history: Dictionary mapping satellite IDs to their reputation history lists.
+    - faulty_ids: Set of satellite IDs that are considered faulty.
+    - start_at_full_constellation: If True, starts the plot at the convergence index or
+      60% of the data if convergence index is not provided. If False, plots from
+      the beginning.
+    - convergence_index: Optional index to indicate filter convergence point on the plot.
 
     Returns:
-        None: Displays a matplotlib plot.
+    - None: Displays a matplotlib plot.
     """
     if not rep_history:
         print("No reputation data to plot.")
         return
 
-    max_len = max(len(h) for h in rep_history.values())
-    honest_matrix = []
-    faulty_matrix = []
+    honest_arr, faulty_arr, max_len = _prepare_reputation_matrices(rep_history, faulty_ids)
 
-    # Pad histories to the same length for numpy operations
+    start_index = 0
+    if start_at_full_constellation:
+        start_index = convergence_index if convergence_index is not None else int(0.6 * max_len)
+        if start_index >= max_len:
+            print("Not enough data to plot with 'start_at_full_constellation'=True. \
+                  Plotting all data.")
+            start_index = 0
+
+    steps = np.arange(max_len)[start_index:]
+    if not steps.size:
+        print("No data points to plot after filtering.")
+        return
+
+    plt.figure(figsize=(10, 6))
+    cmap = plt.get_cmap('viridis')
+
+    _plot_reputation_spread(steps, honest_arr[:, start_index:] if honest_arr.size \
+                            else [], cmap(0.5), "Honest")
+    _plot_reputation_spread(steps, faulty_arr[:, start_index:] if faulty_arr.size \
+                            else [], cmap(0.05), "Faulty")
+
+    plt.axhline(MAX_REPUTATION/2, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
+    if convergence_index is not None and not start_at_full_constellation:
+        plt.axvline(x=convergence_index, color="black", linestyle="--",
+                    linewidth=1, label="Filter Convergence")
+
+    plt.xlabel("Chronological Transaction Index [-]", fontsize=20)
+    plt.ylabel("Reputation Score [-]", fontsize=20)
+    plt.tick_params(axis='both', labelsize=16)
+    plt.legend(loc="lower right", fontsize=14)
+    plt.grid(True, linestyle=":", alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
+
+def _prepare_reputation_matrices(rep_history: dict[str, list[float]],
+                                 faulty_ids: set[int])-> Tuple[np.ndarray, np.ndarray, int]:
+    """
+    Prepares separate matrices for honest and faulty satellite reputations, padding
+    shorter histories with their last known value to allow for mean and std calculations.
+
+    Args:
+    - rep_history: Dictionary mapping satellite IDs to their reputation history lists.
+    - faulty_ids: Set of satellite IDs that are considered faulty.
+
+    Returns:
+    - Tuple containing:
+        - honest_matrix: 2D numpy array of shape (num_honest, max_len)
+        with padded reputations.
+        - faulty_matrix: 2D numpy array of shape (num_faulty, max_len)
+        with padded reputations.
+        - max_len: The maximum length of the reputation histories (after padding).
+    """
+    max_len = max(len(h) for h in rep_history.values())
+    honest_matrix, faulty_matrix = [], []
+
     for sid, history in rep_history.items():
         padded_history = history + [history[-1]] * (max_len - len(history))
         if int(sid) in faulty_ids:
@@ -494,83 +542,33 @@ def plot_aggregated_reputation(
         else:
             honest_matrix.append(padded_history)
 
-    honest_arr = np.array(honest_matrix)
-    faulty_arr = np.array(faulty_matrix)
+    return np.array(honest_matrix), np.array(faulty_matrix), max_len
 
-    start_index = 0
-    if start_at_full_constellation:
-        # Assuming the constellation is fully formed after 60% of the transactions.
-        start_index = convergence_index if convergence_index is not None else int(0.6 * max_len)
 
-    if start_index >= max_len:
-        print("Not enough data to plot with 'start_at_full_constellation'=True. Plotting all data.")
-        start_index = 0
+def _plot_reputation_spread(steps, data_matrix, colour, label_prefix) -> None:
+    """
+    Plots the mean reputation over time with a shaded area representing one standard deviation
+    around the mean.
 
-    # Slice data for plotting
-    steps = np.arange(max_len)[start_index:]
-    if len(honest_arr) > 0:
-        honest_array = np.array(honest_arr)
-        honest_array = honest_array[:, start_index:]
-    if len(faulty_arr) > 0:
-        faulty_array = np.array(faulty_arr)
-        faulty_array = faulty_array[:, start_index:]
+    Args:
+    - steps: 1D array of step indices corresponding to the reputation data.
+    - data_matrix: 2D array where each row is a satellite's reputation history.
+    - colour: Colour for the plot line and shaded area.
+    - label_prefix: String prefix for the legend label (e.g., "Honest" or "Faulty").
 
-    if not steps.size:
-        print("No data points to plot after filtering.")
-        return
+    Returns:
+    - None: Adds the plot to the current matplotlib axes.
+    """
 
-    plt.figure(figsize=(10, 6))
-    cmap = plt.get_cmap('viridis')
-    color_h = cmap(0.5)  # Honest (Greenish)
-    color_f = cmap(0.05) # Faulty (Dark Purple)
+    if len(data_matrix) > 0:
+        mean_vals = np.mean(data_matrix, axis=0)
+        std_vals = np.std(data_matrix, axis=0)
 
-    # Plot Honest Satellites
-    if len(honest_matrix) > 0:
-        honest_mean = np.mean(honest_matrix, axis=0)
-        honest_std = np.std(honest_matrix, axis=0)
-
-        plt.plot(steps, honest_mean, color=color_h, linewidth=2, label="Honest Mean")
+        plt.plot(steps, mean_vals, color=colour, linewidth=2, label=f"{label_prefix} Mean")
         plt.fill_between(
-            steps,
-            honest_mean - honest_std,
-            honest_mean + honest_std,
-            color=color_h,
-            alpha=0.2,
-            label="Honest Spread (1 std. dev.)",
+            steps, mean_vals - std_vals, mean_vals + std_vals,
+            color=colour, alpha=0.2, label=f"{label_prefix} Spread (1 std. dev.)",
         )
-
-    # Plot Faulty Satellites
-    if len(faulty_matrix) > 0:
-        faulty_mean = np.mean(faulty_matrix, axis=0)
-        faulty_std = np.std(faulty_matrix, axis=0)
-
-        plt.plot(steps, faulty_mean, color=color_f, linewidth=2, label="Faulty Mean")
-        plt.fill_between(
-            steps,
-            faulty_mean - faulty_std,
-            faulty_mean + faulty_std,
-            color=color_f,
-            alpha=0.2,
-            label="Faulty Spread (1 std. dev.)",
-        )
-
-    # Formatting
-    plt.axhline(MAX_REPUTATION/2, color="gray", linestyle=":", linewidth=2, label="Neutral (0.5)")
-
-    if convergence_index is not None and not start_at_full_constellation:
-        plt.axvline(x=convergence_index, color="black", linestyle="--",\
-            linewidth=1, label="Filter Convergence")
-
-    plt.xlabel("Chronological Transaction Index [-]", fontsize=20)
-    plt.ylabel("Reputation Score [-]", fontsize=20)
-
-    plt.tick_params(axis='both', labelsize=16)
-    plt.legend(loc="lower right", fontsize=14)
-    plt.grid(True, linestyle=":", alpha=0.7)
-
-    plt.tight_layout()
-    plt.show()
-
 
 def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     """

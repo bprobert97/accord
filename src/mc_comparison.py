@@ -133,29 +133,43 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
 def plot_kpi_comparison(results_a: List[Dict[str, Any]],
                         results_b: List[Dict[str, Any]]) -> None:
     """
-    Plots a bar chart comparison of key KPIs, including TTD as a percentage of runtime.
+    Plots a bar chart comparison of key KPIs, including TTD as a percentage
+    of runtime.
 
     Args:
-        results_a: Dataset A
-        results_b: Dataset B
+    - results_a: Dataset A
+    - results_b: Dataset B
 
     Returns:
-        None. Saves MatPlotLib figures in OUTPUT_DIR.
+    - None. Saves MatPlotLib figures in OUTPUT_DIR.
+    """
+    _plot_kpi_bar_chart(results_a, results_b)
+    _plot_ttd_boxplot(results_a, results_b)
+
+
+def _plot_kpi_bar_chart(results_a: List[Dict[str, Any]],
+                        results_b: List[Dict[str, Any]]) -> None:
+    """
+    Plots a bar chart comparison of recall, precision, FPR, and TTD percentage.
+
+    Args:
+    - results_a: Dataset A
+    - results_b: Dataset B
+
+    Returns:
+    - None. Saves a MatPlotLib figure in OUTPUT_DIR.
     """
     metrics = ["recall", "precision", "fpr"]
     labels = ["Recall", "Precision", "False Positive Rate", "Normalised TTD"]
 
-    # Calculate means for standard metrics
     means_a = [np.mean([k[m] for k in results_a]) for m in metrics]
     means_b = [np.mean([k[m] for k in results_b]) for m in metrics]
 
-    # Calculate Normalised TTD (as % of total steps)
     def get_ttd_percent(results):
-        ttd_pcts = []
-        for k in results:
-            if k.get("avg_ttd") is not None:
-                total_steps = k["honest_matrix"].shape[1]
-                ttd_pcts.append((k["avg_ttd"] / total_steps) * 100)
+        ttd_pcts = [
+            (k["avg_ttd"] / k["honest_matrix"].shape[1]) * 100
+            for k in results if k.get("avg_ttd") is not None
+        ]
         return np.mean(ttd_pcts) if ttd_pcts else 0
 
     means_a.append(get_ttd_percent(results_a))
@@ -163,63 +177,69 @@ def plot_kpi_comparison(results_a: List[Dict[str, Any]],
 
     x = np.arange(len(labels))
     width = 0.35
-
     _, ax = plt.subplots(figsize=(12, 6))
-
-    # Use viridis for color-blind friendly comparisons
     cmap = plt.get_cmap('viridis')
-    color_a = cmap(0.25) # Deep teal/blue
-    color_b = cmap(0.85) # Bright yellow/green
 
-    ax.bar(x - width/2, means_a, width, label='1000km ISL', color=color_a)
-    ax.bar(x + width/2, means_b, width, label='2000km ISL', color=color_b)
+    ax.bar(x - width/2, means_a, width, label='1000km ISL', color=cmap(0.25))
+    ax.bar(x + width/2, means_b, width, label='2000km ISL', color=cmap(0.85))
 
     ax.set_ylabel('Percentage [%]')
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.legend()
     ax.grid(axis='y', alpha=0.1)
-    ax.set_ylim(0, 105) # Metrics are percentages
+    ax.set_ylim(0, 105)
 
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "kpi_percentage_comparison.png"))
     plt.show()
 
-    # TTD Comparison
+
+def _plot_ttd_boxplot(results_a: List[Dict[str, Any]],
+                      results_b: List[Dict[str, Any]]) -> None:
+    """
+    Plots a boxplot comparison of Time to Detection (TTD) in timesteps for both datasets.
+    Only includes runs where TTD is available (not None).
+
+    Args:
+    - results_a: Dataset A
+    - results_b: Dataset B
+
+    Returns:
+    - None. Saves a MatPlotLib figure in OUTPUT_DIR.
+    """
     ttds_a = [float(k.get("avg_ttd", 0)) for k in results_a if k.get("avg_ttd") is not None]
     ttds_b = [float(k.get("avg_ttd", 0)) for k in results_b if k.get("avg_ttd") is not None]
 
-    if ttds_a or ttds_b:
-        plt.figure(figsize=(6, 6))
-        data_to_plot = []
-        labels_ttd = []
-        if ttds_a:
-            data_to_plot.append(ttds_a)
-            labels_ttd.append("1000km ISL")
-        if ttds_b:
-            data_to_plot.append(ttds_b)
-            labels_ttd.append("2000km ISL")
+    if not ttds_a and not ttds_b:
+        return
 
-        # Reduce gap by setting positions closer and increasing widths
-        positions = [1, 1.5]
+    plt.figure(figsize=(6, 6))
+    data_to_plot, labels_ttd = [], []
 
-        cmap = plt.get_cmap('viridis')
-        colors = [cmap(0.25), cmap(0.85)]
+    if ttds_a:
+        data_to_plot.append(ttds_a)
+        labels_ttd.append("1000km ISL")
+    if ttds_b:
+        data_to_plot.append(ttds_b)
+        labels_ttd.append("2000km ISL")
 
-        bp = plt.boxplot(data_to_plot, tick_labels=labels_ttd,
-                    positions=positions[:len(data_to_plot)], widths=0.35,
-                    patch_artist=True)
+    cmap = plt.get_cmap('viridis')
+    colors = [cmap(0.25), cmap(0.85)]
+    bp = plt.boxplot(data_to_plot, tick_labels=labels_ttd, positions=[1, 1.5][:len(data_to_plot)],
+                     widths=0.35, patch_artist=True)
 
-        for patch, color in zip(bp['boxes'], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.6)
+    for patch, color in zip(bp['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.6)
 
-        plt.xlim(0.5, 2.0)
-        plt.ylabel("Time to Detection  [Timesteps]")
-        plt.grid(axis='y', alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(os.path.join(OUTPUT_DIR, "ttd_comparison.png"))
-        plt.show()
+    plt.xlim(0.5, 2.0)
+    plt.ylabel("Time to Detection  [Timesteps]")
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, "ttd_comparison.png"))
+    plt.show()
+
 
 def main():
     """
