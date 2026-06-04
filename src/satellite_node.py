@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import dataclasses
+from dataclasses import dataclass
 import pickle
 from typing import Optional, TYPE_CHECKING
 import numpy as np
@@ -36,6 +37,13 @@ if TYPE_CHECKING:
     from .dag import DAG
 
 logger = get_logger()
+
+@dataclass
+class Position:
+    """3D spatial coordinates of the satellite."""
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
 
 class SatelliteNode():
     """
@@ -53,10 +61,7 @@ class SatelliteNode():
 
         self.sensor_data: Optional[ObservationRecord] = None
 
-        # Position attributes
-        self.x: float = 0.0
-        self.y: float = 0.0
-        self.z: float = 0.0
+        self.position = Position()
 
         # Local storage for synchronised ledger data
         self.local_ledger: dict[str, list[Transaction]] = {}
@@ -69,7 +74,11 @@ class SatelliteNode():
         - state_vector: A NumPy array containing the satellite's state
                         (at least [px, py, pz, ...]).
         """
-        self.x, self.y, self.z = state_vector[0], state_vector[1], state_vector[2]
+        self.position.x, \
+            self.position.y, \
+                self.position.z = state_vector[0], \
+                                    state_vector[1], \
+                                        state_vector[2]
 
     def load_sensor_data(self, observation: ObservationRecord) -> None:
         """

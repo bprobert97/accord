@@ -87,9 +87,9 @@ def is_in_isl_range(isl_range: float, sat1: SatelliteNode, sat2: SatelliteNode) 
     - True if the satellites are within range, False otherwise.
     """
     distance = math.sqrt(
-        (sat1.x - sat2.x)**2 +
-        (sat1.y - sat2.y)**2 +
-        (sat1.z - sat2.z)**2
+        (sat1.position.x - sat2.position.x)**2 +
+        (sat1.position.y - sat2.position.y)**2 +
+        (sat1.position.z - sat2.position.z)**2
     )
     return distance <= isl_range
 
