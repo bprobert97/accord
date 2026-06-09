@@ -2,6 +2,7 @@
 Unit tests for the ConsensusMechanism class.
 """
 import json
+import time
 from unittest.mock import MagicMock, patch
 import pytest
 from src.consensus_mech import ConsensusMechanism
@@ -78,33 +79,49 @@ def test_calculate_dof_score(consensus_mech):
     """
     current_r_vector=[1.0, 2.0, 3.0]
     current_v_vector=[0.1, 0.2, 0.3]
-    # Test base score - no previous vector or delta_t
-    assert consensus_mech.calculate_dof_score(1, current_r_vector, current_v_vector) == 0
-    assert consensus_mech.calculate_dof_score(2, current_r_vector, current_v_vector) == 0.5
-    assert consensus_mech.calculate_dof_score(3, current_r_vector, current_v_vector) == 1.0
+    obs = ObservationRecord(step=500,
+                            time=time.time(),
+                            observer=1,
+                            target=2,
+                            nis=2.0,
+                            dof=1,
+                            r_vector=current_r_vector,
+                            v_vector=current_v_vector)
 
-    # Test with previous vector and delta_t
+    # Test base score - no previous vector or delta_t
+    # DOF = 1 initially
+    assert consensus_mech.calculate_dof_score(obs_record=obs) == 0
+
+    obs.dof = 2
+    assert consensus_mech.calculate_dof_score(obs_record=obs) == 0.5
+
+    obs.dof = 3
+    assert consensus_mech.calculate_dof_score(obs_record=obs) == 1.0
+
+    # Test with previous data
     previous_r_vector = [0.5, 1.5, 2.5]
     previous_v_vector = [0.05, 0.15, 0.25]
-    delta_t = 10.0
+
+    prev_data = {
+        "r_vector": previous_r_vector,
+        "v_vector": previous_v_vector,
+        "time": time.time() - 10}
+
     score_1 = consensus_mech.calculate_dof_score(
-        dof=3,
-        current_r_vector=current_r_vector,
-        current_v_vector=current_v_vector,
-        previous_r_vector=previous_r_vector,
-        previous_v_vector=previous_v_vector,
-        delta_t=delta_t
+        obs_record=obs,
+        previous_data=prev_data
     )
     assert score_1 == pytest.approx(0.4, 0.01)
 
-    # Expect unchanged vectros to score worse
+    # Expect unchanged vectors to score worse
+    prev_data_unchanged = {
+        "r_vector": current_r_vector,
+        "v_vector": current_v_vector,
+        "time": time.time() - 10}
+
     score_2 = consensus_mech.calculate_dof_score(
-        dof=3,
-        current_r_vector=current_r_vector,
-        current_v_vector=current_v_vector,
-        previous_r_vector=current_r_vector,
-        previous_v_vector=current_v_vector,
-        delta_t=delta_t
+        obs_record=obs,
+        previous_data=prev_data_unchanged
     )
     assert score_1 > score_2
 

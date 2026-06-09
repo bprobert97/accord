@@ -107,15 +107,16 @@ def calculate_kpis(sat_pop_data: SatellitePopulationData,
       lists of undetected faulty IDs and their reputations.
     """
 
-    honest_matrix, faulty_matrix, honest_ids, faulty_ids_list = _resolve_kpi_inputs(
-        sat_pop_data.rep_history,
-        sat_pop_data.faulty_ids,
-        sat_pop_data.honest_matrix,
-        sat_pop_data.faulty_matrix
-    )
+    sat_pop_data.honest_matrix, sat_pop_data.faulty_matrix, \
+        honest_ids, faulty_ids_list = _resolve_kpi_inputs(
+            sat_pop_data.rep_history,
+            sat_pop_data.faulty_ids,
+            sat_pop_data.honest_matrix,
+            sat_pop_data.faulty_matrix
+        )
 
     if sat_pop_data.steps is None:
-        sat_pop_data.steps = honest_matrix.shape[1]
+        sat_pop_data.steps = sat_pop_data.honest_matrix.shape[1]
 
     if faulty_ids_list is None:
         raise ValueError("Faulty IDs are required to calculate detection metrics.")
@@ -125,9 +126,9 @@ def calculate_kpis(sat_pop_data: SatellitePopulationData,
         detection_threshold, fpr_offset_percent, logger
     )
 
-    num_honest, num_faulty = len(honest_matrix), len(faulty_matrix)
-    final_honest: np.ndarray = honest_matrix[:, -1] if num_honest else np.array([])
-    final_faulty: np.ndarray = faulty_matrix[:, -1] if num_faulty else np.array([])
+    num_honest, num_faulty = len(sat_pop_data.honest_matrix), len(sat_pop_data.faulty_matrix)
+    final_honest: np.ndarray = sat_pop_data.honest_matrix[:, -1] if num_honest else np.array([])
+    final_faulty: np.ndarray = sat_pop_data.faulty_matrix[:, -1] if num_faulty else np.array([])
 
     return {
         "avg_ttd": np.mean(metrics['ttds']) if metrics['ttds'] else None,
@@ -144,8 +145,8 @@ def calculate_kpis(sat_pop_data: SatellitePopulationData,
         "detection_margin": (np.mean(final_honest) if num_honest else 0) - \
             (np.mean(final_faulty) if num_faulty else 0),
         "flips": metrics['total_flips'],
-        "honest_matrix": honest_matrix,
-        "faulty_matrix": faulty_matrix,
+        "honest_matrix": sat_pop_data.honest_matrix,
+        "faulty_matrix": sat_pop_data.faulty_matrix,
         "honest_nis_stats": _get_nis_stats(sat_pop_data.honest_nis),
         "faulty_nis_stats": _get_nis_stats(sat_pop_data.faulty_nis),
         "undetected_faulty_ids": metrics['undetected_ids'],

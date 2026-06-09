@@ -21,10 +21,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import asyncio
+import logging
 import math
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Any
 import numpy as np
 from src.plotting import  \
@@ -94,6 +95,27 @@ def is_in_isl_range(isl_range: float, sat1: SatelliteNode, sat2: SatelliteNode) 
     )
     return distance <= isl_range
 
+@dataclass
+class StepData:
+    """
+    A dataclass that stores all of the data for
+    one step of the simulation
+    """
+    k: int
+    obs_by_step: dict[int, list[ObservationRecord]]
+    tx_this_step: dict[int, bool]
+
+@dataclass
+class SimData:
+    """
+    A dataclass that stores fixed data for
+    the entire simulation.
+    """
+    truth: np.ndarray
+    faulty_ids: set[int]
+    dag: DAG
+    logger: logging.Logger
+    satellites: dict[int, SatelliteNode] = field(default_factory=dict)
 
 @dataclass
 class DemoToggles:
@@ -165,12 +187,15 @@ async def run_consensus_demo(config: FilterConfig,
     return await _run_consensus_phase(
         config, truth, all_obs_records,
         toggles.save_sim_results,
-        file_paths.sim_results_path, logger
+        file_paths.sim_results_path
     )
 
 
-def _resolve_ekf_phase(config: FilterConfig, load_ekf_results: bool, ekf_results_path: str,
-                       save_ekf_results: bool, logger: Any) -> \
+def _resolve_ekf_phase(config: FilterConfig,
+                       load_ekf_results: bool,
+                       ekf_results_path: str,
+                       save_ekf_results: bool,
+                       logger: logging.Logger) -> \
         tuple[Optional[np.ndarray], Optional[np.ndarray],
               Optional[list[ObservationRecord]], Optional[np.ndarray]]:
 
@@ -204,13 +229,15 @@ def _resolve_ekf_phase(config: FilterConfig, load_ekf_results: bool, ekf_results
 
         # Save EKF results if requested
         if save_ekf_results:
-            _save_ekf_results(ekf_results_path, config, truth,
-                              z_hist, all_obs_records, x_hist, logger)
+            _save_ekf_results(ekf_results_path, config,
+                              (truth, z_hist, all_obs_records, x_hist))
 
     return truth, z_hist, all_obs_records, x_hist
 
 
-def _load_ekf_results(ekf_results_path: str, config: FilterConfig, logger: Any) -> \
+def _load_ekf_results(ekf_results_path: str,
+                      config: FilterConfig,
+                      logger: logging.Logger) -> \
         tuple[Optional[np.ndarray], Optional[np.ndarray],
               Optional[list[ObservationRecord]], Optional[np.ndarray]]:
     """
@@ -292,7 +319,7 @@ def _simulate_ekf_filter(config: FilterConfig, logger: Any) -> \
     # 4. Main simulation loop
     logger.info("Collecting observation records using Clustered EKF")
     all_obs_records, x_hist = _run_ekf_main_loop(config, clusters, cluster_ekfs,
-                                                 z_map, z_hist, logger)
+                                                 z_map, z_hist)
     # --- End of Clustered EKF Implementation ---
 
     return truth, z_hist, all_obs_records, x_hist
@@ -354,11 +381,12 @@ def _create_z_map(n_satellites: int) -> dict[tuple[int, int], slice]:
     return z_map
 
 
-def _run_ekf_main_loop(config: FilterConfig, clusters: list[list[int]],
+def _run_ekf_main_loop(config: FilterConfig,
+                       clusters: list[list[int]],
                        cluster_ekfs: list[Any],
-                       z_map: dict, z_hist: np.ndarray,
-                       logger: Any) -> tuple[list[ObservationRecord],
-                                             np.ndarray]:
+                       z_map: dict, z_hist: np.ndarray
+                       ) -> tuple[list[ObservationRecord],
+                                  np.ndarray]:
     """
     Run the main loop of the EKF simulation, where each cluster EKF processes its
     predictions and updates based on the measurements.
@@ -371,7 +399,6 @@ def _run_ekf_main_loop(config: FilterConfig, clusters: list[list[int]],
     - z_map: A dictionary mapping (observer_id, target_id) to slices of the
              z_hist array.
     - z_hist: The measurement history array.
-    - logger: Logger object for logging messages.
 
     Returns:
     - A tuple containing:
@@ -382,6 +409,7 @@ def _run_ekf_main_loop(config: FilterConfig, clusters: list[list[int]],
     """
     all_obs_records = []
     x_hist = np.zeros((config.steps, config.N * 6))
+    logger=get_logger()
 
     for k in range(config.steps):
         for cluster_sat_ids, ekf in zip(clusters, cluster_ekfs):
@@ -441,24 +469,30 @@ def _get_cluster_measurements(cluster_sat_ids: list[int], z_map: dict,
     return z_k_cluster_list
 
 
-def _save_ekf_results(ekf_results_path: str, config: FilterConfig, truth: np.ndarray,
-                      z_hist: np.ndarray, all_obs_records: list[ObservationRecord],
-                      x_hist: np.ndarray, logger: Any) -> None:
+def _save_ekf_results(ekf_results_path: str,
+                      config: FilterConfig,
+                      ekf_data: tuple[np.ndarray, np.ndarray,
+                                      list[ObservationRecord], np.ndarray]
+                      ) -> None:
     """
     Save the EKF simulation results to a .npz file.
 
     Args:
     - ekf_results_path: The path to the .npz file where results will be saved.
     - config: The FilterConfig used for the simulation (saved for reproducibility).
-    - truth: The ground truth trajectory history.
-    - z_hist: The measurement history.
-    - all_obs_records: The list of observation records generated by the EKF.
-    - x_hist: The EKF state estimate history.
-    - logger: Logger object for logging messages.
+    - ekf_data: A tuple of:
+        - truth: The ground truth trajectory history.
+        - z_hist: The measurement history.
+        - all_obs_records: The list of observation records generated by the EKF.
+        - x_hist: The EKF state estimate history.
 
     Returns:
     - None. The results are saved to the specified file path.
     """
+    # Unpack the tuple
+    truth, z_hist, all_obs_records, x_hist = ekf_data
+
+    logger = get_logger()
     logger.info("Saving EKF simulation results to %s", ekf_results_path)
     os.makedirs(os.path.dirname(ekf_results_path), exist_ok=True)
     np.savez_compressed(
@@ -472,9 +506,11 @@ def _save_ekf_results(ekf_results_path: str, config: FilterConfig, truth: np.nda
     logger.info("EKF simulation results saved successfully.")
 
 
-async def _run_consensus_phase(config: FilterConfig, truth: np.ndarray,
+async def _run_consensus_phase(config: FilterConfig,
+                               truth: np.ndarray,
                                all_obs_records: list[ObservationRecord],
-                               save_sim_results: bool, sim_results_path: str, logger: Any) -> \
+                               save_sim_results: bool,
+                               sim_results_path: str) -> \
         tuple[DAG, dict, np.ndarray, set[int]]:
     """
     Run the consensus simulation phase where satellite nodes submit transactions to the DAG
@@ -486,7 +522,6 @@ async def _run_consensus_phase(config: FilterConfig, truth: np.ndarray,
     - all_obs_records: The list of observation records generated by the EKF.
     - save_sim_results: If True, saves the consensus simulation results to sim_results_path.
     - sim_results_path: Path to save consensus simulation results.
-    - logger: Logger object for logging messages.
 
     Returns:
     - A tuple containing:
@@ -500,15 +535,20 @@ async def _run_consensus_phase(config: FilterConfig, truth: np.ndarray,
     queue: asyncio.Queue = asyncio.Queue()
     dag = DAG(queue=queue, consensus_mech=poise)
     listen_task = asyncio.create_task(dag.listen())
+    sim_data = SimData(
+        truth=truth,
+        dag=dag,
+        faulty_ids=faulty_ids,
+        logger=get_logger())
 
     try:
         rep_history = await _execute_consensus_loop(
-            config, truth, all_obs_records, queue, dag, faulty_ids, logger
+            config, sim_data, all_obs_records, queue
         )
 
         # Save Consensus Simulation results
         if save_sim_results:
-            _save_consensus_results(sim_results_path, dag, rep_history, truth, faulty_ids, logger)
+            _save_consensus_results(sim_results_path, sim_data, rep_history)
     finally:
         listen_task.cancel()
         try:
@@ -519,22 +559,18 @@ async def _run_consensus_phase(config: FilterConfig, truth: np.ndarray,
     return dag, rep_history, truth, faulty_ids
 
 
-async def _execute_consensus_loop(config: FilterConfig, truth: np.ndarray,
+async def _execute_consensus_loop(config: FilterConfig, sim_data: SimData,
                                   all_obs_records: list[ObservationRecord],
-                                  queue: asyncio.Queue, dag: DAG,
-                                  faulty_ids: set[int], logger: Any) -> dict[str, list[float]]:
+                                  queue: asyncio.Queue) -> dict[str, list[float]]:
     """
     Execute the main consensus loop where satellite nodes interact based on the EKF
     observation records.
 
     Args:
     - config: FilterConfig object with simulation parameters.
-    - truth: The ground truth trajectory history.
+    - sim_data: The fixed simulation data
     - all_obs_records: The list of observation records generated by the EKF.
     - queue: The asyncio.Queue used for communication with the DAG.
-    - dag: The DAG instance representing the ledger.
-    - faulty_ids: A set to keep track of satellite IDs that have exhibited faulty behaviour.
-    - logger: Logger object for logging messages.
 
     Returns:
     - A dictionary containing the reputation history for each satellite,
@@ -544,12 +580,12 @@ async def _execute_consensus_loop(config: FilterConfig, truth: np.ndarray,
 
     # Create one SatelliteNode for each of the N satellites in the simulation.
     unique_ids = sorted(list(range(config.N)))
-    satellites: dict[int, SatelliteNode] = {sid: SatelliteNode(node_id=sid,
-                                                               queue=queue) \
-                                                                for sid in unique_ids}
+
+    sim_data.satellites = {sid: SatelliteNode(node_id=sid, queue=queue) \
+                           for sid in unique_ids}
 
     # Initialise rep_history with the starting reputation for all satellites.
-    rep_history: dict[str, list[float]] = {str(sid): [satellites[sid].reputation] \
+    rep_history: dict[str, list[float]] = {str(sid): [sim_data.satellites[sid].reputation] \
                                            for sid in unique_ids}
 
     # Group observations by step
@@ -559,16 +595,24 @@ async def _execute_consensus_loop(config: FilterConfig, truth: np.ndarray,
 
     for k in range(config.steps):
         # Update satellite positions at each step
-        for sid, sat in satellites.items():
-            sat.update_position(truth[k, sid*6:(sid+1)*6])
+        for sid, sat in sim_data.satellites.items():
+            sat.update_position(sim_data.truth[k, sid*6:(sid+1)*6])
 
         transactions_submitted_this_step = {sid: False for sid in unique_ids}
+        step_data = StepData(
+            k = k,
+            obs_by_step=obs_by_step,
+            tx_this_step=transactions_submitted_this_step
+        )
 
         # Iterate through satellites to check for ISL opportunities
-        for sid, sat in satellites.items():
+        for sid, sat in sim_data.satellites.items():
             await _process_satellite_interactions(
-                sid, sat, k, config, satellites, obs_by_step, faulty_ids, dag,
-                transactions_submitted_this_step, logger
+                sid=sid,
+                sat=sat,
+                step_data=step_data,
+                config=config,
+                sim_data=sim_data
             )
 
             # If no transaction submitted, reputation decays towards neutral
@@ -577,16 +621,16 @@ async def _execute_consensus_loop(config: FilterConfig, truth: np.ndarray,
 
         # Record reputation for all satellites at the end of the step
         for sid in unique_ids:
-            rep_history[str(sid)].append(satellites[sid].reputation)
+            rep_history[str(sid)].append(sim_data.satellites[sid].reputation)
 
     return rep_history
 
 
-async def _process_satellite_interactions(sid: int, sat: SatelliteNode, k: int,
+async def _process_satellite_interactions(sid: int,
+                                          sat: SatelliteNode,
+                                          step_data: StepData,
                                           config: FilterConfig,
-                                          satellites: dict[int, SatelliteNode], obs_by_step: dict,
-                                          faulty_ids: set[int], dag: DAG,
-                                          transactions_submitted_this_step: dict, logger: Any
+                                          sim_data: SimData
                                           ) -> None:
     """
     Process the interactions for a single satellite at a given step, including checking for
@@ -596,72 +640,71 @@ async def _process_satellite_interactions(sid: int, sat: SatelliteNode, k: int,
     Args:
     - sid: The ID of the satellite being processed.
     - sat: The SatelliteNode instance for the satellite being processed.
-    - k: The current step in the simulation.
+    - step_data: The data for step k of the simulation
     - config: FilterConfig object with simulation parameters.
-    - satellites: A dictionary of all SatelliteNode instances, keyed by satellite ID.
-    - obs_by_step: A dictionary mapping each step to a list of ObservationRecord
-      instances for that step.
-    - faulty_ids: A set to keep track of satellite IDs that have exhibited faulty behaviour.
-    - dag: The DAG instance representing the ledger.
-    - transactions_submitted_this_step: A dictionary tracking whether each satellite
-      has submitted a transaction this step.
-    - logger: Logger object for logging messages.
+    - sim_data: Fixed data for the simulation.
 
     Returns:
     - None. The function updates the state of the satellite and interacts with the DAG as needed.
     """
-    for other_sid, other_sat in satellites.items():
+    for other_sid, other_sat in sim_data.satellites.items():
         if sid == other_sid:
             continue
 
         if is_in_isl_range(config.ISL_range_m, sat, other_sat):
             # Find the corresponding observation record
             obs_to_submit = next(
-                (obs for obs in obs_by_step.get(k, []) \
+                (obs for obs in step_data.obs_by_step.get(step_data.k, []) \
                  if obs.observer == sid and obs.target == other_sid),
                 None
             )
 
             if obs_to_submit:
                 # Inject dishonest behaviour profiles
-                apply_network_faults(obs_to_submit, sid, config.N, k, faulty_ids)
+                apply_network_faults(obs_to_submit,
+                                     sid, config.N,
+                                     step_data.k,
+                                     sim_data.faulty_ids)
 
                 sat.load_sensor_data(obs_to_submit)
-                logger.info("Satellite %s: submitting transaction \
+                sim_data.logger.info("Satellite %s: submitting transaction \
                             for witness of %s.", sid, other_sid)
                 await sat.submit_transaction(recipient_address=other_sid)
-                transactions_submitted_this_step[sid] = True
+                step_data.tx_this_step[sid] = True
 
             # Once observation submitted, synchronise the DAG on the satellite
-            sat.sync_data(dag)
+            sat.sync_data(sim_data.dag)
 
 
-def _save_consensus_results(sim_results_path: str, dag: DAG, rep_history: dict[str, list[float]],
-                            truth: np.ndarray, faulty_ids: set[int], logger: Any) -> None:
+def _save_consensus_results(sim_results_path: str,
+                            sim_data: SimData,
+                            rep_history: dict[str, list[float]]
+                            ) -> None:
     """
     Save the consensus simulation results to a .npz file.
 
     Args:
     - sim_results_path: The path to the .npz file where results will be saved.
-    - dag: The final DAG object after all transactions have been processed.
+    - Inside sim_data:
+        - dag: The final DAG object after all transactions have been processed.
+        - truth: The ground truth trajectory history.
+        - faulty_ids: A set of satellite IDs that exhibited faulty behaviour during the simulation.
+        - logger: Logger object for logging messages.
     - rep_history: A dictionary containing the reputation history for each satellite.
-    - truth: The ground truth trajectory history.
-    - faulty_ids: A set of satellite IDs that exhibited faulty behaviour during the simulation.
-    - logger: Logger object for logging messages.
 
     Returns:
     - None. The results are saved to the specified file path.
     """
-    logger.info("Saving Simulation results to %s", sim_results_path)
+    sim_data.logger.info("Saving Simulation results to %s", sim_results_path)
     os.makedirs(os.path.dirname(sim_results_path), exist_ok=True)
     np.savez_compressed(
         sim_results_path,
-        dag_ledger=dag.ledger, # type: ignore[arg-type]
+        dag_ledger=sim_data.dag.ledger, # type: ignore[arg-type]
         rep_history=rep_history, # type: ignore[arg-type]
-        truth=truth,
-        faulty_ids=np.array(list(faulty_ids))
+        truth=sim_data.truth,
+        faulty_ids=np.array(list(sim_data.faulty_ids))
     )
-    logger.info("Simulation results saved successfully.")
+    sim_data.logger.info("Simulation results saved successfully.")
 
 # Run demo
 if __name__ == "__main__":
