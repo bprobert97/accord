@@ -33,14 +33,16 @@ from scipy.stats import chi2
 import seaborn as sns
 from src.simulation import generate_random_keplerian_elements
 from src.dag import DAG, MockDAG
-from src.reputation import ReputationManager, MAX_REPUTATION
+from src.reputation import ReputationManager, MAX_REPUTATION, \
+    ReputationParams
 
 # === Configuration ===
 DATA_DIR = "sim_data"
 FILENAME = "sim_data/app.log"  # your log file path
 THRESHOLD = 0.5                # consensus threshold
 CMAP = "viridis"               # color map for correctness
-REP_MGR = ReputationManager()
+REP_PARAMS = ReputationParams()
+REP_MGR = ReputationManager(REP_PARAMS)
 
 def extract_nis_transactions(dag: Any) -> Iterator[Tuple[Any, dict]]:
     """

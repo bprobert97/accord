@@ -26,6 +26,7 @@ import time
 import argparse
 import functools
 import traceback
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
@@ -33,7 +34,8 @@ import matplotlib.pyplot as plt
 from src.logger import get_logger
 from src.plotting import extract_nis_transactions, plot_mc_nis_boxplot, \
     generate_corner_plot
-from accord_demo import run_consensus_demo, DEFAULT_CONFIG
+from accord_demo import run_consensus_demo, DEFAULT_CONFIG, \
+    DemoFilePaths, DemoToggles
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
 # This is needed for parallel processing using ProcessPoolExecutor.
@@ -57,35 +59,46 @@ EKF_DIR = os.path.join(DATA_DIR, "ekf")
 SIM_DIR = os.path.join(DATA_DIR, "sim")
 MC_RESULTS_PATH = os.path.join(SIM_DIR, f"mc_results_{ISL_RANGE_KM}km.npz")
 
-def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
-                   faulty_ids: Optional[set[int]] = None,
-                   steps: Optional[int] = None,
-                   honest_matrix: Optional[np.ndarray] = None,
-                   faulty_matrix: Optional[np.ndarray] = None,
-                   honest_nis: Optional[List[float]] = None,
-                   faulty_nis: Optional[List[float]] = None,
+@dataclass
+class SatellitePopulationData:
+    """
+    A dataclass to store data about
+    the populations of honest and faulty satellites.
+    """
+    rep_history: Optional[Dict[str, List[float]]] = None
+    faulty_ids: Optional[set[int]] = None
+    steps: Optional[int] = None
+    honest_matrix: Optional[np.ndarray] = None
+    faulty_matrix: Optional[np.ndarray] = None
+    honest_nis: Optional[List[float]] = None
+    faulty_nis: Optional[List[float]] = None
+
+def calculate_kpis(sat_pop_data: SatellitePopulationData,
+                   logger: logging.Logger,
                    detection_threshold: float = 0.5,
-                   fpr_offset_percent: float = 0.2,
-                   logger: Optional[Any] = None) -> Dict[str, Any]:
+                   fpr_offset_percent: float = 0.2) -> Dict[str, Any]:
     """
     Calculates KPIs for a single Monte Carlo run based on the reputation history and faulty IDs.
 
     Args:
-    - rep_history: A dictionary mapping satellite IDs to their reputation history over time.
-    - faulty_ids: A set of satellite IDs that were faulty in this run.
-    - steps: The total number of steps in the simulation. If None, it will be inferred from
-    the matrices.
-    - honest_matrix: A 2D NumPy array of shape (num_honest, steps) containing the reputation
-    history of honest satellites.
-    - faulty_matrix: A 2D NumPy array of shape (num_faulty, steps) containing the reputation
-    history of faulty satellites.
-    - honest_nis: A list of NIS values for honest satellites (optional, for additional analysis).
-    - faulty_nis: A list of NIS values for faulty satellites (optional, for additional analysis).
+    Inside sat_pop_data:
+        - rep_history: A dictionary mapping satellite IDs to their reputation history over time.
+        - faulty_ids: A set of satellite IDs that were faulty in this run.
+        - steps: The total number of steps in the simulation. If None, it will be inferred from
+        the matrices.
+        - honest_matrix: A 2D NumPy array of shape (num_honest, steps) containing the reputation
+        history of honest satellites.
+        - faulty_matrix: A 2D NumPy array of shape (num_faulty, steps) containing the reputation
+        history of faulty satellites.
+        - honest_nis: A list of NIS values for honest satellites
+          (optional, for additional analysis).
+        - faulty_nis: A list of NIS values for faulty satellites
+          (optional, for additional analysis).
+    - logger: A logger for logging warnings about undetected faulty satellites.
     - detection_threshold: The reputation threshold below which a satellite is considered
     detected as faulty.
     - fpr_offset_percent: The percentage of initial steps to ignore when calculating false
     positives, to allow for reputation initialization.
-    - logger: An optional logger for logging warnings about undetected faulty satellites.
 
     Returns:
     - A dictionary containing calculated KPIs such as average TTD, worst TTD, FPR, recall,
@@ -95,18 +108,21 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
     """
 
     honest_matrix, faulty_matrix, honest_ids, faulty_ids_list = _resolve_kpi_inputs(
-        rep_history, faulty_ids, honest_matrix, faulty_matrix
+        sat_pop_data.rep_history,
+        sat_pop_data.faulty_ids,
+        sat_pop_data.honest_matrix,
+        sat_pop_data.faulty_matrix
     )
 
-    if steps is None:
-        steps = honest_matrix.shape[1]
+    if sat_pop_data.steps is None:
+        sat_pop_data.steps = honest_matrix.shape[1]
 
     if faulty_ids_list is None:
         raise ValueError("Faulty IDs are required to calculate detection metrics.")
 
     metrics = _compute_detection_metrics(
-        honest_matrix, faulty_matrix, faulty_ids_list,
-        steps, detection_threshold, fpr_offset_percent, logger
+        sat_pop_data, faulty_ids_list,
+        detection_threshold, fpr_offset_percent, logger
     )
 
     num_honest, num_faulty = len(honest_matrix), len(faulty_matrix)
@@ -130,8 +146,8 @@ def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
         "flips": metrics['total_flips'],
         "honest_matrix": honest_matrix,
         "faulty_matrix": faulty_matrix,
-        "honest_nis_stats": _get_nis_stats(honest_nis),
-        "faulty_nis_stats": _get_nis_stats(faulty_nis),
+        "honest_nis_stats": _get_nis_stats(sat_pop_data.honest_nis),
+        "faulty_nis_stats": _get_nis_stats(sat_pop_data.faulty_nis),
         "undetected_faulty_ids": metrics['undetected_ids'],
         "undetected_faulty_reps": np.array(metrics['undetected_reps']),
         "faulty_ids": faulty_ids_list,
@@ -176,25 +192,27 @@ def _resolve_kpi_inputs(rep_history: Optional[dict[str, list[float]]],
         faulty_ids_list = sorted(list(faulty_ids)) if faulty_ids is not None else []
     return honest_matrix, faulty_matrix, honest_ids, faulty_ids_list
 
-def _compute_detection_metrics(honest_matrix: np.ndarray,
-                               faulty_matrix: np.ndarray,
+def _compute_detection_metrics(sat_pop_data: SatellitePopulationData,
                                faulty_ids_list: List[int],
-                               steps: int, threshold: float,
+                               threshold: float,
                                fpr_offset: float,
-                               logger: Optional[logging.Logger]) -> Dict[str, Any]:
+                               logger: logging.Logger) -> Dict[str, Any]:
     """
     Computes detection metrics such as TTDs, false positives, true positives, and
     undetected faulty satellites.
 
     Args:
-    - honest_matrix: A 2D NumPy array of shape (num_honest, steps) containing the reputation
-      history of honest satellites.
-    - faulty_matrix: A 2D NumPy array of shape (num_faulty, steps) containing the reputation
-        history of faulty satellites.
+    Inside sat_pop_data:
+        - honest_matrix: A 2D NumPy array of shape (num_honest, steps) containing the reputation
+          history of honest satellites.
+        - faulty_matrix: A 2D NumPy array of shape (num_faulty, steps) containing the reputation
+          history of faulty satellites.
+        - steps: The number of time steps in the reputation history.
     - faulty_ids_list: A list of satellite IDs corresponding to the rows of faulty_matrix.
-    - steps: The number of time steps in the reputation history.
+    - threshold: The reputation threshold below which a satellite is considered
+                 detected as faulty.
     - fpr_offset: The percentage of initial steps to ignore when calculating false positives.
-    - logger: An optional logger for logging warnings about undetected faulty satellites.
+    - logger: A logger for logging warnings about undetected faulty satellites.
 
     Returns:
     - A dictionary containing lists of TTDs, undetected faulty IDs and their reputations, counts of
@@ -203,13 +221,17 @@ def _compute_detection_metrics(honest_matrix: np.ndarray,
     ttds, undetected_ids, undetected_reps = [], [], []
     true_positives, false_positives, total_flips = 0, 0, 0
 
-    for i, history in enumerate(faulty_matrix):
+    if sat_pop_data.faulty_matrix is None or sat_pop_data.honest_matrix is None:
+        raise ValueError("You must supply a faulty data matrix and honestd \
+                         data matrix to compute metrics.")
+
+    for i, history in enumerate(sat_pop_data.faulty_matrix):
         detected_at = next((idx for idx, rep in enumerate(history) if rep < threshold), None)
         if detected_at is not None:
             ttds.append(detected_at)
             true_positives += 1
         else:
-            sid = faulty_ids_list[i] if faulty_ids_list else i
+            sid = faulty_ids_list[i] if faulty_ids_list[i] else i
             undetected_ids.append(sid)
             undetected_reps.append(history)
             if logger:
@@ -217,8 +239,12 @@ def _compute_detection_metrics(honest_matrix: np.ndarray,
                                sid, history[-1])
         total_flips += np.sum(np.abs(np.diff((history < threshold).astype(int))))
 
-    fpr_start = int(fpr_offset * steps)
-    for history in honest_matrix:
+    if sat_pop_data.steps is None:
+        logger.warning("Simulation steps not provided. Setting to zero.")
+        sat_pop_data.steps = 0
+
+    fpr_start = int(fpr_offset * sat_pop_data.steps)
+    for history in sat_pop_data.honest_matrix:
         if any(rep < threshold for rep in history[fpr_start:]):
             false_positives += 1
         total_flips += np.sum(np.abs(np.diff((history[fpr_start:] < threshold).astype(int))))
@@ -251,13 +277,16 @@ def _get_nis_stats(nis_list: Optional[List[float]]) -> Dict[str, float]:
     }
 
 def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
-                        detection_threshold: float = 0.5,
-                        fpr_offset_percent: float = 0.2) -> List[Optional[Dict[str, Any]]]:
+                         logger: logging.Logger,
+                         detection_threshold: float = 0.5,
+                         fpr_offset_percent: float = 0.2
+                         ) -> List[Optional[Dict[str, Any]]]:
     """
     Recalculate KPIs for a set of Monte Carlo results using new detection parameters.
 
     Args:
         all_results: A list of KPI dictionaries (one per MC run).
+        logger: A logger for logging warnings about satellite data.
         detection_threshold: The new reputation threshold to apply.
         fpr_offset_percent: The new initialization offset percentage to apply.
 
@@ -270,15 +299,20 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
             new_results.append(None)
             continue
 
-        # We reuse the matrices and NIS data already stored in the previous results
-        new_kpis = calculate_kpis(
+        sat_pop_data = SatellitePopulationData(
             honest_matrix=res["honest_matrix"],
             faulty_matrix=res["faulty_matrix"],
             faulty_ids=res.get("faulty_ids"),
             honest_nis=res.get("honest_nis"),
-            faulty_nis=res.get("faulty_nis"),
+            faulty_nis=res.get("faulty_nis")
+        )
+
+        # We reuse the matrices and NIS data already stored in the previous results
+        new_kpis = calculate_kpis(
+            sat_pop_data=sat_pop_data,
             detection_threshold=detection_threshold,
-            fpr_offset_percent=fpr_offset_percent
+            fpr_offset_percent=fpr_offset_percent,
+            logger=logger
         )
         new_results.append(new_kpis)
     return new_results
@@ -299,14 +333,13 @@ def run_single_ekf(run_idx: int) -> bool:
 
     config = DEFAULT_CONFIG
     config.seed += run_idx
+    toggle = DemoToggles(save_sim_results=False, run_consensus=False)
+    fpath = DemoFilePaths(log_file=log_file, ekf_results_path=ekf_path)
 
     logger.info("Starting EKF Generation for Run %d with Seed %d", run_idx, config.seed)
     try:
         loop.run_until_complete(
-            run_consensus_demo(config, save_ekf_results=True, load_ekf_results=False,
-                               ekf_results_path=ekf_path, clear_logs=True,
-                               log_file=log_file, save_sim_results=False,
-                               run_consensus=False)
+            run_consensus_demo(config, toggle, fpath)
         )
         return True
     except Exception as e: # pylint: disable=broad-exception-caught
@@ -337,15 +370,16 @@ def run_single_consensus(run_idx: int,
 
     config = DEFAULT_CONFIG
     config.seed += run_idx
+    toggle = DemoToggles(save_ekf_results=False,
+                         load_ekf_results=True,
+                         save_sim_results=False)
+    fpath = DemoFilePaths(ekf_results_path=ekf_path,log_file=log_file)
 
     logger.info("Starting Consensus Simulation for Run %d", run_idx)
 
     try:
         dag, rep_history, _, faulty_ids = loop.run_until_complete(
-            run_consensus_demo(config, save_ekf_results=False, load_ekf_results=True,
-                               ekf_results_path=ekf_path, clear_logs=True,
-                               log_file=log_file, save_sim_results=False,
-                               run_consensus=True)
+            run_consensus_demo(config, toggle, fpath)
         )
 
         if rep_history is None or dag is None:
@@ -366,10 +400,18 @@ def run_single_consensus(run_idx: int,
             else:
                 honest_nis.append(float(nis))
 
+        sat_pop_data = SatellitePopulationData(
+            rep_history=rep_history,
+            faulty_ids=faulty_ids,
+            steps=config.steps,
+            honest_nis=honest_nis,
+            faulty_nis=faulty_nis
+        )
 
-        kpis = calculate_kpis(rep_history, faulty_ids, config.steps,
-                              honest_nis=honest_nis, faulty_nis=faulty_nis,
-                              detection_threshold=threshold, fpr_offset_percent=fpr_offset,
+
+        kpis = calculate_kpis(sat_pop_data=sat_pop_data,
+                              detection_threshold=threshold,
+                              fpr_offset_percent=fpr_offset,
                               logger=logger)
         return kpis
     except Exception as e: # pylint: disable=broad-exception-caught
@@ -640,7 +682,9 @@ if __name__ == "__main__":
             if NEEDS_RECALCULATE:
                 print(f"Calculating KPIs with threshold={args.threshold}, \
                       fpr_offset={args.fpr_offset}")
-                RESULTS = recalculate_all_kpis(RESULTS, detection_threshold=args.threshold,
+                RESULTS = recalculate_all_kpis(RESULTS,
+                                               logger=get_logger(),
+                                               detection_threshold=args.threshold,
                                                fpr_offset_percent=args.fpr_offset)
                 # Save the updated KPIs back to the file
                 print(f"Updating saved results at {MC_RESULTS_PATH}")

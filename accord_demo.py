@@ -24,6 +24,7 @@ import asyncio
 import math
 import os
 import shutil
+from dataclasses import dataclass
 from typing import Optional, Any
 import numpy as np
 from src.plotting import  \
@@ -93,19 +94,34 @@ def is_in_isl_range(isl_range: float, sat1: SatelliteNode, sat2: SatelliteNode) 
     )
     return distance <= isl_range
 
+
+@dataclass
+class DemoToggles:
+    """
+    A dataclass for storing toggle values when
+    running the consensus demo.
+    """
+    save_ekf_results: bool = True
+    load_ekf_results: bool = False
+    clear_logs: bool = True
+    save_sim_results: bool = True
+    run_consensus: bool = True
+
+@dataclass
+class DemoFilePaths:
+    """
+    A datacl;ass for storing file paths
+    used in the consensus demo.
+    """
+    ekf_results_path: str = EKF_RESULTS_PATH
+    log_file: str = "app.log"
+    sim_results_path: str = SIM_RESULTS_PATH
 #------------------
 # Main demo function
 
 async def run_consensus_demo(config: FilterConfig,
-                             save_ekf_results: bool = True,
-                             load_ekf_results: bool = False,
-                             ekf_results_path: str = \
-                                "sim_data/ekf_simulation_results.npz",
-                             clear_logs: bool = True,
-                             log_file: str = "app.log",
-                             save_sim_results: bool = True,
-                             run_consensus: bool = True,
-                             sim_results_path: str = SIM_RESULTS_PATH) -> \
+                             toggles: DemoToggles,
+                             file_paths: DemoFilePaths) -> \
         tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
@@ -113,16 +129,10 @@ async def run_consensus_demo(config: FilterConfig,
 
     Args:
     - config: FilterConfig object with simulation parameters.
-    - save_ekf_results: If True, saves the EKF simulation results to ekf_results_path.
-    - load_ekf_results: If True, attempts to load EKF simulation results from ekf_results_path.
-                        If successful, skips the EKF simulation phase.
-    - ekf_results_path: Path to the .npz file for saving/loading EKF results.
-    - clear_logs: If True, clears the app.log file at the start.
-    - log_file: The file to write logs to.
-    - save_sim_results: If True, saves the final consensus simulation results to
-                        sim_results_path.
-    - run_consensus: If False, returns early after EKF simulation phase.
-    - sim_results_path: Path to save consensus simulation results.
+    - toggles: An instance of DemoToggles containing the toggled values for running
+               the consensus demo.
+    - file_paths: An instance of DemoFilePaths containing the desired file paths
+                  for running the consensus demo.
 
     Returns:
     - A tuple containing:
@@ -131,17 +141,19 @@ async def run_consensus_demo(config: FilterConfig,
         - The ground truth trajectory history.
         - A set of faulty satellite IDs.
     """
-    logger = get_logger(log_file=log_file)
-    if clear_logs:
-        clear_log(log_file)
+    logger = get_logger(log_file=file_paths.log_file)
+    if toggles.clear_logs:
+        clear_log(file_paths.log_file)
 
     # Attempt to load or generate EKF data
     truth, _, all_obs_records, x_hist = _resolve_ekf_phase(
-        config, load_ekf_results, ekf_results_path, save_ekf_results, logger
+        config, toggles.load_ekf_results,
+        file_paths.ekf_results_path,
+        toggles.save_ekf_results, logger
     )
 
     # Early return if only EKF was requested
-    if not run_consensus:
+    if not toggles.run_consensus:
         logger.info("run_consensus is False. Returning early after EKF phase.")
         return None, None, truth, None
 
@@ -151,7 +163,9 @@ async def run_consensus_demo(config: FilterConfig,
         return None, None, None, None
 
     return await _run_consensus_phase(
-        config, truth, all_obs_records, save_sim_results, sim_results_path, logger
+        config, truth, all_obs_records,
+        toggles.save_sim_results,
+        file_paths.sim_results_path, logger
     )
 
 
@@ -691,9 +705,10 @@ if __name__ == "__main__":
 
     # If simulation results were not loaded or loading failed, run the consensus simulation
     if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
+        toggle = DemoToggles(load_ekf_results=True)
+        paths = DemoFilePaths()
         FINAL_DAG, REP_HIST, TRUTH, FAULTY_IDS = asyncio.run(
-            run_consensus_demo(DEFAULT_CONFIG, load_ekf_results=True,
-            ekf_results_path=EKF_RESULTS_PATH))
+            run_consensus_demo(DEFAULT_CONFIG, toggles=toggle, file_paths=paths))
 
         # Copy the log file to the sim_data directory
         if os.path.exists("app.log"):

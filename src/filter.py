@@ -388,7 +388,7 @@ def simulate_truth_and_meas(config: FilterConfig,
         elements.sort(key=lambda x: (x.raan, x.ta))
 
         for el in elements:
-            state = keplerian_to_cartesian(*el)
+            state = keplerian_to_cartesian(el)
             x0.append(state)
         x0_stack = np.concatenate(x0)
     else:

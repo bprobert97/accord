@@ -28,7 +28,8 @@ from dataclasses import dataclass
 import pickle
 from typing import Optional, TYPE_CHECKING
 import numpy as np
-from src.reputation import ReputationManager, MAX_REPUTATION
+from src.reputation import ReputationManager, MAX_REPUTATION, \
+    ReputationParams
 from src.transaction import Transaction, TransactionMetadata, \
     TransactionAddresses
 from src.filter import ObservationRecord
@@ -58,7 +59,8 @@ class SatelliteNode():
         # Reputation starts at a neutral level
         self.reputation: float = MAX_REPUTATION / 2
         self.performance_ema: float = 0.5  # For tracking recent performance
-        self.rep_manager = ReputationManager()
+        rep_params = ReputationParams()
+        self.rep_manager = ReputationManager(rep_params)
 
         self.sensor_data: Optional[ObservationRecord] = None
 

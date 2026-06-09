@@ -46,16 +46,13 @@ class ReputationManager:
     A class for calculating and updating a satellite node's reputation
     """
     def __init__(self,
-                 params: ReputationParams = None) -> None:
+                 params: ReputationParams) -> None:
         """
         Initialise the ReputationManager with the given parameters.
 
         Args:
         - params: An instance of ReputationParams containing the reputation system parameters.
         """
-        if params is None:
-            params = ReputationParams()
-
         self.max_rep = params.max_rep
         self.offset = params.offset
         self.growth_rate = params.growth_rate

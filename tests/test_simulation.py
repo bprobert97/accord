@@ -30,21 +30,21 @@ class TestSimulation(unittest.TestCase):
 
         # Check some elements for the first satellite
         sat0 = constellation[0]
-        self.assertEqual(sat0[0], a)
-        self.assertEqual(sat0[1], 0.0)
-        self.assertEqual(sat0[2], i)
-        self.assertEqual(sat0[3], 0.0) # Plane 0, RAAN=0
-        self.assertEqual(sat0[5], 0.0) # Sat 0 in Plane 0, TA=0
+        self.assertEqual(sat0.a, a)
+        self.assertEqual(sat0.e, 0.0)
+        self.assertEqual(sat0.i, i)
+        self.assertEqual(sat0.raan, 0.0) # Plane 0, RAAN=0
+        self.assertEqual(sat0.ta, 0.0) # Sat 0 in Plane 0, TA=0
 
         # Check plane 1 RAAN
         sat5 = constellation[5] # First satellite in second plane (T=10, P=2, S=5)
-        self.assertAlmostEqual(sat5[3], np.pi) # Plane 1, RAAN = (2*pi/2)*1 = pi
+        self.assertAlmostEqual(sat5.raan, np.pi) # Plane 1, RAAN = (2*pi/2)*1 = pi
 
         # Check phasing
         # M_ps = (s * 2*pi/S) + (p * 2*pi * F / T)
         # For p=1, s=0, F=1, T=10, S=5:
         # M_10 = (0 * 2*pi/5) + (1 * 2*pi * 1 / 10) = 2*pi/10 = pi/5
-        self.assertAlmostEqual(sat5[5], np.pi / 5)
+        self.assertAlmostEqual(sat5.ta, np.pi / 5)
 
     def test_walker_delta_f0(self) -> None:
         """
@@ -59,9 +59,9 @@ class TestSimulation(unittest.TestCase):
         constellation = generate_walker_delta_constellation(t, p, f, a, i)
 
         # Plane 0, Sat 0: TA=0
-        self.assertAlmostEqual(constellation[0][5], 0.0)
+        self.assertAlmostEqual(constellation[0].ta, 0.0)
         # Plane 1, Sat 0: TA = (0 * 2*pi/2) + (1 * 2*pi * 0 / 4) = 0
-        self.assertAlmostEqual(constellation[2][5], 0.0)
+        self.assertAlmostEqual(constellation[2].ta, 0.0)
 
 if __name__ == "__main__":
     unittest.main()
