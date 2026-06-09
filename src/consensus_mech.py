@@ -157,12 +157,9 @@ class ConsensusMechanism():
 
         return abs(dot_prod) / math.sqrt(v1_sq_norm * v2_sq_norm)
 
-    def calculate_dof_score(self, dof: int,
-                            current_r_vector: list[float],
-                            current_v_vector: list[float],
-                            previous_r_vector: Optional[list[float]] = None,
-                            previous_v_vector: Optional[list[float]] = None,
-                            delta_t: Optional[float] = None,
+    def calculate_dof_score(self,
+                            obs_record: ObservationRecord,
+                            previous_data: Optional[dict] = None,
                             decay_rate: float = 0.05,
                             velocity_weight: float = 0.5) -> float:
         """
@@ -171,15 +168,9 @@ class ConsensusMechanism():
         Returns a value in [0,1].
 
         Args:
-        - dof: Degrees of freedom of the measurement.
-        - current_r_vector: The current position measurement vector (e.g., LOS unit vector).
-        - current_v_vector: The current velocity measurement vector (e.g., LOS unit vector).
-        - previous_r_vector: The previous position measurement vector for the same satellite (
-          if available).
-        - previous_v_vector: The previous velocity measurement vector for the same satellite (
-          if available).
-        - delta_t: Time difference between the current and previous measurement
-          (if available).
+        - obs_record: The observation record containing the DOF information.
+        - previous_data: A dictionary containing the previous r_vector, v_vector, and
+                         timestamp for the same observer-target pair.
         - decay_rate: Rate at which the DOF score decays if the measurement
           direction changes significantly.
         - velocity_weight: Weighting factor for the velocity vector in the blended
@@ -192,14 +183,21 @@ class ConsensusMechanism():
 
         # Calculate base score of (k-1)/2
         # dof = 1 returns 0, dof = 2 returns 0.5 and dof = 3 returns 1.
-        base_score = (dof - 1) / 2
+        base_score = (obs_record.dof - 1) / 2
+
+        if previous_data is None:
+            return base_score
+
+        previous_r_vector = previous_data.get('r_vector')
+        previous_v_vector = previous_data.get('v_vector')
+        delta_t = obs_record.time - previous_data['time'] if 'time' in previous_data else None
 
         if previous_r_vector is None or previous_v_vector is None or delta_t is None:
             return base_score
 
         # Calculate persistence of excitation term
-        r_dot = self.calc_normalised_dot(current_r_vector, previous_r_vector)
-        v_dot = self.calc_normalised_dot(current_v_vector, previous_v_vector)
+        r_dot = self.calc_normalised_dot(obs_record.r_vector, previous_r_vector)
+        v_dot = self.calc_normalised_dot(obs_record.v_vector, previous_v_vector)
 
         # If velocity_weight is 0.5, a change in either position or velocity
         # lowers the blended_dot, triggering a higher reward.
@@ -374,9 +372,8 @@ class ConsensusMechanism():
         prev_data = dag.vector_history_cache.get(cache_key, {})
 
         dof_score = self.calculate_dof_score(
-            obs_record.dof, obs_record.r_vector, obs_record.v_vector,
-            prev_data.get('r_vector'), prev_data.get('v_vector'),
-            obs_record.time - prev_data['time'] if 'time' in prev_data else None
+            obs_record,
+            prev_data
         )
 
         if obs_record.r_vector is not None and obs_record.v_vector is not None:

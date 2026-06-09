@@ -31,7 +31,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 from .logger import get_logger
-from .transaction import Transaction, TransactionMetadata
+from .transaction import Transaction, TransactionMetadata, \
+    TransactionAddresses
 
 if TYPE_CHECKING:
     from .consensus_mech import ConsensusMechanism
@@ -134,11 +135,15 @@ class DAG():
         genesis_metadata = TransactionMetadata(consensus_reached=True,
                                                is_confirmed=True)
 
-        return {"Genesis Transaction 1": [Transaction(0, 0, "1234",
-                                                      "Genesis Transaction 1",
+        genesis_addresses = TransactionAddresses(sender_address=0, recipient_address=0)
+
+        return {"Genesis Transaction 1": [Transaction(addresses=genesis_addresses,
+                                                      sender_private_key="1234",
+                                                      tx_data="Genesis Transaction 1",
                                                       metadata=genesis_metadata)],
-                "Genesis Transaction 2": [Transaction(0, 0, "5678",
-                                                      "Genesis Transaction 2",
+                "Genesis Transaction 2": [Transaction(addresses=genesis_addresses,
+                                                      sender_private_key="5678",
+                                                      tx_data="Genesis Transaction 2",
                                                       metadata=genesis_metadata)]}
 
     def get_parents(self) -> tuple[str, ...]:

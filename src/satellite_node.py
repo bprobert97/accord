@@ -29,7 +29,8 @@ import pickle
 from typing import Optional, TYPE_CHECKING
 import numpy as np
 from src.reputation import ReputationManager, MAX_REPUTATION
-from src.transaction import Transaction, TransactionMetadata
+from src.transaction import Transaction, TransactionMetadata, \
+    TransactionAddresses
 from src.filter import ObservationRecord
 from src.logger import get_logger
 
@@ -110,8 +111,10 @@ class SatelliteNode():
 
         # Create metadata and transaction
         metadata = TransactionMetadata()
-        transaction = Transaction(sender_address=hash(self.id),
-                                  recipient_address=recipient_address,
+        addresses = TransactionAddresses(sender_address=hash(self.id),
+                                         recipient_address=recipient_address)
+
+        transaction = Transaction(addresses=addresses,
                                   sender_private_key="PLACEHOLDER_KEY",
                                   tx_data=tx_data,
                                   metadata=metadata)

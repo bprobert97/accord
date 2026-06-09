@@ -7,8 +7,7 @@ max-attributes=10
 [MESSAGES CONTROL]
 disable=
     too-many-locals,
-    too-many-arguments,
-    too-many-positional-arguments
+    too-many-arguments
 
 [BASIC]
 # Allow standard snake_case AND scientific/maths notation (e.g., F, H, P0, Phi, H1_t, F_jacobian_6)

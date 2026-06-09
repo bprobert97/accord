@@ -714,7 +714,9 @@ def generate_constellation_df(num_sats: int, seed: int) -> pd.DataFrame:
     """
     elements = []
     for n in range(num_sats):
-        a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=seed + n)
+        kep_elements = generate_random_keplerian_elements(seed=seed + n)
+        a, e, i, raan, argp, ta = kep_elements.a, kep_elements.e, kep_elements.i, \
+                                    kep_elements.raan, kep_elements.argp, kep_elements.ta
         elements.append((a, e, i, raan, argp, ta))
 
     # Create a DataFrame

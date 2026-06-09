@@ -385,7 +385,7 @@ def simulate_truth_and_meas(config: FilterConfig,
         elements = generate_walker_delta_constellation(t=config.N, p=5, f=1, \
                                                        a=RE+500e3, i=np.radians(53))
         # Sort for deterministic node ordering (e.g. by RAAN then True Anomaly)
-        elements.sort(key=lambda x: (x[3], x[5]))
+        elements.sort(key=lambda x: (x.raan, x.ta))
 
         for el in elements:
             state = keplerian_to_cartesian(*el)
@@ -395,8 +395,8 @@ def simulate_truth_and_meas(config: FilterConfig,
         logger.info("Generating random satellite constellation with %s satellites", config.N)
 
         for n in range(config.N):
-            a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=config.seed + n)
-            state = keplerian_to_cartesian(a, e, i, raan, argp, ta)
+            kep_elements = generate_random_keplerian_elements(seed=config.seed + n)
+            state = keplerian_to_cartesian(kep_elements)
             x0.append(state)
         x0_stack = np.concatenate(x0)
 

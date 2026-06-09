@@ -7,7 +7,8 @@ import pytest
 from src.consensus_mech import ConsensusMechanism
 from src.reputation import MAX_REPUTATION
 from src.satellite_node import SatelliteNode
-from src.transaction import Transaction, TransactionMetadata
+from src.transaction import Transaction, TransactionMetadata, \
+    TransactionAddresses
 from src.filter import ObservationRecord
 
 @pytest.fixture
@@ -149,7 +150,11 @@ def test_poise_empty_transaction(consensus_mech, mock_dag, mock_sat_node):
     """
     Test PoISE with an empty transaction, expecting reputation penalty.
     """
-    empty_tx = Transaction(1, 2, "k", "", TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    empty_tx = Transaction(addresses=addresses,
+                           sender_private_key="k",
+                           tx_data="",
+                           metadata=TransactionMetadata())
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
         mock_dag, mock_sat_node, empty_tx, {}
@@ -167,7 +172,11 @@ def test_poise_no_bft_quorum(consensus_mech, mock_dag, mock_sat_node):
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    tx = Transaction(addresses=addresses,
+                     sender_private_key="k",
+                     tx_data=tx_data,
+                     metadata=TransactionMetadata())
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
         mock_dag, mock_sat_node, tx, {}
@@ -190,7 +199,11 @@ def test_poise_consensus_reached(mock_chi2, consensus_mech, mock_dag, mock_sat_n
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    tx = Transaction(addresses=addresses,
+                     sender_private_key="k",
+                     tx_data=tx_data,
+                     metadata=TransactionMetadata())
 
     # Make consensus score high to ensure it passes
     consensus_mech.calculate_consensus_score = MagicMock(return_value=0.8)
@@ -216,7 +229,11 @@ def test_poise_consensus_failed(mock_chi2, consensus_mech, mock_dag, mock_sat_no
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=10.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    tx = Transaction(addresses=addresses,
+                     sender_private_key="k",
+                     tx_data=tx_data,
+                     metadata=TransactionMetadata())
 
     # Make consensus score low to ensure it fails
     consensus_mech.calculate_consensus_score = MagicMock(return_value=0.4)
