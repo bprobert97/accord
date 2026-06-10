@@ -4,10 +4,6 @@ load-plugins=pylint_pytest
 [DESIGN]
 max-attributes=10
 
-[MESSAGES CONTROL]
-disable=
-    too-many-locals
-
 [BASIC]
 # Allow standard snake_case AND scientific/maths notation (e.g., F, H, P0, Phi, H1_t, F_jacobian_6)
 # This regex allows any name starting with a letter, followed by letters, numbers, or underscores.

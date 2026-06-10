@@ -113,33 +113,27 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     Plots the 3D orbits of a satellite constellation around the Earth.
 
     Args:
-        truth (np.ndarray): The history of true stacked state vectors, with shape (steps, 6*N).
-        n (int): The number of satellites.
+    - truth (np.ndarray): The history of true stacked state vectors,
+                            with shape (steps, 6*N).
+    - n (int): The number of satellites.
 
     Returns:
-        None: Displays a matplotlib plot.
+    - None. Displays a matplotlib plot.
     """
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
 
-    # Plot Earth
-    r_e = 6378e3  # Earth radius in meters
-    u = np.linspace(0, 2 * np.pi, 100)
-    v = np.linspace(0, np.pi, 100)
-    x_earth = r_e * np.outer(np.cos(u), np.sin(v))
-    y_earth = r_e * np.outer(np.sin(u), np.sin(v))
-    z_earth = r_e * np.outer(np.ones(np.size(u)), np.cos(v))
-    ax.plot_surface(x_earth, y_earth, z_earth,
-                    color='blue', alpha=0.3,
-                    rstride=4, cstride=4)
+    # 1. Plot the Earth
+    _plot_earth_surface(ax)
 
-    # Plot satellite orbits
+    # 2. Plot satellite orbits
     for i in range(n):
         # Extract position history for satellite i
         pos_hist = truth[:, i*6:i*6+3]
 
         # Plot orbit path
-        ax.plot(pos_hist[:, 0], pos_hist[:, 1], pos_hist[:, 2], color='black', alpha=0.3)
+        ax.plot(pos_hist[:, 0], pos_hist[:, 1], pos_hist[:, 2],
+                color='black', alpha=0.3)
 
         # Plot final position
         ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2],
@@ -158,55 +152,78 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     ax.set_ylabel("Y (m)")
     ax.set_zlabel("Z (m)")
 
-    # Make axes equal to avoid distortion
-    max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(),
-                               ax.get_zlim()])
+    # 3. Make axes equal to avoid distortion
+    _set_axes_equal(ax)
+
+    plt.show()
+
+
+def _plot_earth_surface(ax: Any) -> None:
+    """
+    Helper to generate and plot the Earth's surface as a 3D sphere.
+
+    Args:
+    - ax: The Axes of the subplot.
+
+    Returns:
+    - None. Plots the earth's surface on the subplot
+    """
+    r_e = 6378e3  # Earth radius in meters
+    u = np.linspace(0, 2 * np.pi, 100)
+    v = np.linspace(0, np.pi, 100)
+
+    x_earth = r_e * np.outer(np.cos(u), np.sin(v))
+    y_earth = r_e * np.outer(np.sin(u), np.sin(v))
+    z_earth = r_e * np.outer(np.ones(np.size(u)), np.cos(v))
+
+    ax.plot_surface(x_earth, y_earth, z_earth,
+                    color='blue', alpha=0.3,
+                    rstride=4, cstride=4)
+
+
+def _set_axes_equal(ax: Any) -> None:
+    """
+    Helper to scale the 3D plot axes equally to prevent orbital distortion.
+
+    Args:
+    - ax: The Axes of the subplot.
+
+    Returns:
+    - None. Scales the axes of the plot.
+    """
+    max_range_temp = np.array([ax.get_xlim(), ax.get_ylim(), ax.get_zlim()])
     max_range = np.ptp(max_range_temp).max() / 2.0
+
     mid_x = np.mean(ax.get_xlim())
     mid_y = np.mean(ax.get_ylim())
     mid_z = np.mean(ax.get_zlim())
+
     ax.set_xlim(mid_x - max_range, mid_x + max_range)
     ax.set_ylim(mid_y - max_range, mid_y + max_range)
     ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
-    plt.show()
 
-def plot_nis_boxplot(dag: DAG | MockDAG, faulty_ids: set[int],
-                    convergence_index: Optional[int] = None) -> None:
+def plot_nis_boxplot(dag: DAG | MockDAG,
+                     faulty_ids: set[int],
+                     convergence_index: Optional[int] = None) -> None:
     """
     Generates a grouped box plot for NIS values, separating honest and faulty satellites.
 
     Args:
-        dag (DAG | MockDAG): The DAG or mock DAG object containing transaction data.
-        faulty_ids (set[int]): A set of IDs for faulty satellites.
-        convergence_index (int): Optional index to only plot data
-                                 after filter convergence.
+    - dag (DAG | MockDAG): The DAG or mock DAG object containing transaction data.
+    - faulty_ids (set[int]): A set of IDs for faulty satellites.
+    - convergence_index (int): Optional index to only plot data
+                               after filter convergence.
 
     Returns:
-        None: Displays a matplotlib plot.
+    - None: Displays a matplotlib plot.
     """
-    honest_nis = []
-    faulty_nis = []
     start_index = convergence_index if convergence_index is not None else 0
-
-    for tx, tx_data in extract_nis_transactions(dag):
-        sid = tx_data.get("observer")
-        nis = getattr(tx.metadata, "nis", None)
-
-        if sid is None or nis is None:
-            continue
-
-        if int(sid) in faulty_ids:
-            faulty_nis.append(nis)
-        else:
-            honest_nis.append(nis)
+    honest_nis, faulty_nis = extract_nis_data(dag, faulty_ids, start_index)
 
     if not honest_nis and not faulty_nis:
         print("No NIS data available to create a box plot.")
         return
-
-    honest_nis = honest_nis[start_index:]
-    faulty_nis = faulty_nis[start_index:]
 
     plot_data = []
     labels = []
@@ -232,22 +249,17 @@ def plot_nis_boxplot(dag: DAG | MockDAG, faulty_ids: set[int],
             parts[partname].set_color('black')
             parts[partname].set_linewidth(1.5)
 
-    # Add expected median (assuming DOF=2)
-    expected_median = 1.386
-
-    # Compute chi-square 95% confidence bounds
-    chi2_lower = chi2.ppf((1 - 0.95) / 2, df=2)
-    chi2_upper = chi2.ppf((1 + 0.95) / 2, df=2)
-
-    cmap = plt.get_cmap('viridis')
-    color_bound = cmap(0.1) # Dark Purple for bounds
+    # Inline the colormap to save local variables
+    colour_bound = plt.get_cmap('viridis')(0.1) # Dark Purple for bounds
 
     # Plot the horizontal lines for the confidence interval bounds
-    ax.axhline(chi2_lower, color=color_bound, linestyle='--', alpha=0.7, \
-        label='95% Confidence Interval Bounds')
-    ax.axhline(chi2_upper, color=color_bound, linestyle='--', alpha=0.7)
+    # Inline the chi2 calculations to save local variables
+    ax.axhline(chi2.ppf((1 - 0.95) / 2, df=2), color=colour_bound, linestyle='--',
+               alpha=0.7, label='95% Confidence Interval Bounds')
+    ax.axhline(chi2.ppf((1 + 0.95) / 2, df=2), color=colour_bound, linestyle='--', alpha=0.7)
 
-    ax.axhline(expected_median, color='black', linestyle=':', label='Expected Median (1.386)')
+    # Inline expected median
+    ax.axhline(1.386, color='black', linestyle=':', label='Expected Median (1.386)')
 
     ax.set_xticks(np.arange(1, len(labels) + 1))
     ax.set_xticklabels(labels, fontsize=20)
@@ -260,6 +272,40 @@ def plot_nis_boxplot(dag: DAG | MockDAG, faulty_ids: set[int],
 
     plt.tight_layout()
     plt.show()
+
+
+def extract_nis_data(dag: DAG | MockDAG,
+                     faulty_ids: Optional[set[int]] = None,
+                     start_index: int = 0) -> tuple[list[float], list[float]]:
+    """
+    Parses the DAG and extracts honest and faulty NIS values.
+
+    Args:
+    - dag (DAG | MockDAG): The DAG or mock DAG object containing transaction data.
+    - faulty_ids (set[int], optional): A set of IDs for faulty satellites.
+                                       If None, assumes all are honest.
+    - start_index (int): Index to start plotting or extracting data from.
+
+    Returns:
+    - A tuple of honest and faulty NIS data, sliced from the start_index onwards.
+    """
+    honest_nis = []
+    faulty_nis = []
+    f_ids = faulty_ids or set()  # Safeguard for when faulty_ids is None
+
+    for tx, tx_data in extract_nis_transactions(dag):
+        sid = tx_data.get("observer")
+        nis = getattr(tx.metadata, "nis", None)
+
+        if sid is None or nis is None:
+            continue
+
+        if int(sid) in f_ids:
+            faulty_nis.append(float(nis))
+        else:
+            honest_nis.append(float(nis))
+
+    return honest_nis[start_index:], faulty_nis[start_index:]
 
 
 def calculate_median_percentiles(dof: int = 2) -> None:
@@ -396,15 +442,56 @@ def calculate_nis_convergence_index(
     satellites enter and stay within the expected chi-squared consistency bounds.
 
     Args:
-        dag (DAG | MockDAG): The DAG or mock DAG object containing transactions with NIS metadata.
-        faulty_ids (set[int]): Set of faulty satellite IDs to exclude.
-        confidence (float): Confidence level for chi-square bounds (default=0.95).
-        window_size (int): Number of consecutive steps NIS must be within bounds.
+    - dag (DAG | MockDAG): The DAG or mock DAG object containing transactions with NIS metadata.
+    - faulty_ids (set[int]): Set of faulty satellite IDs to exclude.
+    - confidence (float): Confidence level for chi-square bounds (default=0.95).
+    - window_size (int): Number of consecutive steps NIS must be within bounds.
 
     Returns:
-        int: The first step where convergence is detected.
+    - int: The first step where convergence is detected.
     """
     # 1. Collect NIS values for honest satellites, grouped by step
+    step_nis_data, step_dof_data = _extract_step_data(dag, faulty_ids)
+
+    if not step_nis_data:
+        return 0
+
+    sorted_steps = sorted(step_nis_data.keys())
+
+    # 2. Check per step if mean NIS is within chi-square upper bound
+    is_converged = []
+    for step in sorted_steps:
+        mean_nis = np.mean(step_nis_data[step])
+        mean_dof = np.mean(step_dof_data[step])
+
+        # Upper bound for chi-square
+        chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
+
+        is_converged.append(mean_nis <= chi2_upper)
+
+    # 3. Find first step where we have a window of consecutive converged steps
+    for i in range(len(is_converged) - window_size + 1):
+        if all(is_converged[i : i + window_size]):
+            return int(sorted_steps[i])
+
+    return 0
+
+
+def _extract_step_data(dag: DAG | MockDAG,
+                       faulty_ids: set[int]
+                       ) -> tuple[dict[int, list[float]],
+                                  dict[int, list[int]]]:
+    """
+    Helper to parse the ledger and group honest NIS and DOF data by step.
+
+    Args:
+    - dag (DAG | MockDAG): The DAG or mock DAG object containing transactions
+                           with NIS metadata.
+    - faulty_ids (set[int]): Set of faulty satellite IDs to exclude.
+
+    Returns:
+    - A tuple of nis data and DOF data, grouped by simulation step.
+    """
     step_nis_data: dict[int, list[float]] = {}
     step_dof_data: dict[int, list[int]] = {}
 
@@ -431,28 +518,7 @@ def calculate_nis_convergence_index(
             step_nis_data.setdefault(int(step), []).append(float(nis))
             step_dof_data.setdefault(int(step), []).append(int(dof))
 
-    if not step_nis_data:
-        return 0
-
-    sorted_steps = sorted(step_nis_data.keys())
-
-    # 2. Check per step if mean NIS is within chi-square upper bound
-    is_converged = []
-    for step in sorted_steps:
-        mean_nis = np.mean(step_nis_data[step])
-        mean_dof = np.mean(step_dof_data[step])
-
-        # Upper bound for chi-square
-        chi2_upper = chi2.ppf((1 + confidence) / 2, df=mean_dof)
-
-        is_converged.append(mean_nis <= chi2_upper)
-
-    # 3. Find first step where we have a window of consecutive converged steps
-    for i in range(len(is_converged) - window_size + 1):
-        if all(is_converged[i : i + window_size]):
-            return int(sorted_steps[i])
-
-    return 0
+    return step_nis_data, step_dof_data
 
 
 def plot_aggregated_reputation(
@@ -577,70 +643,33 @@ def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
     Plots a 2D ground track map using a static Earth image background.
 
     Args:
-        truth (np.ndarray): The history of true stacked state vectors, with shape (steps, 6*N).
-        n (int): The number of satellites.
+    - truth (np.ndarray): The history of true stacked state vectors, with shape (steps, 6*N).
+    - n (int): The number of satellites.
 
     Returns:
-        None: Displays a matplotlib plot.
+    - None: Displays a matplotlib plot.
     """
     _, ax = plt.subplots(figsize=(14, 8))
-
-    # --- PART 1: The "Poor Man's" Map Background ---
-
-    img_path = "images/1024px-Land_ocean_ice_2048.jpg"
-
-    # Display the image with the correct extent [-180, 180, -90, 90]
-    if os.path.exists(img_path):
-        img = plt.imread(img_path)
-        ax.imshow(img, extent=(-180.0, 180.0, -90.0, 90.0), aspect='auto', alpha=0.2)
-    else:
-        # Fallback if download fails
-        ax.set_facecolor('lightgray')
-
-    # --- PART 2: Plotting the Data ---
 
     # Set limits explicitly to match the image extent
     ax.set_xlim(-180, 180)
     ax.set_ylim(-90, 90)
 
-    for i in range(n):
-        pos_hist = truth[:, i*6:i*6+3]
+    # Plot the map background
+    _plot_map_background(ax)
 
-        # Convert Cartesian X,Y,Z to Lat, Lon
-        r = np.linalg.norm(pos_hist, axis=1)
-        lat = np.degrees(np.arcsin(np.clip(pos_hist[:, 2] / r, -1, 1)))
-        lon = np.degrees(np.arctan2(pos_hist[:, 1], pos_hist[:, 0]))
+    # Plot the data
+    _plot_satellite_tracks(ax, truth, n)
 
-        # Handle wraparound
-        lon_diff = np.abs(np.diff(lon))
-        wrap_idx = np.where(lon_diff > 180)[0]
-
-        lon_plot = np.insert(lon, wrap_idx + 1, np.nan)
-        lat_plot = np.insert(lat, wrap_idx + 1, np.nan)
-
-        # Formatting
-        color = 'black'
-        alpha = 0.1
-        zorder = 5
-        lw = 1.2
-
-        ax.plot(lon_plot, lat_plot, color=color, alpha=alpha,
-                lw=lw, zorder=zorder)
-
-        # Plot current/final position
-        ax.scatter(lon[-1], lat[-1], color=color, s=20,
-                   edgecolor='white', linewidth=0.5, zorder=zorder+1)
-
-    # --- PART 3: Styling ---
-
+    # Style the plot
     # Custom legend
     handles = [
         Line2D([0], [0], marker='o', color='w', label='Satellite',
                markerfacecolor='black', markersize=10),
         Line2D([0], [0], color='black', lw=2, label='Simulated Orbit')
     ]
-    leg = ax.legend(handles=handles, loc='upper right', framealpha=0.7, facecolor='white',
-                    fontsize=16)
+    leg = ax.legend(handles=handles, loc='upper right', framealpha=0.7,
+                    facecolor='white', fontsize=16)
     leg.set_zorder(10)
 
     ax.set_xlabel("Longitude [Degrees]", fontsize=20)
@@ -651,6 +680,66 @@ def plot_ground_tracks(truth: np.ndarray, n: int) -> None:
 
     plt.tight_layout()
     plt.savefig(os.path.join(DATA_DIR, "orbit_map.png"))
+
+
+def _plot_map_background(ax: Any) -> None:
+    """
+    Helper to load and display the static Earth map background.
+
+    Args:
+    - ax: The Axes of the subplot.
+
+    Returns:
+    - None. Plots a map in the background of the subplot.
+
+    """
+    img_path = "images/1024px-Land_ocean_ice_2048.jpg"
+
+    # Display the image with the correct extent [-180, 180, -90, 90]
+    if os.path.exists(img_path):
+        # Inline the img variable to save locals
+        ax.imshow(plt.imread(img_path), extent=(-180.0, 180.0, -90.0, 90.0),
+                  aspect='auto', alpha=0.2)
+    else:
+        # Fallback if download fails
+        ax.set_facecolor('lightgray')
+
+
+def _plot_satellite_tracks(ax: Any,
+                           truth: np.ndarray,
+                           n: int) -> None:
+    """
+    Helper to compute and plot lat/lon ground tracks from Cartesian state history.
+
+    Args:
+    - ax: The axes of the subplot.
+    - truth: The history of true stacked state vectors, with shape (steps, 6*N).
+    - n: The number of satellites.
+
+    Returns:
+    - None. Plots the ground tracks on the subplot.
+    """
+    for i in range(n):
+        pos_hist = truth[:, i*6:i*6+3]
+
+        # Convert Cartesian X,Y,Z to Lat, Lon
+        r = np.linalg.norm(pos_hist, axis=1)
+        lat = np.degrees(np.arcsin(np.clip(pos_hist[:, 2] / r, -1, 1)))
+        lon = np.degrees(np.arctan2(pos_hist[:, 1], pos_hist[:, 0]))
+
+        # Handle wraparound (inline lon_diff to save locals)
+        wrap_idx = np.where(np.abs(np.diff(lon)) > 180)[0]
+
+        lon_plot = np.insert(lon, wrap_idx + 1, np.nan)
+        lat_plot = np.insert(lat, wrap_idx + 1, np.nan)
+
+        # Inline formatting variables directly into the plot calls
+        ax.plot(lon_plot, lat_plot, color='black', alpha=0.1, lw=1.2, zorder=5)
+
+        # Plot current/final position
+        ax.scatter(lon[-1], lat[-1], color='black', s=20,
+                   edgecolor='white', linewidth=0.5, zorder=6)
+
 
 def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     """
@@ -666,13 +755,13 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     all_faulty_medians = []
 
     for kpi in all_kpis:
-        h_stats = kpi.get("honest_nis", {})
-        f_stats = kpi.get("faulty_nis", {})
+        h_stats = kpi.get("honest_nis_stats", {})
+        f_stats = kpi.get("faulty_nis_stats", {})
 
-        if h_stats:
-            all_honest_medians.append(np.median(h_stats))
-        if f_stats:
-            all_faulty_medians.append(np.median(f_stats))
+        if h_stats["median"]:
+            all_honest_medians.append(h_stats["median"])
+        if f_stats["median"]:
+            all_faulty_medians.append(f_stats["median"])
 
     if not all_honest_medians and not all_faulty_medians:
         print("No MC NIS data available to plot.")

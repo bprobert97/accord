@@ -31,6 +31,7 @@ def visualise_orbits(data_path: str = 'sim_data/sim_results.npz',
                      frames: int = 200, interval: int = 50) -> None:
     """
     Visualises the orbits of satellites from a .npz simulation data file, and saves as a GIF.
+
     Args:
     - data_path: Path to the .npz file containing the simulation results.
                  Must contain a 'truth' array of shape (timesteps, num_sats*6)
@@ -42,56 +43,71 @@ def visualise_orbits(data_path: str = 'sim_data/sim_results.npz',
     Returns:
     - None. Saves the animation as a GIF at the specified path.
     """
-
     if not os.path.exists(data_path):
         print(f"Error: Data file {data_path} not found.")
         return
 
     print(f"Loading data from {data_path}...")
-    data = np.load(data_path, allow_pickle=True)
-    truth = data['truth']
-    steps, state_size = truth.shape
-    n_sats = state_size // 6
+    # Inline the load statement to save local variables
+    truth = np.load(data_path, allow_pickle=True)['truth']
 
-    frames = min(frames, steps)
-    indices = np.linspace(0, steps - 1, frames, dtype=int)
+    _generate_orbit_animation(truth, output_gif_path, frames, interval)
+
+
+def _generate_orbit_animation(truth: np.ndarray,
+                              output_gif_path: str,
+                              frames: int,
+                              interval: int) -> None:
+    """
+    Helper function to configure and run the matplotlib 3D animation.
+
+    Args:
+    - truth: Array of data of the true simulated orbits of the satellites.
+    - output_gif_path: Path to save the output GIF animation.
+    - frames: Number of frames to include in the animation (evenly spaced through the simulation).
+    - interval: Time in milliseconds between frames in the animation.
+
+    Returns:
+    - None. Generates the animation.
+    """
+    steps = len(truth)
+    # Inline min(frames, steps) directly into linspace
+    indices = np.linspace(0, steps - 1, min(frames, steps), dtype=int)
 
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
     _draw_earth(ax)
 
-    dots, trails, step_text, viz_indices = _setup_animation_markers(ax, n_sats)
+    # Bundle markers into a single tuple to drastically reduce outer scope variables
+    anim_elements = _setup_animation_markers(ax, truth.shape[1] // 6)
+
     max_dist = np.max(np.linalg.norm(truth[0, :3], axis=0))
-    limit = max_dist * 1.2 if max_dist > 0 else 6378e3 * 2
-    _set_axes_limits(ax, limit)
+    _set_axes_limits(ax, max_dist * 1.2 if max_dist > 0 else 6378e3 * 2)
 
     def init() -> list:
         """
         Initialises the animation by clearing all satellite markers and trails,
         and resetting the step text.
-        Returns:
-        - A list of all Matplotlib artists that were modified (dots,
-        trails, step_text) for blitting.
         """
+        # Unpack inside the closure so Pylint counts them as local to 'init' only
+        dots, trails, step_text, _ = anim_elements
+
         for dot, trail in zip(dots, trails):
             dot.set_data([], [])
             dot.set_3d_properties([])
             trail.set_data([], [])
             trail.set_3d_properties([])
+
         step_text.set_text("")
         return dots + trails + [step_text]
 
     def update(frame: int) -> list:
         """
         Updates the positions of satellite markers and trails for the given frame index.
-        Args:
-        - frame: The index of the current frame in the animation (0 to frames-1).
-                 This index is used to select the corresponding timestep from the
-                 truth data.
-        Returns:
-        - A list of all Matplotlib artists that were modified (dots,
-        trails, step_text) for blitting.
         """
+        # Unpack inside the closure so Pylint counts them as local to 'update' only
+        dots, trails, step_text, viz_indices = anim_elements
+
         actual_step = indices[frame]
         start_step = indices[max(0, frame - 30)]
 
@@ -109,7 +125,8 @@ def visualise_orbits(data_path: str = 'sim_data/sim_results.npz',
         return dots + trails + [step_text]
 
     print("Creating animation...")
-    ani = FuncAnimation(fig, update, frames=frames, init_func=init, blit=True, interval=interval)
+    ani = FuncAnimation(fig, update, frames=len(indices),
+                        init_func=init, blit=True, interval=interval)
     print(f"Saving to {output_gif_path}...")
     ani.save(output_gif_path, writer=PillowWriter(fps=1000 // interval))
     print("Done!")

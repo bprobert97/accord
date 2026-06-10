@@ -96,29 +96,16 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
     """
     plt.figure(figsize=(12, 7))
     cmap = plt.get_cmap('viridis')
-    color_a = cmap(0.25)  # 1000km
-    color_b = cmap(0.85) # 2000km
 
+    # Inline the color selection to save local variables
     datasets = [
-    (results_a, start_step_a, color_a, "1000km"),
-    (results_b, start_step_b, color_b, "2000km")
+        (results_a, start_step_a, cmap(0.25), "1000km"),
+        (results_b, start_step_b, cmap(0.85), "2000km")
     ]
 
     for res, start_step, color, label in datasets:
         if res:
-            h, f = get_aggregated_reps(res)
-            h, f = h[:, start_step:], f[:, start_step:]
-            steps = np.arange(start_step, start_step + h.shape[1])
-
-            # Plot Honest
-            h_mean, h_std = np.mean(h, axis=0), np.std(h, axis=0)
-            plt.plot(steps, h_mean, color=color, label=f"Honest ({label} ISL)")
-            plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color=color, alpha=0.1)
-
-            # Plot Faulty
-            f_mean, f_std = np.mean(f, axis=0), np.std(f, axis=0)
-            plt.plot(steps, f_mean, color=color, linestyle="--", label=f"Faulty ({label} ISL)")
-            plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color=color, alpha=0.1)
+            _plot_single_dataset(res, start_step, color, label)
 
     plt.axhline(0.5, color="gray", linestyle=":", label="Neutral")
     plt.xlabel("Timestep [-]", fontsize=14)
@@ -128,6 +115,41 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "reputation_comparison.png"))
     plt.show()
+
+
+def _plot_single_dataset(res: List[Dict[str, Any]],
+                         start_step: int,
+                         colour: Any,
+                         label: str) -> None:
+    """
+    Helper function to calculate stats and plot lines for a single dataset.
+
+    Args:
+    - res: A list of result dictionaries containing the simulation data to aggregate.
+    - start_step: The integer step index from which to begin plotting the data.
+    - colour: The Matplotlib color identifier (e.g., an RGBA tuple) used for the
+             plot lines and the shaded standard deviation regions.
+    - label: A string descriptor (e.g., "1000km") used to label the honest and
+             faulty lines in the plot's legend.
+
+    Returns:
+    - None. The function adds plotted lines and fill_between regions directly
+      to the active Matplotlib figure.
+    """
+
+    h, f = get_aggregated_reps(res)
+    h, f = h[:, start_step:], f[:, start_step:]
+    steps = np.arange(start_step, start_step + h.shape[1])
+
+    # Plot Honest
+    h_mean, h_std = np.mean(h, axis=0), np.std(h, axis=0)
+    plt.plot(steps, h_mean, color=colour, label=f"Honest ({label} ISL)")
+    plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color=colour, alpha=0.1)
+
+    # Plot Faulty
+    f_mean, f_std = np.mean(f, axis=0), np.std(f, axis=0)
+    plt.plot(steps, f_mean, color=colour, linestyle="--", label=f"Faulty ({label} ISL)")
+    plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color=colour, alpha=0.1)
 
 
 def plot_kpi_comparison(results_a: List[Dict[str, Any]],

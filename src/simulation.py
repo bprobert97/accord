@@ -104,32 +104,29 @@ def keplerian_to_cartesian(kep_elements: KeplerianElements) -> NDArray[np.float6
     Returns:
     - 6-element Cartesian state vector [px, py, pz, vx, vy, vz]
     """
-    a = kep_elements.a
-    e = kep_elements.e
-    i = kep_elements.i
-    raan = kep_elements.raan
-    argp = kep_elements.argp
-    ta = kep_elements.ta
 
     # Position and velocity in the perifocal frame
-    r = a * (1 - e**2) / (1 + e * np.cos(ta))
+    r = kep_elements.a * (1 - kep_elements.e**2) / (\
+        1 + kep_elements.e * np.cos(kep_elements.ta))
 
-    p_pqw = r * np.array([np.cos(ta), np.sin(ta), 0])
+    p_pqw = r * np.array([np.cos(kep_elements.ta),
+                          np.sin(kep_elements.ta), 0])
 
     # Check for division by zero or invalid values
-    sqrt_val = MU_EARTH * a * (1 - e**2)
+    sqrt_val = MU_EARTH * kep_elements.a * (1 - kep_elements.e**2)
     sqrt_val = max(sqrt_val, 0)
 
     v_pqw_mag = np.sqrt(sqrt_val) / r
-    v_pqw = v_pqw_mag * np.array([-np.sin(ta), e + np.cos(ta), 0])
+    v_pqw = v_pqw_mag * np.array([-np.sin(kep_elements.ta),
+                                  kep_elements.e + np.cos(kep_elements.ta), 0])
 
     # Rotation matrix from perifocal to ECI frame
-    ci = np.cos(i)
-    si = np.sin(i)
-    craan = np.cos(raan)
-    sraan = np.sin(raan)
-    cargp = np.cos(argp)
-    sargp = np.sin(argp)
+    ci = np.cos(kep_elements.i)
+    si = np.sin(kep_elements.i)
+    craan = np.cos(kep_elements.raan)
+    sraan = np.sin(kep_elements.raan)
+    cargp = np.cos(kep_elements.argp)
+    sargp = np.sin(kep_elements.argp)
 
     rot_matrix = np.array([
         [craan*cargp - sraan*sargp*ci, -craan*sargp - sraan*cargp*ci, sraan*si],

@@ -43,10 +43,11 @@ If you use this work, please cite it as:
 │   └── filter.py                  # Code for the orbit determination calculations
 │   └── logger.py                  # Code for the app logger
 │   └── mc_comparison.py           # Code for generating comparison plots for different Monte Carlo data sets
-|   └── plotting.py                # Code for plotting simulation results
+│   └── mc_plotting.py             # Code for plotting aggregated Monte Carlo simulation results
+|   └── plotting.py                # Code for plotting individual simulation results
 │   └── reputation.py              # Code for the satellite reputation manager
 │   └── satellite_node.py          # Code representing a satellite in the network
-│   └── simulation.py              # Helper functions for generating and converting satellite orbital elements.
+│   └── simulation.py              # Helper functions for generating and converting satellite orbital elements
 │   └── transaction.py             # Code representing a transaction submitted by a satellite
 │   └── visualise_orbits.py        # Code for generating a gif of truth orbits
 │
