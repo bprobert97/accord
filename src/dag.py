@@ -27,11 +27,12 @@ import asyncio
 import json
 import random
 import bisect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 from .logger import get_logger
-from .transaction import Transaction, TransactionMetadata
+from .transaction import Transaction, TransactionMetadata, \
+    TransactionAddresses
 
 if TYPE_CHECKING:
     from .consensus_mech import ConsensusMechanism
@@ -42,6 +43,14 @@ logger = get_logger()
 class MockDAG():
     """A mock DAG object that only holds a ledger for plotting."""
     ledger: dict
+
+@dataclass
+class NISMetricsTracker:
+    """Tracks Normalised Innovation Squared (NIS) statistics per satellite."""
+    mean_per_satellite: dict[int, float] = field(default_factory=dict)
+    sums: dict[int, float] = field(default_factory=dict)
+    counts: dict[int, int] = field(default_factory=dict)
+
 
 class DAG():
     """
@@ -65,9 +74,9 @@ class DAG():
 
         self.consensus_mech = consensus_mech
         self.queue = queue
-        self.mean_nis_per_satellite: dict[int, float] = {}
-        self.nis_sums: dict[int, float] = {}
-        self.nis_counts: dict[int, int] = {}
+
+        # Grouped NIS statistics
+        self.nis_metrics = NISMetricsTracker()
 
         # History cache for Persistence of Excitation
         # Key: (observer_id, target_id)
@@ -87,27 +96,28 @@ class DAG():
                     dag=self,
                     sat_node=satellite,
                     transaction=transaction,
-                    mean_nis_per_satellite=self.mean_nis_per_satellite)
+                    mean_nis_per_satellite=self.nis_metrics.mean_per_satellite)
             future.set_result((consensus_result, mean_ema_nis))
 
             # If the transaction was successfully processed and returned a new_ema_nis,
-            # update the DAG's internal running sums/counts and its cached mean_nis_per_satellite.
+            # update the DAG's internal running sums/counts and its cached mean_per_satellite.
             if consensus_result and mean_ema_nis is not None:
                 try:
                     # Extract observer ID from the transaction data
                     observer_id = transaction.metadata.observer_id
                     if observer_id is not None:
                         # initialise if observer_id is new
-                        self.nis_sums.setdefault(observer_id, 0.0)
-                        self.nis_counts.setdefault(observer_id, 0)
+                        self.nis_metrics.sums.setdefault(observer_id, 0.0)
+                        self.nis_metrics.counts.setdefault(observer_id, 0)
 
                         # Update running sums and counts
-                        self.nis_sums[observer_id] += mean_ema_nis
-                        self.nis_counts[observer_id] += 1
+                        self.nis_metrics.sums[observer_id] += mean_ema_nis
+                        self.nis_metrics.counts[observer_id] += 1
 
-                        # Update the cached mean_nis_per_satellite for this observer
-                        self.mean_nis_per_satellite[observer_id] = \
-                            self.nis_sums[observer_id] / self.nis_counts[observer_id]
+                        # Update the cached mean_per_satellite for this observer
+                        self.nis_metrics.mean_per_satellite[observer_id] = \
+                            self.nis_metrics.sums[observer_id] / \
+                                self.nis_metrics.counts[observer_id]
                 except (json.JSONDecodeError, TypeError):
                     logger.warning("Could not parse transaction data \
                                    for NIS update in DAG.listen().")
@@ -125,11 +135,15 @@ class DAG():
         genesis_metadata = TransactionMetadata(consensus_reached=True,
                                                is_confirmed=True)
 
-        return {"Genesis Transaction 1": [Transaction(0, 0, "1234",
-                                                      "Genesis Transaction 1",
+        genesis_addresses = TransactionAddresses(sender_address=0, recipient_address=0)
+
+        return {"Genesis Transaction 1": [Transaction(addresses=genesis_addresses,
+                                                      sender_private_key="1234",
+                                                      tx_data="Genesis Transaction 1",
                                                       metadata=genesis_metadata)],
-                "Genesis Transaction 2": [Transaction(0, 0, "5678",
-                                                      "Genesis Transaction 2",
+                "Genesis Transaction 2": [Transaction(addresses=genesis_addresses,
+                                                      sender_private_key="5678",
+                                                      tx_data="Genesis Transaction 2",
                                                       metadata=genesis_metadata)]}
 
     def get_parents(self) -> tuple[str, ...]:
@@ -196,3 +210,12 @@ class DAG():
         real_tx_count = max(0, len(self.ledger) - 2)  # exclude genesis
         # If f=1, we need 4 real tx (3*1+1)
         return real_tx_count >= 4
+
+    def get_ledger(self) -> dict[str, list[Transaction]]:
+        """
+        Returns the current state of the DAG ledger.
+
+        Returns:
+        - A dictionary representing the ledger.
+        """
+        return self.ledger

@@ -20,15 +20,32 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
+from __future__ import annotations
 import asyncio
 import json
 import dataclasses
-from typing import Optional
+from dataclasses import dataclass
+import pickle
+from typing import Optional, TYPE_CHECKING
 import numpy as np
-from .reputation import ReputationManager, MAX_REPUTATION
-from .transaction import Transaction, TransactionMetadata
-from .filter import ObservationRecord
+from src.reputation import ReputationManager, MAX_REPUTATION, \
+    ReputationParams
+from src.transaction import Transaction, TransactionMetadata, \
+    TransactionAddresses
+from src.filter import ObservationRecord
+from src.logger import get_logger
 
+if TYPE_CHECKING:
+    from .dag import DAG
+
+logger = get_logger()
+
+@dataclass
+class Position:
+    """3D spatial coordinates of the satellite."""
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
 
 class SatelliteNode():
     """
@@ -42,14 +59,15 @@ class SatelliteNode():
         # Reputation starts at a neutral level
         self.reputation: float = MAX_REPUTATION / 2
         self.performance_ema: float = 0.5  # For tracking recent performance
-        self.rep_manager = ReputationManager()
+        rep_params = ReputationParams()
+        self.rep_manager = ReputationManager(rep_params)
 
         self.sensor_data: Optional[ObservationRecord] = None
 
-        # Position attributes
-        self.x: float = 0.0
-        self.y: float = 0.0
-        self.z: float = 0.0
+        self.position = Position()
+
+        # Local storage for synchronised ledger data
+        self.local_ledger: dict[str, list[Transaction]] = {}
 
     def update_position(self, state_vector: np.ndarray) -> None:
         """
@@ -59,7 +77,11 @@ class SatelliteNode():
         - state_vector: A NumPy array containing the satellite's state
                         (at least [px, py, pz, ...]).
         """
-        self.x, self.y, self.z = state_vector[0], state_vector[1], state_vector[2]
+        self.position.x, \
+            self.position.y, \
+                self.position.z = state_vector[0], \
+                                    state_vector[1], \
+                                        state_vector[2]
 
     def load_sensor_data(self, observation: ObservationRecord) -> None:
         """
@@ -91,8 +113,10 @@ class SatelliteNode():
 
         # Create metadata and transaction
         metadata = TransactionMetadata()
-        transaction = Transaction(sender_address=hash(self.id),
-                                  recipient_address=recipient_address,
+        addresses = TransactionAddresses(sender_address=hash(self.id),
+                                         recipient_address=recipient_address)
+
+        transaction = Transaction(addresses=addresses,
                                   sender_private_key="PLACEHOLDER_KEY",
                                   tx_data=tx_data,
                                   metadata=metadata)
@@ -101,3 +125,19 @@ class SatelliteNode():
         await self.queue.put((transaction, self, future))
         # Waits until DAG sets the result
         return await future
+
+    def sync_data(self, dag: DAG) -> None:
+        """
+        Synchronises the local ledger with the global DAG ledger.
+        This mimics how a distributed ledger node would update its local state.
+
+        Args:
+        - dag: The global DAG object to sync from.
+        """
+        # In a real DLT, this would involve network communication.
+        # Here we just copy the reference or the data.
+        self.local_ledger = dag.get_ledger().copy()
+        ledger_size = len(pickle.dumps(self.local_ledger))
+        logger.info("Satellite %d synced data from DAG. Local ledger now \
+                    has %d transactions (%d bytes)." , self.id,
+                    len(self.local_ledger), ledger_size)

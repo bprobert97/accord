@@ -1,16 +1,18 @@
 """
 Unit tests for the Transaction class.
 """
-from src.transaction import Transaction, TransactionMetadata
+from src.transaction import Transaction, TransactionMetadata, \
+    TransactionAddresses
 
 def test_transaction_creation_and_hash():
     """
     Test that a transaction is created correctly and its hash is consistent.
     """
     metadata = TransactionMetadata()
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2)
     tx = Transaction(
-        sender_address=1,
-        recipient_address=2,
+        addresses=addresses,
         sender_private_key="test_key",
         tx_data="test_data",
         metadata=metadata
@@ -26,8 +28,7 @@ def test_transaction_creation_and_hash():
 
     tx2_metadata = TransactionMetadata(timestamp=timestamp)
     tx2 = Transaction(
-        sender_address=1,
-        recipient_address=2,
+        addresses=addresses,
         sender_private_key="test_key",
         tx_data="test_data",
         metadata=tx2_metadata
@@ -37,8 +38,8 @@ def test_transaction_creation_and_hash():
     # Changing any data should result in a different hash
     tx3_metadata = TransactionMetadata(timestamp=timestamp)
     tx3 = Transaction(
-        sender_address=99, # Changed sender
-        recipient_address=2,
+        addresses=TransactionAddresses(sender_address=99,
+                                       recipient_address=2),
         sender_private_key="test_key",
         tx_data="test_data",
         metadata=tx3_metadata
@@ -50,9 +51,10 @@ def test_transaction_repr():
     Test the __repr__ method of the Transaction class.
     """
     metadata = TransactionMetadata()
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2)
     tx = Transaction(
-        sender_address=1,
-        recipient_address=2,
+        addresses=addresses,
         sender_private_key="test_key",
         tx_data="test_data",
         metadata=metadata

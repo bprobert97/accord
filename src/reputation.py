@@ -21,41 +21,46 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import time
+from dataclasses import dataclass
 import numpy as np
 
 # Global Variables for consensus
 MAX_REPUTATION: float = 1
+
+@dataclass
+class ReputationParams:
+    """
+    A dataclass to hold parameters for the reputation system.
+    """
+    max_rep: float = MAX_REPUTATION
+    offset: float = 0.693
+    growth_rate: float = 0.6
+    decay_rate: float = 0.002
+    alpha: float = 0.12
+    performance_ema_alpha: float = 0.1
+    min_drop_factor: float = 0.65
+    max_drop_factor: float = 0.95
 
 class ReputationManager:
     """
     A class for calculating and updating a satellite node's reputation
     """
     def __init__(self,
-                 max_rep: float = MAX_REPUTATION,
-                 offset: float = 0.693,
-                 growth_rate: float = 0.6,
-                 decay_rate: float = 0.002,
-                 alpha: float = 0.12,
-                 performance_ema_alpha: float = 0.1,
-                 min_drop_factor: float = 0.65,
-                 max_drop_factor: float = 0.95) -> None:
+                 params: ReputationParams) -> None:
         """
-        max_rep: max possible reputation
-        offset, growth_rate: Gompertz curve parameters
-        decay_rate: exponential decay per second (or tick)
-        alpha: % of distance toward Gompertz target per positive event
-        performance_ema_alpha: Smoothing factor for the performance EMA.
-        min_drop_factor: Multiplier for the worst-case negative event.
-        max_drop_factor: Multiplier for the mildest negative event.
+        Initialise the ReputationManager with the given parameters.
+
+        Args:
+        - params: An instance of ReputationParams containing the reputation system parameters.
         """
-        self.max_rep = max_rep
-        self.offset = offset
-        self.growth_rate = growth_rate
-        self.decay_rate = decay_rate
-        self.alpha = alpha
-        self.performance_ema_alpha = performance_ema_alpha
-        self.min_drop_factor = min_drop_factor
-        self.max_drop_factor = max_drop_factor
+        self.max_rep = params.max_rep
+        self.offset = params.offset
+        self.growth_rate = params.growth_rate
+        self.decay_rate = params.decay_rate
+        self.alpha = params.alpha
+        self.performance_ema_alpha = params.performance_ema_alpha
+        self.min_drop_factor = params.min_drop_factor
+        self.max_drop_factor = params.max_drop_factor
         self._last_update = time.time()
 
     def decay(self, current_rep: float) -> float:
@@ -71,7 +76,7 @@ class ReputationManager:
           so as to not overly penalise inactive nodes, especially in async
           situations where nodes may be out of contact for a longer period.
         """
-        neutral_rep: float = MAX_REPUTATION / 2
+        neutral_rep: float = self.max_rep / 2
         now: float = time.time()
         delta_t: float = now - self._last_update
         self._last_update = now

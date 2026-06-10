@@ -18,6 +18,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 from src.logger import get_logger
@@ -29,8 +30,19 @@ MU_EARTH = 3.986004418e14  # m^3/s^2
 RE = 6378e3
 # ---------------------------------------------------------
 
-def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
-                                                           float, float, float]:
+@dataclass
+class KeplerianElements:
+    """
+    A dataclass to hold Keplerian elements for a satellite.
+    """
+    a: float
+    e: float
+    i: float
+    raan: float
+    argp: float
+    ta: float
+
+def generate_random_keplerian_elements(seed: int) -> KeplerianElements:
     """
     Generates a set of random but valid Keplerian elements for a LEO satellite.
 
@@ -50,11 +62,10 @@ def generate_random_keplerian_elements(seed: int) -> tuple[float, float, float,
     raan = rng.uniform(0, 2 * np.pi)
     argp = rng.uniform(0, 2 * np.pi)
     ta = rng.uniform(0, 2 * np.pi)
-    return a, e, i, raan, argp, ta
+    return KeplerianElements(a, e, i, raan, argp, ta)
 
 def generate_walker_delta_constellation(t: int, p: int, f: int, a: float,
-                                         i: float) -> list[tuple[float, float, float,
-                                                                 float, float, float]]:
+                                         i: float) -> list[KeplerianElements]:
     """
     Generates Keplerian elements for a Walker Delta constellation i: T/P/F.
     Args:
@@ -64,7 +75,7 @@ def generate_walker_delta_constellation(t: int, p: int, f: int, a: float,
     - a: Semi-major axis (assuming circular orbits, e=0)
     - i: Inclination (radians)
     Returns:
-    - List of tuples containing (a, e, i, raan, argp, ta) for each satellite
+    - List of KeplerianElements for each satellite
     """
     if t % p != 0:
         raise ValueError("Total number of satellites T must be divisible by number of planes P.")
@@ -81,43 +92,41 @@ def generate_walker_delta_constellation(t: int, p: int, f: int, a: float,
             ta = (2 * np.pi / s) * sat_idx + (2 * np.pi * f / t) * plane_idx
             # Normalise ta to [0, 2*pi]
             ta %= (2 * np.pi)
-            constellation.append((a, e, i, raan, argp, ta))
+            constellation.append(KeplerianElements(a, e, i, raan, argp, ta))
 
     return constellation
 
-def keplerian_to_cartesian(a: float, e: float, i: float, raan: float,
-                           argp: float, ta: float) -> NDArray[np.float64]:
+def keplerian_to_cartesian(kep_elements: KeplerianElements) -> NDArray[np.float64]:
     """
     Converts Keplerian elements to a Cartesian state vector (position and velocity).
     Args:
-    - a: Semi-major axis
-    - e: Eccentricity
-    - i: Inclination
-    - raan: Right Ascension of the Ascending Node
-    - argp: Argument of Periapsis
-    - ta: True Anomaly
+    - kep_elements: A KeplerianElements instance containing the orbital elements.
     Returns:
     - 6-element Cartesian state vector [px, py, pz, vx, vy, vz]
     """
-    # Position and velocity in the perifocal frame
-    r = a * (1 - e**2) / (1 + e * np.cos(ta))
 
-    p_pqw = r * np.array([np.cos(ta), np.sin(ta), 0])
+    # Position and velocity in the perifocal frame
+    r = kep_elements.a * (1 - kep_elements.e**2) / (\
+        1 + kep_elements.e * np.cos(kep_elements.ta))
+
+    p_pqw = r * np.array([np.cos(kep_elements.ta),
+                          np.sin(kep_elements.ta), 0])
 
     # Check for division by zero or invalid values
-    sqrt_val = MU_EARTH * a * (1 - e**2)
+    sqrt_val = MU_EARTH * kep_elements.a * (1 - kep_elements.e**2)
     sqrt_val = max(sqrt_val, 0)
 
     v_pqw_mag = np.sqrt(sqrt_val) / r
-    v_pqw = v_pqw_mag * np.array([-np.sin(ta), e + np.cos(ta), 0])
+    v_pqw = v_pqw_mag * np.array([-np.sin(kep_elements.ta),
+                                  kep_elements.e + np.cos(kep_elements.ta), 0])
 
     # Rotation matrix from perifocal to ECI frame
-    ci = np.cos(i)
-    si = np.sin(i)
-    craan = np.cos(raan)
-    sraan = np.sin(raan)
-    cargp = np.cos(argp)
-    sargp = np.sin(argp)
+    ci = np.cos(kep_elements.i)
+    si = np.sin(kep_elements.i)
+    craan = np.cos(kep_elements.raan)
+    sraan = np.sin(kep_elements.raan)
+    cargp = np.cos(kep_elements.argp)
+    sargp = np.sin(kep_elements.argp)
 
     rot_matrix = np.array([
         [craan*cargp - sraan*sargp*ci, -craan*sargp - sraan*cargp*ci, sraan*si],

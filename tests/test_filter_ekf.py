@@ -23,13 +23,7 @@ def ekf(filter_config: FilterConfig):
     """Provides a JointEKF instance for tests."""
     # To initialise the EKF, we need an initial truth state.
     initial_truth, _ = simulate_truth_and_meas(
-        N=filter_config.N,
-        steps=1,
-        dt=filter_config.dt,
-        sig_r=filter_config.sig_r,
-        sig_rdot=filter_config.sig_rdot,
-        seed=filter_config.seed
-    )
+        config=filter_config)
     return JointEKF(config=filter_config, initial_truth=initial_truth[0])
 
 def test_joint_ekf_init(ekf, filter_config):

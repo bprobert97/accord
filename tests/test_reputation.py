@@ -4,14 +4,16 @@ Unit tests for the ReputationManager class.
 """
 
 import pytest
-from src.reputation import ReputationManager, MAX_REPUTATION
+from src.reputation import ReputationManager, \
+    MAX_REPUTATION, ReputationParams
 
 @pytest.fixture
 def rep_manager():
     """
     Pytest fixture to provide a ReputationManager instance for tests.
     """
-    return ReputationManager(decay_rate=0) # Disable time decay for predictable tests
+    params = ReputationParams(decay_rate=0) # Disable time decay for predictable tests
+    return ReputationManager(params)
 
 def test_apply_positive_increases_reputation(rep_manager):
     """

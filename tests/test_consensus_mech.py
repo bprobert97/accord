@@ -2,12 +2,14 @@
 Unit tests for the ConsensusMechanism class.
 """
 import json
+import time
 from unittest.mock import MagicMock, patch
 import pytest
 from src.consensus_mech import ConsensusMechanism
 from src.reputation import MAX_REPUTATION
 from src.satellite_node import SatelliteNode
-from src.transaction import Transaction, TransactionMetadata
+from src.transaction import Transaction, TransactionMetadata, \
+    TransactionAddresses
 from src.filter import ObservationRecord
 
 @pytest.fixture
@@ -77,33 +79,49 @@ def test_calculate_dof_score(consensus_mech):
     """
     current_r_vector=[1.0, 2.0, 3.0]
     current_v_vector=[0.1, 0.2, 0.3]
-    # Test base score - no previous vector or delta_t
-    assert consensus_mech.calculate_dof_score(1, current_r_vector, current_v_vector) == 0
-    assert consensus_mech.calculate_dof_score(2, current_r_vector, current_v_vector) == 0.5
-    assert consensus_mech.calculate_dof_score(3, current_r_vector, current_v_vector) == 1.0
+    obs = ObservationRecord(step=500,
+                            time=time.time(),
+                            observer=1,
+                            target=2,
+                            nis=2.0,
+                            dof=1,
+                            r_vector=current_r_vector,
+                            v_vector=current_v_vector)
 
-    # Test with previous vector and delta_t
+    # Test base score - no previous vector or delta_t
+    # DOF = 1 initially
+    assert consensus_mech.calculate_dof_score(obs_record=obs) == 0
+
+    obs.dof = 2
+    assert consensus_mech.calculate_dof_score(obs_record=obs) == 0.5
+
+    obs.dof = 3
+    assert consensus_mech.calculate_dof_score(obs_record=obs) == 1.0
+
+    # Test with previous data
     previous_r_vector = [0.5, 1.5, 2.5]
     previous_v_vector = [0.05, 0.15, 0.25]
-    delta_t = 10.0
+
+    prev_data = {
+        "r_vector": previous_r_vector,
+        "v_vector": previous_v_vector,
+        "time": time.time() - 10}
+
     score_1 = consensus_mech.calculate_dof_score(
-        dof=3,
-        current_r_vector=current_r_vector,
-        current_v_vector=current_v_vector,
-        previous_r_vector=previous_r_vector,
-        previous_v_vector=previous_v_vector,
-        delta_t=delta_t
+        obs_record=obs,
+        previous_data=prev_data
     )
     assert score_1 == pytest.approx(0.4, 0.01)
 
-    # Expect unchanged vectros to score worse
+    # Expect unchanged vectors to score worse
+    prev_data_unchanged = {
+        "r_vector": current_r_vector,
+        "v_vector": current_v_vector,
+        "time": time.time() - 10}
+
     score_2 = consensus_mech.calculate_dof_score(
-        dof=3,
-        current_r_vector=current_r_vector,
-        current_v_vector=current_v_vector,
-        previous_r_vector=current_r_vector,
-        previous_v_vector=current_v_vector,
-        delta_t=delta_t
+        obs_record=obs,
+        previous_data=prev_data_unchanged
     )
     assert score_1 > score_2
 
@@ -149,7 +167,11 @@ def test_poise_empty_transaction(consensus_mech, mock_dag, mock_sat_node):
     """
     Test PoISE with an empty transaction, expecting reputation penalty.
     """
-    empty_tx = Transaction(1, 2, "k", "", TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    empty_tx = Transaction(addresses=addresses,
+                           sender_private_key="k",
+                           tx_data="",
+                           metadata=TransactionMetadata())
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
         mock_dag, mock_sat_node, empty_tx, {}
@@ -167,7 +189,11 @@ def test_poise_no_bft_quorum(consensus_mech, mock_dag, mock_sat_node):
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    tx = Transaction(addresses=addresses,
+                     sender_private_key="k",
+                     tx_data=tx_data,
+                     metadata=TransactionMetadata())
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
         mock_dag, mock_sat_node, tx, {}
@@ -190,7 +216,11 @@ def test_poise_consensus_reached(mock_chi2, consensus_mech, mock_dag, mock_sat_n
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    tx = Transaction(addresses=addresses,
+                     sender_private_key="k",
+                     tx_data=tx_data,
+                     metadata=TransactionMetadata())
 
     # Make consensus score high to ensure it passes
     consensus_mech.calculate_consensus_score = MagicMock(return_value=0.8)
@@ -216,7 +246,11 @@ def test_poise_consensus_failed(mock_chi2, consensus_mech, mock_dag, mock_sat_no
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=10.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    tx = Transaction(1, 2, "k", tx_data, TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    tx = Transaction(addresses=addresses,
+                     sender_private_key="k",
+                     tx_data=tx_data,
+                     metadata=TransactionMetadata())
 
     # Make consensus score low to ensure it fails
     consensus_mech.calculate_consensus_score = MagicMock(return_value=0.4)

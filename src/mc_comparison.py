@@ -96,29 +96,16 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
     """
     plt.figure(figsize=(12, 7))
     cmap = plt.get_cmap('viridis')
-    color_a = cmap(0.25)  # 1000km
-    color_b = cmap(0.85) # 2000km
 
+    # Inline the color selection to save local variables
     datasets = [
-    (results_a, start_step_a, color_a, "1000km"),
-    (results_b, start_step_b, color_b, "2000km")
+        (results_a, start_step_a, cmap(0.25), "1000km"),
+        (results_b, start_step_b, cmap(0.85), "2000km")
     ]
 
     for res, start_step, color, label in datasets:
         if res:
-            h, f = get_aggregated_reps(res)
-            h, f = h[:, start_step:], f[:, start_step:]
-            steps = np.arange(start_step, start_step + h.shape[1])
-
-            # Plot Honest
-            h_mean, h_std = np.mean(h, axis=0), np.std(h, axis=0)
-            plt.plot(steps, h_mean, color=color, label=f"Honest ({label} ISL)")
-            plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color=color, alpha=0.1)
-
-            # Plot Faulty
-            f_mean, f_std = np.mean(f, axis=0), np.std(f, axis=0)
-            plt.plot(steps, f_mean, color=color, linestyle="--", label=f"Faulty ({label} ISL)")
-            plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color=color, alpha=0.1)
+            _plot_single_dataset(res, start_step, color, label)
 
     plt.axhline(0.5, color="gray", linestyle=":", label="Neutral")
     plt.xlabel("Timestep [-]", fontsize=14)
@@ -130,32 +117,81 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
     plt.show()
 
 
+def _plot_single_dataset(res: List[Dict[str, Any]],
+                         start_step: int,
+                         colour: Any,
+                         label: str) -> None:
+    """
+    Helper function to calculate stats and plot lines for a single dataset.
+
+    Args:
+    - res: A list of result dictionaries containing the simulation data to aggregate.
+    - start_step: The integer step index from which to begin plotting the data.
+    - colour: The Matplotlib color identifier (e.g., an RGBA tuple) used for the
+             plot lines and the shaded standard deviation regions.
+    - label: A string descriptor (e.g., "1000km") used to label the honest and
+             faulty lines in the plot's legend.
+
+    Returns:
+    - None. The function adds plotted lines and fill_between regions directly
+      to the active Matplotlib figure.
+    """
+
+    h, f = get_aggregated_reps(res)
+    h, f = h[:, start_step:], f[:, start_step:]
+    steps = np.arange(start_step, start_step + h.shape[1])
+
+    # Plot Honest
+    h_mean, h_std = np.mean(h, axis=0), np.std(h, axis=0)
+    plt.plot(steps, h_mean, color=colour, label=f"Honest ({label} ISL)")
+    plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color=colour, alpha=0.1)
+
+    # Plot Faulty
+    f_mean, f_std = np.mean(f, axis=0), np.std(f, axis=0)
+    plt.plot(steps, f_mean, color=colour, linestyle="--", label=f"Faulty ({label} ISL)")
+    plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color=colour, alpha=0.1)
+
+
 def plot_kpi_comparison(results_a: List[Dict[str, Any]],
                         results_b: List[Dict[str, Any]]) -> None:
     """
-    Plots a bar chart comparison of key KPIs, including TTD as a percentage of runtime.
+    Plots a bar chart comparison of key KPIs, including TTD as a percentage
+    of runtime.
 
     Args:
-        results_a: Dataset A
-        results_b: Dataset B
+    - results_a: Dataset A
+    - results_b: Dataset B
 
     Returns:
-        None. Saves MatPlotLib figures in OUTPUT_DIR.
+    - None. Saves MatPlotLib figures in OUTPUT_DIR.
+    """
+    _plot_kpi_bar_chart(results_a, results_b)
+    _plot_ttd_boxplot(results_a, results_b)
+
+
+def _plot_kpi_bar_chart(results_a: List[Dict[str, Any]],
+                        results_b: List[Dict[str, Any]]) -> None:
+    """
+    Plots a bar chart comparison of recall, precision, FPR, and TTD percentage.
+
+    Args:
+    - results_a: Dataset A
+    - results_b: Dataset B
+
+    Returns:
+    - None. Saves a MatPlotLib figure in OUTPUT_DIR.
     """
     metrics = ["recall", "precision", "fpr"]
     labels = ["Recall", "Precision", "False Positive Rate", "Normalised TTD"]
 
-    # Calculate means for standard metrics
     means_a = [np.mean([k[m] for k in results_a]) for m in metrics]
     means_b = [np.mean([k[m] for k in results_b]) for m in metrics]
 
-    # Calculate Normalised TTD (as % of total steps)
     def get_ttd_percent(results):
-        ttd_pcts = []
-        for k in results:
-            if k.get("avg_ttd") is not None:
-                total_steps = k["honest_matrix"].shape[1]
-                ttd_pcts.append((k["avg_ttd"] / total_steps) * 100)
+        ttd_pcts = [
+            (k["avg_ttd"] / k["honest_matrix"].shape[1]) * 100
+            for k in results if k.get("avg_ttd") is not None
+        ]
         return np.mean(ttd_pcts) if ttd_pcts else 0
 
     means_a.append(get_ttd_percent(results_a))
@@ -163,63 +199,69 @@ def plot_kpi_comparison(results_a: List[Dict[str, Any]],
 
     x = np.arange(len(labels))
     width = 0.35
-
     _, ax = plt.subplots(figsize=(12, 6))
-
-    # Use viridis for color-blind friendly comparisons
     cmap = plt.get_cmap('viridis')
-    color_a = cmap(0.25) # Deep teal/blue
-    color_b = cmap(0.85) # Bright yellow/green
 
-    ax.bar(x - width/2, means_a, width, label='1000km ISL', color=color_a)
-    ax.bar(x + width/2, means_b, width, label='2000km ISL', color=color_b)
+    ax.bar(x - width/2, means_a, width, label='1000km ISL', color=cmap(0.25))
+    ax.bar(x + width/2, means_b, width, label='2000km ISL', color=cmap(0.85))
 
     ax.set_ylabel('Percentage [%]')
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.legend()
     ax.grid(axis='y', alpha=0.1)
-    ax.set_ylim(0, 105) # Metrics are percentages
+    ax.set_ylim(0, 105)
 
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "kpi_percentage_comparison.png"))
     plt.show()
 
-    # TTD Comparison
+
+def _plot_ttd_boxplot(results_a: List[Dict[str, Any]],
+                      results_b: List[Dict[str, Any]]) -> None:
+    """
+    Plots a boxplot comparison of Time to Detection (TTD) in timesteps for both datasets.
+    Only includes runs where TTD is available (not None).
+
+    Args:
+    - results_a: Dataset A
+    - results_b: Dataset B
+
+    Returns:
+    - None. Saves a MatPlotLib figure in OUTPUT_DIR.
+    """
     ttds_a = [float(k.get("avg_ttd", 0)) for k in results_a if k.get("avg_ttd") is not None]
     ttds_b = [float(k.get("avg_ttd", 0)) for k in results_b if k.get("avg_ttd") is not None]
 
-    if ttds_a or ttds_b:
-        plt.figure(figsize=(6, 6))
-        data_to_plot = []
-        labels_ttd = []
-        if ttds_a:
-            data_to_plot.append(ttds_a)
-            labels_ttd.append("1000km ISL")
-        if ttds_b:
-            data_to_plot.append(ttds_b)
-            labels_ttd.append("2000km ISL")
+    if not ttds_a and not ttds_b:
+        return
 
-        # Reduce gap by setting positions closer and increasing widths
-        positions = [1, 1.5]
+    plt.figure(figsize=(6, 6))
+    data_to_plot, labels_ttd = [], []
 
-        cmap = plt.get_cmap('viridis')
-        colors = [cmap(0.25), cmap(0.85)]
+    if ttds_a:
+        data_to_plot.append(ttds_a)
+        labels_ttd.append("1000km ISL")
+    if ttds_b:
+        data_to_plot.append(ttds_b)
+        labels_ttd.append("2000km ISL")
 
-        bp = plt.boxplot(data_to_plot, tick_labels=labels_ttd,
-                    positions=positions[:len(data_to_plot)], widths=0.35,
-                    patch_artist=True)
+    cmap = plt.get_cmap('viridis')
+    colors = [cmap(0.25), cmap(0.85)]
+    bp = plt.boxplot(data_to_plot, tick_labels=labels_ttd, positions=[1, 1.5][:len(data_to_plot)],
+                     widths=0.35, patch_artist=True)
 
-        for patch, color in zip(bp['boxes'], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.6)
+    for patch, color in zip(bp['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.6)
 
-        plt.xlim(0.5, 2.0)
-        plt.ylabel("Time to Detection  [Timesteps]")
-        plt.grid(axis='y', alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(os.path.join(OUTPUT_DIR, "ttd_comparison.png"))
-        plt.show()
+    plt.xlim(0.5, 2.0)
+    plt.ylabel("Time to Detection  [Timesteps]")
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, "ttd_comparison.png"))
+    plt.show()
+
 
 def main():
     """

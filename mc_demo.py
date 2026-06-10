@@ -19,20 +19,22 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
+import logging
 import os
 import asyncio
 import time
 import argparse
 import functools
 import traceback
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
-import matplotlib.pyplot as plt
 from src.logger import get_logger
-from src.plotting import extract_nis_transactions, plot_mc_nis_boxplot, \
-    generate_corner_plot
-from accord_demo import run_consensus_demo, DEFAULT_CONFIG
+from src.mc_plotting import plot_mc_results, DATA_DIR
+from src.plotting import generate_corner_plot, extract_nis_data
+from accord_demo import run_consensus_demo, DEFAULT_CONFIG, \
+    DemoFilePaths, DemoToggles
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
 # This is needed for parallel processing using ProcessPoolExecutor.
@@ -51,166 +53,241 @@ ISL_RANGE_KM = DEFAULT_CONFIG.ISL_range_m // 1000
 # --- MC Configuration ---
 NUM_RUNS = 40
 NUM_PROCESSES = 4
-DATA_DIR = os.path.join("sim_data", "mc_results")
 EKF_DIR = os.path.join(DATA_DIR, "ekf")
 SIM_DIR = os.path.join(DATA_DIR, "sim")
 MC_RESULTS_PATH = os.path.join(SIM_DIR, f"mc_results_{ISL_RANGE_KM}km.npz")
 
-def calculate_kpis(rep_history: Optional[Dict[str, List[float]]] = None,
-                   faulty_ids: Optional[set[int]] = None,
-                   steps: Optional[int] = None,
-                   honest_matrix: Optional[np.ndarray] = None,
-                   faulty_matrix: Optional[np.ndarray] = None,
-                   honest_nis: Optional[List[float]] = None,
-                   faulty_nis: Optional[List[float]] = None,
-                   detection_threshold: float = 0.5,
-                   fpr_offset_percent: float = 0.2,
-                   logger: Optional[Any] = None) -> Dict[str, Any]:
+@dataclass
+class SatellitePopulationData:
     """
-    Calculate Key Performance Indicators (KPIs) for a single MC simulation run.
+    A dataclass to store data about
+    the populations of honest and faulty satellites.
+    """
+    rep_history: Optional[Dict[str, List[float]]] = None
+    faulty_ids: Optional[set[int]] = None
+    steps: Optional[int] = None
+    honest_matrix: Optional[np.ndarray] = None
+    faulty_matrix: Optional[np.ndarray] = None
+    honest_nis: Optional[List[float]] = None
+    faulty_nis: Optional[List[float]] = None
+
+def calculate_kpis(sat_pop_data: SatellitePopulationData,
+                   logger: logging.Logger,
+                   detection_threshold: float = 0.5,
+                   fpr_offset_percent: float = 0.2) -> Dict[str, Any]:
+    """
+    Calculates KPIs for a single Monte Carlo run based on the reputation history and faulty IDs.
 
     Args:
-        rep_history: Dictionary mapping satellite IDs to their reputation history.
-        faulty_ids: List of IDs identifying faulty satellites.
-        steps: Total number of simulation steps.
-        honest_matrix: A 2D NumPy array where each row is the reputation history
-                       of an honest node.
-        faulty_matrix: A 2D NumPy array where each row is the reputation history
-                       of a faulty node.
-        honest_nis: List of NIS values for transactions from honest satellites.
-        faulty_nis: List of NIS values for transactions from faulty satellites.
-        detection_threshold: The reputation value below which a node is considered
-                             "detected" as faulty.
-        fpr_offset_percent: The fraction of initial steps to ignore when calculating
-                            False Positives (to allow for EKF convergence).
-        logger: Optional logger to record undetected faulty nodes.
+    Inside sat_pop_data:
+        - rep_history: A dictionary mapping satellite IDs to their reputation history over time.
+        - faulty_ids: A set of satellite IDs that were faulty in this run.
+        - steps: The total number of steps in the simulation. If None, it will be inferred from
+        the matrices.
+        - honest_matrix: A 2D NumPy array of shape (num_honest, steps) containing the reputation
+        history of honest satellites.
+        - faulty_matrix: A 2D NumPy array of shape (num_faulty, steps) containing the reputation
+        history of faulty satellites.
+        - honest_nis: A list of NIS values for honest satellites
+          (optional, for additional analysis).
+        - faulty_nis: A list of NIS values for faulty satellites
+          (optional, for additional analysis).
+    - logger: A logger for logging warnings about undetected faulty satellites.
+    - detection_threshold: The reputation threshold below which a satellite is considered
+    detected as faulty.
+    - fpr_offset_percent: The percentage of initial steps to ignore when calculating false
+    positives, to allow for reputation initialization.
 
     Returns:
-        A dictionary containing KPIs and processed matrices/NIS lists.
+    - A dictionary containing calculated KPIs such as average TTD, worst TTD, FPR, recall,
+      precision, FNR, final average reputations for honest and faulty satellites, reputation
+      spread among honest satellites, detection margin, total flips in detection status, and
+      lists of undetected faulty IDs and their reputations.
     """
-    # If matrices aren't provided, convert the raw rep_history dictionary into NumPy matrices
+
+    sat_pop_data.honest_matrix, sat_pop_data.faulty_matrix, \
+        honest_ids, faulty_ids_list = _resolve_kpi_inputs(
+            sat_pop_data.rep_history,
+            sat_pop_data.faulty_ids,
+            sat_pop_data.honest_matrix,
+            sat_pop_data.faulty_matrix
+        )
+
+    if sat_pop_data.steps is None:
+        sat_pop_data.steps = sat_pop_data.honest_matrix.shape[1]
+
+    if faulty_ids_list is None:
+        raise ValueError("Faulty IDs are required to calculate detection metrics.")
+
+    metrics = _compute_detection_metrics(
+        sat_pop_data, faulty_ids_list,
+        detection_threshold, fpr_offset_percent, logger
+    )
+
+    num_honest, num_faulty = len(sat_pop_data.honest_matrix), len(sat_pop_data.faulty_matrix)
+    final_honest: np.ndarray = sat_pop_data.honest_matrix[:, -1] if num_honest else np.array([])
+    final_faulty: np.ndarray = sat_pop_data.faulty_matrix[:, -1] if num_faulty else np.array([])
+
+    return {
+        "avg_ttd": np.mean(metrics['ttds']) if metrics['ttds'] else None,
+        "worst_ttd": np.max(metrics['ttds']) if metrics['ttds'] else None,
+        "fpr": (metrics['false_positives'] / num_honest) * 100 if num_honest > 0 else 0,
+        "recall": (metrics['true_positives'] / num_faulty) * 100 if num_faulty > 0 else 0,
+        "precision": (metrics['true_positives'] / (metrics['true_positives'] \
+                                                   + metrics['false_positives'])) * 100
+                     if (metrics['true_positives'] + metrics['false_positives']) > 0 else 0,
+        "fnr": 100 - ((metrics['true_positives'] / num_faulty) * 100 if num_faulty > 0 else 0),
+        "final_honest_rep": np.mean(final_honest) if num_honest > 0 else 0,
+        "final_faulty_rep": np.mean(final_faulty) if num_faulty > 0 else 0,
+        "honest_spread": np.std(final_honest) if num_honest > 0 else 0,
+        "detection_margin": (np.mean(final_honest) if num_honest else 0) - \
+            (np.mean(final_faulty) if num_faulty else 0),
+        "flips": metrics['total_flips'],
+        "honest_matrix": sat_pop_data.honest_matrix,
+        "faulty_matrix": sat_pop_data.faulty_matrix,
+        "honest_nis_stats": _get_nis_stats(sat_pop_data.honest_nis),
+        "faulty_nis_stats": _get_nis_stats(sat_pop_data.faulty_nis),
+        "undetected_faulty_ids": metrics['undetected_ids'],
+        "undetected_faulty_reps": np.array(metrics['undetected_reps']),
+        "faulty_ids": faulty_ids_list,
+        "honest_ids": honest_ids
+    }
+
+def _resolve_kpi_inputs(rep_history: Optional[dict[str, list[float]]],
+                        faulty_ids: Optional[set[int]],
+                        honest_matrix: Optional[np.ndarray],
+                        faulty_matrix: Optional[np.ndarray]
+                        ) -> tuple[np.ndarray, np.ndarray,
+                                   Optional[List[int]], Optional[List[int]]]:
+    """
+    Resolves the inputs for KPI calculation, allowing for either raw matrices or a
+    reputation history dictionary.
+
+    Args:
+    - rep_history: A dictionary mapping satellite IDs to their reputation history over time.
+    - faulty_ids: A set of satellite IDs that were faulty in this run.
+    - honest_matrix: A 2D NumPy array of shape (num_honest, steps) containing the reputation
+      history of honest satellites.
+    - faulty_matrix: A 2D NumPy array of shape (num_faulty, steps) containing the reputation
+      history of faulty satellites.
+
+    Returns:
+    - A tuple containing:
+        - honest_matrix: A 2D NumPy array of shape (num_honest, steps) for honest satellites.
+        - faulty_matrix: A 2D NumPy array of shape (num_faulty, steps) for faulty satellites.
+        - honest_ids: An optional list of satellite IDs corresponding to the rows of honest_matrix.
+        - faulty_ids_list: An optional list of satellite IDs corresponding to the rows of
+          faulty_matrix.
+    """
     if honest_matrix is None or faulty_matrix is None:
         if rep_history is None or faulty_ids is None:
             raise ValueError("Must provide either matrices OR rep_history and faulty_ids")
-
         honest_ids = sorted([int(sid) for sid in rep_history.keys() if int(sid) not in faulty_ids])
         faulty_ids_list = sorted(list(faulty_ids))
         honest_matrix = np.array([rep_history[str(sid)] for sid in honest_ids])
         faulty_matrix = np.array([rep_history[str(sid)] for sid in faulty_ids_list])
     else:
-        # If matrices provided, we try to recover IDs if passed
         honest_ids = None
-        faulty_ids_list = sorted(list(faulty_ids)) \
-            if faulty_ids is not None else []
+        faulty_ids_list = sorted(list(faulty_ids)) if faulty_ids is not None else []
+    return honest_matrix, faulty_matrix, honest_ids, faulty_ids_list
 
-    # Infer steps from the matrix shape if not explicitly provided
-    if steps is None:
-        steps = honest_matrix.shape[1]
+def _compute_detection_metrics(sat_pop_data: SatellitePopulationData,
+                               faulty_ids_list: List[int],
+                               threshold: float,
+                               fpr_offset: float,
+                               logger: logging.Logger) -> Dict[str, Any]:
+    """
+    Computes detection metrics such as TTDs, false positives, true positives, and
+    undetected faulty satellites.
 
-    ttds = [] # List to store Time to Detection for each faulty node
-    undetected_ids = []
-    undetected_reps = []
-    false_positives = 0
-    true_positives = 0
-    total_flips = 0
+    Args:
+    Inside sat_pop_data:
+        - honest_matrix: A 2D NumPy array of shape (num_honest, steps) containing the reputation
+          history of honest satellites.
+        - faulty_matrix: A 2D NumPy array of shape (num_faulty, steps) containing the reputation
+          history of faulty satellites.
+        - steps: The number of time steps in the reputation history.
+    - faulty_ids_list: A list of satellite IDs corresponding to the rows of faulty_matrix.
+    - threshold: The reputation threshold below which a satellite is considered
+                 detected as faulty.
+    - fpr_offset: The percentage of initial steps to ignore when calculating false positives.
+    - logger: A logger for logging warnings about undetected faulty satellites.
 
-    # Extract final reputations for reporting
-    final_honest_reps = honest_matrix[:, -1]
-    final_faulty_reps = faulty_matrix[:, -1]
+    Returns:
+    - A dictionary containing lists of TTDs, undetected faulty IDs and their reputations, counts of
+      true positives, false positives, and total flips in detection status.
+    """
+    if sat_pop_data.faulty_matrix is None or sat_pop_data.honest_matrix is None:
+        raise ValueError("You must supply a faulty data matrix and honest "
+                         "data matrix to compute metrics.")
 
-    # Calculate Time to Detection (TTD) and Recall/FNR for faulty and honest nodes
-    for i, history in enumerate(faulty_matrix):
-        detected_at = next((idx for idx, rep in enumerate(history) \
-                            if rep < detection_threshold), None)
+    # Bundle all trackers into the return dictionary immediately to save local variables
+    metrics: Dict[str, Any] = {
+        'ttds': [], 'undetected_ids': [], 'undetected_reps': [],
+        'true_positives': 0, 'false_positives': 0, 'total_flips': 0
+    }
+
+    for i, history in enumerate(sat_pop_data.faulty_matrix):
+        detected_at = next((idx for idx, rep in enumerate(history) if rep < threshold), None)
         if detected_at is not None:
-            ttds.append(detected_at)
-            true_positives += 1
+            metrics['ttds'].append(detected_at)
+            metrics['true_positives'] += 1
         else:
-            # Undetected faulty node
-            sid = faulty_ids_list[i] if faulty_ids_list is not None else i
-            undetected_ids.append(sid)
-            undetected_reps.append(history)
+            sid = faulty_ids_list[i] if faulty_ids_list[i] else i
+            metrics['undetected_ids'].append(sid)
+            metrics['undetected_reps'].append(history)
             if logger:
-                logger.warning("Faulty satellite %s was NOT detected \
-                               (final rep: %.4f, rep history: %s)",
-                               sid, history[-1], history)
+                logger.warning("Faulty satellite %s NOT detected (final rep: %.4f)",
+                               sid, history[-1])
 
-        # Calculate flips (stability)
-        diff = np.diff((history < detection_threshold).astype(int))
-        total_flips += np.sum(np.abs(diff))
+        metrics['total_flips'] += np.sum(np.abs(np.diff((history < threshold).astype(int))))
 
-    # Calculate False Positive Rate (FPR) among honest nodes
-    fpr_start_step = int(fpr_offset_percent * steps)
-    for history in honest_matrix:
-        # A false positive occurs if an honest node's reputation ever drops below the threshold
-        if any(rep < detection_threshold for rep in history[fpr_start_step:]):
-            false_positives += 1
+    if sat_pop_data.steps is None:
+        logger.warning("Simulation steps not provided. Setting to zero.")
+        sat_pop_data.steps = 0
 
-        # Calculate flips for honest nodes too
-        diff = np.diff((history[fpr_start_step:] < detection_threshold).astype(int))
-        total_flips += np.sum(np.abs(diff))
+    fpr_start = int(fpr_offset * sat_pop_data.steps)
+    for history in sat_pop_data.honest_matrix:
+        if any(rep < threshold for rep in history[fpr_start:]):
+            metrics['false_positives'] += 1
 
-    # Normalise Metrics
-    num_honest = len(honest_matrix)
-    num_faulty = len(faulty_matrix)
+        metrics['total_flips'] += np.sum(np.abs(np.diff((history[fpr_start:] \
+                                                         < threshold).astype(int))))
 
-    def get_nis_stats(nis_list):
-        arr = np.array(nis_list) if nis_list else np.array([])
-        if len(arr) == 0:
-            return {"min": 0, "q1": 0, "median": 0, "q3": 0, "max": 0}
-        return {
-            "min": float(np.min(arr)),
-            "q1": float(np.percentile(arr, 25)),
-            "median": float(np.median(arr)),
-            "q3": float(np.percentile(arr, 75)),
-            "max": float(np.max(arr))
-        }
+    return metrics
 
-    honest_nis_stats = get_nis_stats(honest_nis)
-    faulty_nis_stats = get_nis_stats(faulty_nis)
+def _get_nis_stats(nis_list: Optional[List[float]]) -> Dict[str, float]:
+    """
+    Gets summary statistics for a list of NIS values, including min,
+    25th percentile (q1), median, 75th percentile (q3), and max.
 
-    fpr = (false_positives / num_honest) * 100 if num_honest > 0 else 0
-    recall = (true_positives / num_faulty) * 100 if num_faulty > 0 else 0
-    fnr = 100 - recall
-    precision = (true_positives / (true_positives + false_positives)) * 100 \
-                if (true_positives + false_positives) > 0 else 0
+    Args:
+    - nis_list: A list of NIS values to summarize.
 
-    avg_ttd = np.mean(ttds) if ttds else None
-    worst_ttd = np.max(ttds) if ttds else None
-
-    mean_honest = np.mean(final_honest_reps) if num_honest > 0 else 0
-    mean_faulty = np.mean(final_faulty_reps) if num_faulty > 0 else 0
-
+    Returns:
+    - A dictionary containing the min, q1, median, q3, and max of the NIS values.
+      If the list is empty, all values will be returned as 0.
+    """
+    arr = np.array(nis_list) if nis_list else np.array([])
+    if len(arr) == 0:
+        return {"min": 0, "q1": 0, "median": 0, "q3": 0, "max": 0}
     return {
-        "avg_ttd": avg_ttd,
-        "worst_ttd": worst_ttd,
-        "fpr": fpr,
-        "recall": recall,
-        "precision": precision,
-        "fnr": fnr,
-        "final_honest_rep": mean_honest,
-        "final_faulty_rep": mean_faulty,
-        "honest_spread": np.std(final_honest_reps) if num_honest > 0 else 0,
-        "detection_margin": mean_honest - mean_faulty,
-        "flips": total_flips,
-        "honest_matrix": honest_matrix,
-        "faulty_matrix": faulty_matrix,
-        "honest_nis_stats": honest_nis_stats,
-        "faulty_nis_stats": faulty_nis_stats,
-        "undetected_faulty_ids": undetected_ids,
-        "undetected_faulty_reps": np.array(undetected_reps),
-        "faulty_ids": faulty_ids_list,
-        "honest_ids": honest_ids
+        "min": float(np.min(arr)), "q1": float(np.percentile(arr, 25)),
+        "median": float(np.median(arr)), "q3": float(np.percentile(arr, 75)),
+        "max": float(np.max(arr))
     }
 
 def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
-                        detection_threshold: float = 0.5,
-                        fpr_offset_percent: float = 0.2) -> List[Optional[Dict[str, Any]]]:
+                         logger: logging.Logger,
+                         detection_threshold: float = 0.5,
+                         fpr_offset_percent: float = 0.2
+                         ) -> List[Optional[Dict[str, Any]]]:
     """
     Recalculate KPIs for a set of Monte Carlo results using new detection parameters.
 
     Args:
         all_results: A list of KPI dictionaries (one per MC run).
+        logger: A logger for logging warnings about satellite data.
         detection_threshold: The new reputation threshold to apply.
         fpr_offset_percent: The new initialization offset percentage to apply.
 
@@ -223,15 +300,20 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
             new_results.append(None)
             continue
 
-        # We reuse the matrices and NIS data already stored in the previous results
-        new_kpis = calculate_kpis(
+        sat_pop_data = SatellitePopulationData(
             honest_matrix=res["honest_matrix"],
             faulty_matrix=res["faulty_matrix"],
             faulty_ids=res.get("faulty_ids"),
             honest_nis=res.get("honest_nis"),
-            faulty_nis=res.get("faulty_nis"),
+            faulty_nis=res.get("faulty_nis")
+        )
+
+        # We reuse the matrices and NIS data already stored in the previous results
+        new_kpis = calculate_kpis(
+            sat_pop_data=sat_pop_data,
             detection_threshold=detection_threshold,
-            fpr_offset_percent=fpr_offset_percent
+            fpr_offset_percent=fpr_offset_percent,
+            logger=logger
         )
         new_results.append(new_kpis)
     return new_results
@@ -252,14 +334,13 @@ def run_single_ekf(run_idx: int) -> bool:
 
     config = DEFAULT_CONFIG
     config.seed += run_idx
+    toggle = DemoToggles(save_sim_results=False, run_consensus=False)
+    fpath = DemoFilePaths(log_file=log_file, ekf_results_path=ekf_path)
 
     logger.info("Starting EKF Generation for Run %d with Seed %d", run_idx, config.seed)
     try:
         loop.run_until_complete(
-            run_consensus_demo(config, save_ekf_results=True, load_ekf_results=False,
-                               ekf_results_path=ekf_path, clear_logs=True,
-                               log_file=log_file, save_sim_results=False,
-                               run_consensus=False)
+            run_consensus_demo(config, toggle, fpath)
         )
         return True
     except Exception as e: # pylint: disable=broad-exception-caught
@@ -272,10 +353,19 @@ def run_single_ekf(run_idx: int) -> bool:
         loop.close()
 
 def run_single_consensus(run_idx: int,
-                          threshold: float = 0.5,
-                          fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
+                         threshold: float = 0.5,
+                         fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
     """
     Run the Consensus phase for a single Monte Carlo iteration.
+
+    Args:
+    - run_idx: The index of the run in a series of Monte Carlo runs.
+    - threshold: The reputation threshold below which a satellite is considered
+                 detected as faulty.
+    - fpr_offset: The percentage of initial steps to ignore when calculating false positives.
+
+    Returns:
+    - KPIs for the conensus run, if successful. Else None.
     """
     ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
     log_file = os.path.join(SIM_DIR, f"sim_run_{run_idx}.log")
@@ -294,37 +384,38 @@ def run_single_consensus(run_idx: int,
     logger.info("Starting Consensus Simulation for Run %d", run_idx)
 
     try:
+        # Inline the toggle and fpath configurations to save local variables
         dag, rep_history, _, faulty_ids = loop.run_until_complete(
-            run_consensus_demo(config, save_ekf_results=False, load_ekf_results=True,
-                               ekf_results_path=ekf_path, clear_logs=True,
-                               log_file=log_file, save_sim_results=False,
-                               run_consensus=True)
+            run_consensus_demo(
+                config,
+                DemoToggles(save_ekf_results=False,
+                            load_ekf_results=True,
+                            save_sim_results=False),
+                DemoFilePaths(ekf_results_path=ekf_path,
+                              log_file=log_file)
+            )
         )
 
         if rep_history is None or dag is None:
             return None
 
-        # Extract NIS data from DAG
-        honest_nis = []
-        faulty_nis = []
-        for tx, tx_data in extract_nis_transactions(dag):
-            sid = tx_data.get("observer")
-            nis = getattr(tx.metadata, "nis")
+        # Use the unified extraction function from plotting.py
+        honest_nis, faulty_nis = extract_nis_data(dag, faulty_ids, start_index=0)
 
-            if sid is None or nis is None:
-                continue
+        # Inline sat_pop_data directly into the calculate_kpis return statement
+        return calculate_kpis(
+            sat_pop_data=SatellitePopulationData(
+                rep_history=rep_history,
+                faulty_ids=faulty_ids,
+                steps=config.steps,
+                honest_nis=honest_nis,
+                faulty_nis=faulty_nis
+            ),
+            detection_threshold=threshold,
+            fpr_offset_percent=fpr_offset,
+            logger=logger
+        )
 
-            if faulty_ids is not None and int(sid) in faulty_ids:
-                faulty_nis.append(float(nis))
-            else:
-                honest_nis.append(float(nis))
-
-
-        kpis = calculate_kpis(rep_history, faulty_ids, config.steps,
-                              honest_nis=honest_nis, faulty_nis=faulty_nis,
-                              detection_threshold=threshold, fpr_offset_percent=fpr_offset,
-                              logger=logger)
-        return kpis
     except Exception as e: # pylint: disable=broad-exception-caught
         # We catch everything here so one failed MC iteration doesn't
         # crash the whole pool
@@ -334,196 +425,6 @@ def run_single_consensus(run_idx: int,
     finally:
         loop.close()
 
-def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
-                                threshold: float = 0.5,
-                                start_step: int = 0) -> None:
-    """
-    Plot the full reputation history of every undetected faulty satellite across all runs,
-    colour-coded by satellite ID.
-
-    Args:
-        all_kpis: List of KPI dictionaries from MC runs.
-        threshold: The detection threshold used.
-        start_step: The step to start plotting from.
-    """
-    plt.figure(figsize=(12, 7))
-
-    # Identify all unique IDs that went undetected
-    unique_ids = sorted(list(set(
-        sid for kpi in all_kpis
-        for sid in kpi.get("undetected_faulty_ids", [])
-    )))
-
-    if not unique_ids:
-        plt.text(0.5, 0.5, "No undetected faulty satellites found",
-                 ha="center", va="center", transform=plt.gca().transAxes)
-        total_lines = 0
-    else:
-        # Use a colourmap to assign distinct colours to each ID
-        cmap = plt.get_cmap("tab20")
-        id_to_color = {sid: cmap(i % 20) for i, sid in enumerate(unique_ids)}
-
-        plotted_legend_ids = set()
-        total_lines = 0
-
-        for kpi in all_kpis:
-            ids = kpi.get("undetected_faulty_ids", [])
-            reps = kpi.get("undetected_faulty_reps", [])
-
-            for sid, history in zip(ids, reps):
-                color = id_to_color[sid]
-                # Only add to legend once per unique satellite ID
-                label = f"Sat {sid}" if sid not in plotted_legend_ids else None
-
-                # Plot from start_step onwards
-                steps = np.arange(start_step, len(history))
-                plt.plot(steps, history[start_step:], color=color,
-                alpha=0.6, linewidth=1.5, label=label)
-                plotted_legend_ids.add(sid)
-                total_lines += 1
-
-        plt.axhline(threshold, color="black", linestyle="--", label=f"Threshold ({threshold})")
-
-        # Adjust legend position and columns based on the number of items
-        num_items = len(plotted_legend_ids)
-        if num_items > 15:
-            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small', ncol=2)
-            plt.tight_layout(rect=(0, 0, 0.85, 1))
-        elif num_items > 0:
-            plt.legend(loc='best', fontsize='small')
-
-    plt.xlabel("Step")
-    plt.ylabel("Reputation")
-    plt.grid(True, alpha=0.3)
-    plt.ylim(-0.05, 1.05)
-    plt.savefig(os.path.join(DATA_DIR, "mc_undetected_reps.png"))
-    plt.show()
-
-def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]],
-                    start_step: int = 0) -> None:
-    """
-    Aggregate results from all Monte Carlo runs and generate summary plots.
-
-    Generates summary plots for reputation spread, KPI distributions, and 
-    undetected faulty nodes.
-
-    Args:
-        all_kpis_raw: A list of KPI dictionaries from multiple simulation runs.
-        start_step: The step to start plotting from.
-    """
-    # Filter out failed runs
-    all_kpis: List[Dict[str, Any]] = [k for k in all_kpis_raw if k is not None]
-    if not all_kpis:
-        print("No successful runs to plot.")
-        return
-
-    # Plot undetected histories first (new addition)
-    # We try to infer the threshold from the first result if possible,
-    # though it's typically passed via args in main.
-    plot_undetected_reputations(all_kpis, start_step=start_step)
-
-    # 1. Aggregate Reputation Histories
-    honest_means_list: List[np.ndarray] = []
-    faulty_means_list: List[np.ndarray] = []
-
-    for kpi in all_kpis:
-        honest_means_list.append(np.mean(kpi["honest_matrix"], axis=0))
-        faulty_means_list.append(np.mean(kpi["faulty_matrix"], axis=0))
-
-    all_honest_means = np.array(honest_means_list)
-    all_faulty_means = np.array(faulty_means_list)
-
-    # Slice data based on start_step
-    all_honest_means = all_honest_means[:, start_step:]
-    all_faulty_means = all_faulty_means[:, start_step:]
-    steps = np.arange(start_step, start_step + all_honest_means.shape[1])
-
-    plt.figure(figsize=(10, 6))
-
-    # Honest
-    h_mean = np.mean(all_honest_means, axis=0)
-    h_std = np.std(all_honest_means, axis=0)
-    plt.plot(steps, h_mean, color="green", label="Honest (MC Mean)")
-    plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color="green",
-                     alpha=0.2, label="Honest Pop. 1 Std. Dev. Spread")
-
-    # Faulty
-    f_mean = np.mean(all_faulty_means, axis=0)
-    f_std = np.std(all_faulty_means, axis=0)
-    plt.plot(steps, f_mean, color="red", label="Faulty (MC Mean)")
-    plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color="red",
-                     alpha=0.2, label="Faulty Pop. 1 Std. Dev. Spread")
-
-    plt.axhline(0.5, color="gray", linestyle="--")
-    plt.xlabel("Step")
-    plt.ylabel("Reputation")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.savefig(os.path.join(DATA_DIR, "mc_reputation.png"))
-    plt.show()
-
-    # 2. Plot KPI Distributions
-    _, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-    # TTD Histogram
-    ttds = [float(k.get("avg_ttd", 0)) for k in all_kpis if k.get("avg_ttd") is not None]
-    if ttds:
-        axes[0].hist(ttds, bins=10, color='skyblue', edgecolor='black')
-        axes[0].set_title("Time to Detection (Steps)")
-        axes[0].axvline(float(np.mean(ttds)), color='red', linestyle='dashed',
-                        label=f'Mean: {np.mean(ttds):.1f}')
-        axes[0].legend()
-
-    # FPR Histogram
-    fprs = [float(k.get("fpr", 0)) for k in all_kpis]
-    axes[1].hist(fprs, bins=10, color='salmon', edgecolor='black')
-    axes[1].set_title("False Positive Rate (%)")
-    axes[1].axvline(float(np.mean(fprs)), color='red', linestyle='dashed',
-                    label=f'Mean: {np.mean(fprs):.1f}%')
-    axes[1].legend()
-
-    # Recall/Precision Scatter
-    recalls = [float(k.get("recall", 0)) for k in all_kpis]
-    precisions = [float(k.get("precision", 0)) for k in all_kpis]
-    axes[2].scatter(recalls, precisions, color='purple', alpha=0.5)
-    axes[2].set_xlabel("Recall (%)")
-    axes[2].set_ylabel("Precision (%)")
-    axes[2].set_title("Detection Reliability")
-    axes[2].set_xlim(-5, 105)
-    axes[2].set_ylim(-5, 105)
-    axes[2].grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(DATA_DIR, "mc_kpis.png"))
-    plt.show()
-
-    # Print Summary
-    print("--- Monte Carlo Summary ---")
-    print(f"Total Runs: {len(all_kpis)}")
-    print(f"Mean Recall: {np.mean(recalls):.2f}%")
-    print(f"Mean Precision: {np.mean(precisions):.2f}%")
-    print(f"Mean FPR: {np.mean(fprs):.2f}%")
-
-    if ttds:
-        print(f"Mean TTD: {np.mean(ttds):.2f} steps")
-        worst_ttds = [float(k.get('worst_ttd', 0)) for k in \
-                      all_kpis if k.get('worst_ttd') is not None]
-        if worst_ttds:
-            print(f"Worst-Case TTD: {np.max(worst_ttds):.2f} steps")
-
-    print(f"Avg Detection Margin: {np.mean([float(k.get('detection_margin', 0)) \
-                                            for k in all_kpis]):.4f}")
-    print(f"Avg Honest Spread: {np.mean([float(k.get('honest_spread', 0)) \
-                                         for k in all_kpis]):.4f}")
-    print(f"Avg Stability (Total Flips): {np.mean([float(k.get('flips', 0)) \
-                                                   for k in all_kpis]):.2f}")
-    print(f"Avg Final Honest Rep: {np.mean([float(k.get('final_honest_rep', 0)) \
-                                            for k in all_kpis]):.4f}")
-    print(f"Avg Final Faulty Rep: {np.mean([float(k.get('final_faulty_rep', 0)) \
-                                            for k in all_kpis]):.4f}")
-
-    # 4. NIS Median Distribution
-    plot_mc_nis_boxplot(all_kpis)
 
 if __name__ == "__main__":
     # e.g. python mc_demo.py --recalculate --threshold 0.3 --fpr-offset 0.1
@@ -563,7 +464,9 @@ if __name__ == "__main__":
             if NEEDS_RECALCULATE:
                 print(f"Calculating KPIs with threshold={args.threshold}, \
                       fpr_offset={args.fpr_offset}")
-                RESULTS = recalculate_all_kpis(RESULTS, detection_threshold=args.threshold,
+                RESULTS = recalculate_all_kpis(RESULTS,
+                                               logger=get_logger(),
+                                               detection_threshold=args.threshold,
                                                fpr_offset_percent=args.fpr_offset)
                 # Save the updated KPIs back to the file
                 print(f"Updating saved results at {MC_RESULTS_PATH}")

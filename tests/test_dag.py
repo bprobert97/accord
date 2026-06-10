@@ -5,7 +5,8 @@ import asyncio
 from unittest.mock import MagicMock, AsyncMock
 import pytest
 from src.dag import DAG
-from src.transaction import Transaction, TransactionMetadata
+from src.transaction import Transaction, TransactionMetadata, \
+    TransactionAddresses
 
 @pytest.fixture
 def mock_consensus_mech():
@@ -41,7 +42,11 @@ def test_add_tx(dag):
     Test adding a transaction to the DAG.
     """
     initial_len = len(dag.ledger)
-    new_tx = Transaction(1, 2, "key", "data", TransactionMetadata())
+    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    new_tx = Transaction(addresses=addresses,
+                         sender_private_key="key",
+                         tx_data="data",
+                         metadata=TransactionMetadata())
 
     dag.add_tx(new_tx)
 
@@ -62,7 +67,12 @@ def test_get_parents(dag):
 
     # Add more transactions and check again
     for i in range(5):
-        dag.add_tx(Transaction(i, i+1, "k", f"d{i}", TransactionMetadata()))
+        addresses = TransactionAddresses(sender_address=i,
+                                         recipient_address=i+1)
+        dag.add_tx(Transaction(addresses=addresses,
+                               sender_private_key="k",
+                               tx_data=f"d{i}",
+                               metadata=TransactionMetadata()))
 
     new_parents = dag.get_parents()
     assert len(new_parents) == 2
@@ -78,9 +88,21 @@ def test_has_bft_quorum(dag):
 
     # Add 3 real transactions. Not enough for f=1 (needs 4).
     for i in range(3):
-        dag.add_tx(Transaction(i, i+1, "k", f"d{i}", TransactionMetadata()))
+        addresses = TransactionAddresses(sender_address=i,
+                                         recipient_address=i+1)
+
+        dag.add_tx(Transaction(addresses=addresses,
+                               sender_private_key="k",
+                               tx_data=f"d{i}",
+                               metadata=TransactionMetadata()))
     assert not dag.has_bft_quorum()
 
     # Add the 4th real transaction. Now we have quorum.
-    dag.add_tx(Transaction(4, 5, "k", "d4", TransactionMetadata()))
+    addresses = TransactionAddresses(sender_address=4,
+                                     recipient_address=5)
+
+    dag.add_tx(Transaction(addresses=addresses,
+                           sender_private_key="k",
+                           tx_data="d4",
+                           metadata=TransactionMetadata()))
     assert dag.has_bft_quorum()

@@ -157,12 +157,9 @@ class ConsensusMechanism():
 
         return abs(dot_prod) / math.sqrt(v1_sq_norm * v2_sq_norm)
 
-    def calculate_dof_score(self, dof: int,
-                            current_r_vector: list[float],
-                            current_v_vector: list[float],
-                            previous_r_vector: Optional[list[float]] = None,
-                            previous_v_vector: Optional[list[float]] = None,
-                            delta_t: Optional[float] = None,
+    def calculate_dof_score(self,
+                            obs_record: ObservationRecord,
+                            previous_data: Optional[dict] = None,
                             decay_rate: float = 0.05,
                             velocity_weight: float = 0.5) -> float:
         """
@@ -171,15 +168,9 @@ class ConsensusMechanism():
         Returns a value in [0,1].
 
         Args:
-        - dof: Degrees of freedom of the measurement.
-        - current_r_vector: The current position measurement vector (e.g., LOS unit vector).
-        - current_v_vector: The current velocity measurement vector (e.g., LOS unit vector).
-        - previous_r_vector: The previous position measurement vector for the same satellite (
-          if available).
-        - previous_v_vector: The previous velocity measurement vector for the same satellite (
-          if available).
-        - delta_t: Time difference between the current and previous measurement
-          (if available).
+        - obs_record: The observation record containing the DOF information.
+        - previous_data: A dictionary containing the previous r_vector, v_vector, and
+                         timestamp for the same observer-target pair.
         - decay_rate: Rate at which the DOF score decays if the measurement
           direction changes significantly.
         - velocity_weight: Weighting factor for the velocity vector in the blended
@@ -192,14 +183,21 @@ class ConsensusMechanism():
 
         # Calculate base score of (k-1)/2
         # dof = 1 returns 0, dof = 2 returns 0.5 and dof = 3 returns 1.
-        base_score = (dof - 1) / 2
+        base_score = (obs_record.dof - 1) / 2
+
+        if previous_data is None:
+            return base_score
+
+        previous_r_vector = previous_data.get('r_vector')
+        previous_v_vector = previous_data.get('v_vector')
+        delta_t = obs_record.time - previous_data['time'] if 'time' in previous_data else None
 
         if previous_r_vector is None or previous_v_vector is None or delta_t is None:
             return base_score
 
         # Calculate persistence of excitation term
-        r_dot = self.calc_normalised_dot(current_r_vector, previous_r_vector)
-        v_dot = self.calc_normalised_dot(current_v_vector, previous_v_vector)
+        r_dot = self.calc_normalised_dot(obs_record.r_vector, previous_r_vector)
+        v_dot = self.calc_normalised_dot(obs_record.v_vector, previous_v_vector)
 
         # If velocity_weight is 0.5, a change in either position or velocity
         # lowers the blended_dot, triggering a higher reward.
@@ -246,134 +244,202 @@ class ConsensusMechanism():
                                             mean_nis_per_satellite: dict[int, float],
                                             ) -> tuple[bool, Optional[float]]:
         """
-        Returns a bool of if consensus has been reached, and the new EMA NIS for the satellite.
+        Returns a bool of if consensus has been reached, and the new EMA NIS for
+        the satellite.
         NOTE: Assume one witnessed satellite per transaction
+
+        Args:
+        - dag: The DAG instance to access current transactions and history.
+        - sat_node: The SatelliteNode that submitted the transaction.
+        - transaction: The Transaction object containing the observation data.
+        - mean_nis_per_satellite: A dictionary mapping satellite ID to its historical
+        EMA NIS.
+
+        Returns:
+        - A tuple containing:
+            - A boolean indicating whether consensus was reached for this transaction.
+            - The new EMA NIS value for the observing satellite
+              (or None if consensus not reached).
         """
         new_ema_nis: Optional[float] = None
-        # 1) Check for valid data
-        # 1a) If the transaction is empty, penalise and reject
-        if not transaction.tx_data:
-            # Reduce node reputation for providing no or invalid data
-            sat_node.reputation, sat_node.exp_pos, \
-                sat_node.performance_ema = sat_node.rep_manager.apply_negative(
-                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
-                )
+
+        if not self._is_transaction_valid(transaction, sat_node):
             return False, new_ema_nis
 
         transaction_data: dict = json.loads(transaction.tx_data)
         obs_record = ObservationRecord(**transaction_data)
         transaction.metadata.observer_id = obs_record.observer
 
-        # 1b) Check if the DOF is impossible (i.e. > 6 or < 1)
-        if obs_record.dof > 6 or obs_record.dof < 1:
-            logger.info("Invalid DOF of %d in transaction. Penalising reputation.",
-                        obs_record.dof)
-
-            # Instantly apply a negative penalty to the satellite
-            sat_node.reputation, sat_node.exp_pos, \
-                sat_node.performance_ema = sat_node.rep_manager.apply_negative(
-                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
-            )
-
-            # Reject the transaction before it contaminates the DAG
-            transaction.metadata.consensus_reached = False
-            transaction.metadata.is_rejected = True
+        if not self._is_dof_valid(obs_record, transaction, sat_node):
             return False, new_ema_nis
 
-
-        # 2) Add transaction to the DAG and check for BFT quorum
         dag.add_tx(transaction)
-
         if not dag.has_bft_quorum():
-            logger.info("Not enough transactions for BFT quorum.")
-            logger.info("Satellite reputation unchanged at %.2f", sat_node.reputation)
+            logger.info("Not enough transactions for BFT quorum. Satellite \
+                        reputation unchanged at %.2f", sat_node.reputation)
             return False, new_ema_nis
 
-        # 3) Calculate various PoISE scores
-        # 3a) Calculate correctness score
-        correctness_score, new_ema_nis = self.get_correctness_score(obs_record,
-                                                                    mean_nis_per_satellite)
+        consensus_score, correctness_score, new_ema_nis = self._calculate_poise_scores(
+            dag, obs_record, sat_node, mean_nis_per_satellite
+        )
 
-        # 3b) Calculate DOF-based reward score, using the current and previous measurement vectors
-        observer_id = obs_record.observer
-        target_id = obs_record.target
-        current_r_vector = obs_record.r_vector
-        current_v_vector = obs_record.v_vector
-        current_time = obs_record.time
+        self._update_transaction_metadata(transaction, obs_record, consensus_score,
+                                          correctness_score)
+        self._update_satellite_reputation(sat_node, obs_record)
 
-        previous_r_vector = None
-        previous_v_vector = None
-        delta_t = None
-        cache_key = (observer_id, target_id)
-
-        if cache_key in dag.vector_history_cache:
-            prev_data = dag.vector_history_cache[cache_key]
-            previous_r_vector = prev_data['r_vector']
-            previous_v_vector = prev_data['v_vector']
-            delta_t = current_time - prev_data['time']
-
-        dof_score = self.calculate_dof_score(obs_record.dof,
-                                             current_r_vector, current_v_vector,
-                                             previous_r_vector, previous_v_vector,
-                                             delta_t,)
-
-        # Update the history cache on the DAG for this observer-target pair
-        if current_r_vector is not None and current_v_vector is not None:
-            dag.vector_history_cache[cache_key] = {
-                'r_vector': current_r_vector,
-                'v_vector': current_v_vector,
-                'time': current_time
-            }
-
-        # 3c) Calculate consensus score
-        consensus_score = self.calculate_consensus_score(correctness_score,
-                                                         dof_score,
-                                                         sat_node.reputation)
-
-        # 4) Store scores in metadata for later analysis
-        transaction.metadata.consensus_score = consensus_score
-        transaction.metadata.correctness_score = correctness_score
-        transaction.metadata.nis = obs_record.nis
-        transaction.metadata.dof = obs_record.dof
-
-        logger.info("NIS=%.3f, DOF=%d, correctness=%.3f, consensus_score=%.3f, \
-                    reputation=%.3f",
-        obs_record.nis, obs_record.dof,
-        correctness_score, consensus_score, sat_node.reputation)
-
-        # 5) Update reputation based on statistical confidence of NIS
-        lower_bound = chi2.ppf(0.025, obs_record.dof)
-        upper_bound = chi2.ppf(0.975, obs_record.dof)
-        is_within_bounds = lower_bound <= obs_record.nis <= upper_bound
-
-        sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
-        logger.info("Satellite reputation decayed to %.3f.", sat_node.reputation)
-
-        if is_within_bounds:
-            # If NIS is within 95% confidence, reputation grows slowly
-            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
-                sat_node.rep_manager.apply_positive(
-                    sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
-            )
-            logger.info("NIS within bounds. Reputation slowly increased to %.2f",
-                        sat_node.reputation)
-        else:
-            # If NIS is outside 95% confidence, penalise reputation
-            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
-                sat_node.rep_manager.apply_negative(
-                    sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema
-            )
-            logger.info("NIS outside bounds. Reputation decreased to %.2f", sat_node.reputation)
-
-        # 6) Check if consensus is reached for transaction confirmation
         if consensus_score >= self.consensus_threshold:
             transaction.metadata.consensus_reached = True
             transaction.metadata.is_confirmed = True
             logger.info("Successful consensus score: %.2f", consensus_score)
             return True, new_ema_nis
 
-        logger.info("Consensus threshold of %.2f does not met threshold.",
-                    consensus_score)
+        logger.info("Consensus score of %.2f does not meet threshold.", consensus_score)
         transaction.metadata.consensus_reached = False
         transaction.metadata.is_rejected = True
         return False, new_ema_nis
+
+    def _is_transaction_valid(self, transaction: Transaction, sat_node: SatelliteNode) -> bool:
+        """
+        Checks if the transaction contains valid data. If not, applies
+        a penalty to the satellite's reputation.
+
+        Args:
+        - transaction: The Transaction object to validate.
+        - sat_node: The SatelliteNode that submitted the transaction, used for applying penalties.
+
+        Returns:
+        - A boolean indicating whether the transaction is valid.
+        """
+        if not transaction.tx_data:
+            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                sat_node.rep_manager.apply_negative(sat_node.reputation,
+                                                    sat_node.exp_pos,
+                                                    sat_node.performance_ema)
+            return False
+        return True
+
+    def _is_dof_valid(self, obs_record: ObservationRecord,
+                      transaction: Transaction, sat_node: SatelliteNode) -> bool:
+        """
+        Checks if the degrees of freedom (DOF) of the observation are within expected bounds.
+        If the DOF is invalid, applies a penalty to the satellite's reputation.
+
+        Args:
+        - obs_record: The ObservationRecord extracted from the transaction data.
+        - transaction: The Transaction object being evaluated, used for updating metadata.
+        - sat_node: The SatelliteNode that submitted the transaction, used for applying penalties.
+
+        Returns:
+        - A boolean indicating whether the DOF is valid.
+        """
+        if obs_record.dof > 6 or obs_record.dof < 1:
+            logger.info("Invalid DOF of %d in transaction. Penalising reputation.", obs_record.dof)
+            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                sat_node.rep_manager.apply_negative(sat_node.reputation,
+                                                    sat_node.exp_pos,
+                                                    sat_node.performance_ema)
+            transaction.metadata.consensus_reached = False
+            transaction.metadata.is_rejected = True
+            return False
+        return True
+
+    def _calculate_poise_scores(self,
+                                dag: DAG,
+                                obs_record: ObservationRecord,
+                                sat_node: SatelliteNode,
+                                mean_nis_per_satellite: dict):
+        """
+        Calculates the correctness score, DOF score, and overall consensus score for a
+        given observation record.
+        Also updates the DAG's vector history cache for DOF scoring.
+
+        Args:
+        - dag: The DAG instance to access current transactions and history.
+        - obs_record: The ObservationRecord extracted from the transaction data.
+        - sat_node: The SatelliteNode that submitted the transaction, used for accessing reputation.
+        - mean_nis_per_satellite: A dictionary mapping satellite ID to its historical EMA NIS.
+
+        Returns:
+        - A tuple containing:
+            - The overall consensus score for the transaction.
+            - The correctness score based on NIS and historical performance.
+            - The new EMA NIS value for the observing satellite.
+        """
+        correctness_score, new_ema_nis = self.get_correctness_score(obs_record,
+        mean_nis_per_satellite)
+
+        cache_key = (obs_record.observer, obs_record.target)
+        prev_data = dag.vector_history_cache.get(cache_key, {})
+
+        dof_score = self.calculate_dof_score(
+            obs_record,
+            prev_data
+        )
+
+        if obs_record.r_vector is not None and obs_record.v_vector is not None:
+            dag.vector_history_cache[cache_key] = {
+                'r_vector': obs_record.r_vector,
+                'v_vector': obs_record.v_vector,
+                'time': obs_record.time
+            }
+
+        consensus_score = self.calculate_consensus_score(correctness_score, dof_score,
+                                                         sat_node.reputation)
+        return consensus_score, correctness_score, new_ema_nis
+
+    def _update_transaction_metadata(self, transaction: Transaction, obs_record: ObservationRecord,
+                                     consensus_score: float, correctness_score: float) -> None:
+        """
+        Updates the transaction metadata with the calculated consensus score, correctness score,
+        and NIS value.
+        Args:
+        - transaction: The Transaction object to update.
+        - obs_record: The ObservationRecord containing the NIS and DOF values.
+        - consensus_score: The overall consensus score calculated for this transaction.
+        - correctness_score: The correctness score calculated based on NIS and historical
+        performance.
+
+        Returns:
+        None. Updates the transaction's metadata in place.
+        """
+        transaction.metadata.consensus_score = consensus_score
+        transaction.metadata.correctness_score = correctness_score
+        transaction.metadata.nis = obs_record.nis
+        transaction.metadata.dof = obs_record.dof
+
+    def _update_satellite_reputation(self, sat_node: SatelliteNode,
+                                     obs_record: ObservationRecord) -> None:
+        """
+        Updates the satellite's reputation based on the NIS value of the observation
+        and its historical performance.
+        The reputation is decayed towards neutral on every observation,
+        then adjusted up or down based on
+        whether the NIS is within the expected bounds of the chi-squared distribution.
+
+        Args:
+        - sat_node: The SatelliteNode whose reputation is to be updated.
+        - obs_record: The ObservationRecord containing the NIS and DOF values.
+
+        Returns:
+        None. Updates the satellite's reputation in place.
+        """
+        lower_bound = chi2.ppf(0.025, obs_record.dof)
+        upper_bound = chi2.ppf(0.975, obs_record.dof)
+
+        sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
+        logger.info("Satellite reputation decayed to %.3f.", sat_node.reputation)
+
+        if lower_bound <= obs_record.nis <= upper_bound:
+            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                sat_node.rep_manager.apply_positive(sat_node.reputation,
+                                                    sat_node.exp_pos,
+                                                    sat_node.performance_ema)
+            logger.info("NIS within bounds. Reputation slowly increased to %.2f",
+                        sat_node.reputation)
+        else:
+            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                sat_node.rep_manager.apply_negative(sat_node.reputation,
+                                                    sat_node.exp_pos,
+                                                    sat_node.performance_ema)
+            logger.info("NIS outside bounds. Reputation decreased to %.2f",
+                        sat_node.reputation)

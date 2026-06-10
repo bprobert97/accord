@@ -22,7 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import numpy as np
 from numpy.typing import NDArray
 from scipy.linalg import expm
@@ -38,6 +38,30 @@ logger = get_logger()
 STATE_DIM = 6 # State vector dimension (position and velocity)
 POS_VEL_DIM = 3 # Position or velocity dimension
 MAX_ISL_RANGE = 5000e3 # Maximum range for ISL observation records (5000km)
+
+@dataclass
+class FilterConfig:
+    """
+    Configuration parameters for the Extended Kalman Filter simulation.
+
+    Attributes:
+    - ISL_range_m: The range for inter-satellite link observations in metres.
+    - N: Number of satellites in the constellation.
+    - steps: Number of simulation steps.
+    - dt: Time step size in seconds.
+    - sig_r: Standard deviation of range measurement noise in meters.
+    - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
+    - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
+    - seed: Random seed for reproducibility.
+    """
+    ISL_range_m: float
+    N: int = 10
+    steps: int = 3000
+    dt: float = 60.0
+    sig_r: float = 10.0
+    sig_rdot: float = 0.02
+    q_acc_target: float = 1e-6
+    seed: int = 42
 
 # ----------------------- Result Types ---------------------
 @dataclass
@@ -65,6 +89,16 @@ class ObservationRecord:
     dof: int
     r_vector: List[float]
     v_vector: List[float]
+
+@dataclass
+class ObservationPair:
+    """
+    A dataclass to store information about an observation pair for processing.
+    """
+    i: int
+    j: int
+    yij: np.ndarray
+    diag_R_ij: np.ndarray
 
 # ----------------------- Dynamics ------------------------
 def two_body_f(x6: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -210,8 +244,9 @@ def hx_block(target: NDArray[np.float64], obs: NDArray[np.float64]) -> NDArray[n
     return np.array([r, rdot])
 
 def H_blocks_target_obs(target: NDArray[np.float64],
-                        obs: NDArray[np.float64]) -> tuple[NDArray[np.float64],
-                                                           NDArray[np.float64]]:
+                        obs: NDArray[np.float64]
+                        ) -> tuple[NDArray[np.float64],
+                                  NDArray[np.float64]]:
     """
     Calculates the Jacobian matrices for the measurement function with
     respect to target and observer states.
@@ -225,25 +260,21 @@ def H_blocks_target_obs(target: NDArray[np.float64],
         - Ht: 2x6 Jacobian matrix with respect to the target state.
         - Ho: 2x6 Jacobian matrix with respect to the observer state.
     """
-    pt, vt = target[:POS_VEL_DIM], target[POS_VEL_DIM:]
-    po, vo = obs[:POS_VEL_DIM], obs[POS_VEL_DIM:]
-    rho = pt - po
-    r = np.linalg.norm(rho)
-    r = np.maximum(r, 1e-8)
-    rhat = rho / r
-    I3 = np.eye(POS_VEL_DIM)
-    vrel = vt - vo
+    rho = target[:POS_VEL_DIM] - obs[:POS_VEL_DIM]
+    vrel = target[POS_VEL_DIM:] - obs[POS_VEL_DIM:]
 
+    r = np.maximum(np.linalg.norm(rho), 1e-8)
+    rhat = rho / r
+
+    # Compute Target Jacobian blocks
     H1_t = np.hstack([rhat, np.zeros(POS_VEL_DIM)])
-    d_rdot_d_pt = ((I3 - np.outer(rhat, rhat)) @ vrel) / r
+    # np.eye(POS_VEL_DIM) is identity matrix with POS_VEL_DIM rows
+    d_rdot_d_pt = ((np.eye(POS_VEL_DIM) - np.outer(rhat, rhat)) @ vrel) / r
     H2_t = np.hstack([d_rdot_d_pt, rhat])
     Ht = np.vstack([H1_t, H2_t])
 
-    H1_o = np.hstack([-rhat, np.zeros(POS_VEL_DIM)])
-    d_rdot_d_po = -((I3 - np.outer(rhat, rhat)) @ vrel) / r
-    H2_o = np.hstack([d_rdot_d_po, -rhat])
-    Ho = np.vstack([H1_o, H2_o])
-    return Ht, Ho
+    # Exploit relative navigation symmetry: Ho = -Ht
+    return Ht, -Ht
 
 def hx_joint(x: NDArray[np.float64], N: int) -> NDArray[np.float64]:
     """
@@ -334,23 +365,18 @@ def ekf_predict_joint(ekf: ExtendedKalmanFilter, dt: float, N: int,
     ekf.P = 0.5*(ekf.P + ekf.P.T)
 
 # ----------------------- Truth + measurement sim ----------
-def simulate_truth_and_meas(N: int, steps: int, dt: float,
-                            sig_r: float, sig_rdot: float,
-                            seed: int,
-                            walker_delta: bool = False) -> tuple[NDArray[np.float64],
-                                                NDArray[np.float64]]:
+def simulate_truth_and_meas(config: FilterConfig,
+                            walker_delta: bool = False
+                            ) -> tuple[NDArray[np.float64],
+                                       NDArray[np.float64]]:
     """
     Simulates the true satellite trajectories and generates noisy
     inter-satellite measurements.
 
     Args:
-    - N: The number of satellites.
-    - steps: The number of simulation steps.
-    - dt: The time step size.
-    - sig_r: Standard deviation of range measurement noise.
-    - sig_rdot: Standard deviation of range-rate measurement noise.
-    - seed: An integer seed for reproducibility.
-    - walker_delta: If True, generates a Walker Delta constellation instead of random orbits.
+    - config: FilterConfig object with simulation parameters.
+    - walker_delta: If True, generates a Walker Delta constellation
+      instead of random orbits.
 
     Returns:
     - A tuple containing:
@@ -358,52 +384,120 @@ def simulate_truth_and_meas(N: int, steps: int, dt: float,
         - z_hist: The history of noisy stacked measurements.
     """
 
-    x0 = []
-    if walker_delta:
-        logger.info("Generating walker_delta satellite constellation with %s satellites", N)
+    # 1. Generate Initial States
+    x0_stack = _generate_initial_states(config, walker_delta)
 
-        # Generate elements and convert to Cartesian
-        elements = generate_walker_delta_constellation(t=N, p=5, f=1, a=RE+500e3, i=np.radians(53))
-        # Sort for deterministic node ordering (e.g. by RAAN then True Anomaly)
-        elements.sort(key=lambda x: (x[3], x[5]))
-
-        for el in elements:
-            state = keplerian_to_cartesian(*el)
-            x0.append(state)
-        x0_stack = np.concatenate(x0)
-    else:
-        logger.info("Generating random satellite constellation with %s satellites", N)
-
-        for n in range(N):
-            a, e, i, raan, argp, ta = generate_random_keplerian_elements(seed=seed + n)
-            state = keplerian_to_cartesian(a, e, i, raan, argp, ta)
-            x0.append(state)
-        x0_stack = np.concatenate(x0)
-
+    # 2. Propagate Truth
     logger.info("Propagating truth states")
-    truth = propagate_truth_kepler(x0_stack, steps, dt)
+    truth = propagate_truth_kepler(x0_stack, config.steps, config.dt)
 
+    # 3. Generate Measurements
     logger.info("Generating noisy inter-satellite measurements")
-    M = N*(N-1)
-    z_hist = np.zeros((steps, 2*M))
-    for k in range(steps):
-        xk = truth[k]
-        z = []
-        for i in range(N):
-            xi = xk[6*i:6*i+6]
-            for j in range(N):
-                if i != j:
-                    z.append(hx_block(xk[6*j:6*j+6], xi))
-        z_true = np.concatenate(z)
-        noise = np.zeros(2*M)
-        noise[0::2] = np.random.normal(0,sig_r, M)
-        noise[1::2] = np.random.normal(0,sig_rdot, M)
-        z_hist[k] = z_true + noise
+    z_hist = _generate_noisy_measurements(config, truth)
+
     return truth, z_hist
 
+
+def _generate_initial_states(config: FilterConfig,
+                             walker_delta: bool) -> NDArray[np.float64]:
+    """
+    Helper to generate the initial Cartesian
+    state vectors for the constellation.
+
+    Args:
+    - config: FilterConfig object with simulation parameters.
+    - walker_delta: If True, generates a Walker Delta constellation
+      instead of random orbits.
+
+    Returns:
+    - An array of the initial cartesian state vectors.
+
+    """
+    x0 = []
+    if walker_delta:
+        logger.info("Generating walker_delta satellite constellation \
+                    with %s satellites", config.N)
+        # Generate elements and convert to Cartesian
+        elements = generate_walker_delta_constellation(
+            t=config.N, p=5, f=1, a=RE+500e3, i=np.radians(53)
+        )
+        # Sort for deterministic node ordering (e.g. by RAAN then True Anomaly)
+        elements.sort(key=lambda x: (x.raan, x.ta))
+
+        for el in elements:
+            x0.append(keplerian_to_cartesian(el))
+    else:
+        logger.info("Generating random satellite constellation with %s satellites",
+                    config.N)
+        for n in range(config.N):
+            kep_elements = generate_random_keplerian_elements(seed=config.seed + n)
+            x0.append(keplerian_to_cartesian(kep_elements))
+
+    return np.concatenate(x0)
+
+
+def _generate_noisy_measurements(config: FilterConfig,
+                                 truth: NDArray[np.float64]) -> NDArray[np.float64]:
+    """
+    Helper to compute noisy inter-satellite measurements from the truth states.
+
+    Args:
+    - config: FilterConfig object with simulation parameters.
+    - truth: The history of true stacked state vectors.
+
+    Returns:
+    - z_hist: The history of noisy stacked measurements.
+    """
+    # M represents the total number of unique directional inter-satellite links.
+    # Every satellite observes every other satellite exactly once per step.
+    M = config.N * (config.N - 1)
+
+    # Pre-allocate the history array.
+    # Size is 2 * M because each observation produces two values: Range and Range-Rate.
+    z_hist = np.zeros((config.steps, 2 * M))
+
+    for k in range(config.steps):
+        # Extract the stacked state vector for all satellites at the current time step 'k'
+        xk = truth[k]
+        z = []
+
+        # Iterate through every satellite acting as the observer
+        for i in range(config.N):
+            # Extract the 6-element state vector (3D position, 3D velocity) for observer 'i'
+            xi = xk[6*i:6*i+6]
+
+            # Iterate through every satellite acting as the target
+            for j in range(config.N):
+                # Satellites do not measure themselves
+                if i != j:
+                    # Calculate the theoretical, noise-free measurement (hx_block)
+                    # using the target's state and the observer's state
+                    z.append(hx_block(xk[6*j:6*j+6], xi))
+
+        # Flatten the list of arrays into a single continuous 1D array for this step
+        z_true = np.concatenate(z)
+
+        # Prepare an array to hold the generated Gaussian noise
+        noise = np.zeros(2 * M)
+
+        # Range measurements are at even indices (0, 2, 4...).
+        # Apply standard deviation config.sig_r
+        noise[0::2] = np.random.normal(0, config.sig_r, M)
+
+        # Range-rate (velocity) measurements are at odd indices (1, 3, 5...).
+        # Apply standard deviation config.sig_rdot
+        noise[1::2] = np.random.normal(0, config.sig_rdot, M)
+
+        # Corrupt the true measurements with the generated noise and store in history
+        z_hist[k] = z_true + noise
+
+    return z_hist
+
 # ----------------------- EKF ------------------------------
-def joseph_update(P: NDArray[np.float64], K: NDArray[np.float64],
-                  H: NDArray[np.float64], R: NDArray[np.float64]) -> NDArray[np.float64]:
+def joseph_update(P: NDArray[np.float64],
+                  K: NDArray[np.float64],
+                  H: NDArray[np.float64],
+                  R: NDArray[np.float64]) -> NDArray[np.float64]:
     """
     Numerically stable Joseph form of covariance update.
 
@@ -469,125 +563,108 @@ def _ekf_update(ekf: ExtendedKalmanFilter, z_k: np.ndarray, N: int) -> np.ndarra
     ekf.P = joseph_update(ekf.P, K, H, ekf.R)
     return y
 
-def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, N: int, k: int,
-             dt: float, sig_r: float, sig_rdot: float) -> List[ObservationRecord]:
+def _log_nis(y: np.ndarray, ekf: ExtendedKalmanFilter, k: int,
+             config: FilterConfig) -> List[ObservationRecord]:
     """
     Calculates and logs the Normalised Innovation Squared (NIS) for each observation.
 
     Args:
     - y: The innovation vector (measurement residual).
     - ekf: The EKF object.
-    - N: The number of satellites.
-    - k: The current simulation step.
-    - dt: The time step size.
-    - sig_r: Standard deviation of range measurement noise.
-    - sig_rdot: Standard deviation of range-rate measurement noise.
+    - k: The current time step.
+    - config: The filter configuration.
 
     Returns:
     - A list of ObservationRecord objects for the current step.
     """
     obs_records = []
-    diag_R_ij = np.diag([sig_r**2, sig_rdot**2])
     idx = 0
-    for i in range(N): # observer
-        xi_idx_slice = slice(STATE_DIM*i, STATE_DIM*i+STATE_DIM)
-        for j in range(N): # target
+
+    for i in range(config.N): # observer
+        for j in range(config.N): # target
             if i == j:
                 continue
 
-            xj_idx_slice = slice(STATE_DIM*j, STATE_DIM*j+STATE_DIM)
+            obs_pair = ObservationPair(
+                i=i,
+                j=j,
+                yij=y[idx:idx+2],
+                diag_R_ij=np.diag([config.sig_r**2,
+                                   config.sig_rdot**2])
+                )
 
-            # Get position vectors, rho
-            # The po and pt vectors are generated by the keplerian_to_cartesian function
-            # which is in an Earth-Centred Interial (ECI) frame.
-            po = ekf.x[STATE_DIM*i : STATE_DIM*i+3]
-            pt = ekf.x[STATE_DIM*j : STATE_DIM*j+3]
+            record = _process_observation_pair(obs_pair, ekf, k, config)
 
-            # rho is a relative position vector
-            # No rotation is applied so this is still in the ECI frame
-            rho = pt - po
+            if record is not None:
+                obs_records.append(record)
 
-            # Skip records for satellites further than 5000km apart
-            r = np.linalg.norm(rho)
-            if r > MAX_ISL_RANGE:
-                # Advance index by 2 as every pair is range and range rate
-                idx += 2
-                continue
-
-            # Get velocity vectors
-            vo = ekf.x[STATE_DIM*i+3 : STATE_DIM*i+6]
-            vt = ekf.x[STATE_DIM*j+3 : STATE_DIM*j+6]
-
-            # vrel is a relative velocity vector
-            vrel = vt - vo
-
-            yij = y[idx:idx+2]
-
-            # Recalculate Ht and Ho for the current pair, this is necessary.
-            # These are small 2x6 matrices.
-            Ht, Ho = H_blocks_target_obs(ekf.x[xj_idx_slice], ekf.x[xi_idx_slice])
-
-            # Extract relevant blocks from ekf.P
-            # These are 6x6 matrices
-            P_oo = ekf.P[xi_idx_slice, xi_idx_slice]
-            P_ot = ekf.P[xi_idx_slice, xj_idx_slice]
-            P_to = ekf.P[xj_idx_slice, xi_idx_slice]
-            P_tt = ekf.P[xj_idx_slice, xj_idx_slice]
-
-            # Calculate H_ij @ ekf.P @ H_ij.T more efficiently
-            # This avoids creating the full H_ij (2 x dim_x) matrix repeatedly
-            innovation_covariance_contribution = (
-                Ho @ P_oo @ Ho.T +
-                Ho @ P_ot @ Ht.T +
-                Ht @ P_to @ Ho.T +
-                Ht @ P_tt @ Ht.T
-            )
-
-            S_ij = innovation_covariance_contribution + diag_R_ij
-            S_ij_inv = np.linalg.inv(S_ij) # Changed from pinv to inv
-            nis = float(yij.T @ S_ij_inv @ yij)
-
-            # Add unit LOS vector. Avoid division by zero.
-            # rhat is an NDArray so use tolist() later to make it json serialisable.
-            rhat = rho / (np.maximum(r, 1e-8))
-
-            # Add unit LOS velocity vector. Avoid division by zero.
-            # vhat is an NDArray so use tolist() later to make it json serialisable.
-            vhat = vrel / (np.maximum(np.linalg.norm(vrel), 1e-8))
-
-            obs_records.append(
-                ObservationRecord(
-                    step=k, observer=i, target=j, nis=nis, dof=yij.shape[0],
-                    time = k*dt, r_vector=rhat.tolist(), v_vector=vhat.tolist()
-            ))
             # Advance index by 2 as every pair is range and range rate
             idx += 2
+
     return obs_records
 
-@dataclass
-class FilterConfig:
-    """
-    Configuration parameters for the Extended Kalman Filter simulation.
 
-    Attributes:
-    - ISL_range_m: The range for inter-satellite link observations in metres.
-    - N: Number of satellites in the constellation.
-    - steps: Number of simulation steps.
-    - dt: Time step size in seconds.
-    - sig_r: Standard deviation of range measurement noise in meters.
-    - sig_rdot: Standard deviation of range-rate measurement noise in m/s.
-    - q_acc_target: Continuous-time process noise acceleration magnitude for target satellites.
-    - seed: Random seed for reproducibility.
+def _process_observation_pair(obs_pair: ObservationPair,
+                              ekf: ExtendedKalmanFilter,
+                              k: int,
+                              config: FilterConfig
+                              ) -> Optional[ObservationRecord]:
     """
-    ISL_range_m: float
-    N: int = 10
-    steps: int = 3000
-    dt: float = 60.0
-    sig_r: float = 10.0
-    sig_rdot: float = 0.02
-    q_acc_target: float = 1e-6
-    seed: int = 42
+    Helper function to calculate NIS and generate a record for a single satellite pair.
 
+    Args:
+    - Inside obs_pair:
+        - i: The integer ID (index) of the observing satellite.
+        - j: The integer ID (index) of the target satellite.
+        - yij: The innovation vector (measurement residual) for this specific pair.
+        - diag_R_ij: The diagonal measurement noise covariance matrix for this pair.
+    - ekf: The ExtendedKalmanFilter instance containing the current state and covariance.
+    - k: The current simulation time step.
+    - config: The FilterConfig object containing simulation parameters (e.g., dt, sig_r).
+
+    Returns:
+    - An ObservationRecord containing the NIS, DOF, and normalized line-of-sight
+      vectors if the target is within ISL range. Returns None if the target is out of range.
+    """
+    xi_idx = slice(STATE_DIM*obs_pair.i, STATE_DIM*obs_pair.i+STATE_DIM)
+    xj_idx = slice(STATE_DIM*obs_pair.j, STATE_DIM*obs_pair.j+STATE_DIM)
+
+    # Get position vectors, rho
+    # The vectors are generated by the keplerian_to_cartesian function (ECI frame).
+    # rho is a relative position vector. No rotation is applied so this is still ECI.
+    rho = ekf.x[STATE_DIM*obs_pair.j : STATE_DIM*obs_pair.j+3] - \
+        ekf.x[STATE_DIM*obs_pair.i : STATE_DIM*obs_pair.i+3]
+    r = np.linalg.norm(rho)
+
+    # Skip records for satellites further than 5000km apart
+    if r > MAX_ISL_RANGE:
+        return None
+
+    # vrel is a relative velocity vector
+    vrel = ekf.x[STATE_DIM*obs_pair.j+3 : STATE_DIM*obs_pair.j+6] \
+        - ekf.x[STATE_DIM*obs_pair.i+3 : STATE_DIM*obs_pair.i+6]
+
+    # Recalculate Ht and Ho for the current pair, this is necessary.
+    # These are small 2x6 matrices.
+    Ht, Ho = H_blocks_target_obs(ekf.x[xj_idx], ekf.x[xi_idx])
+
+    # Calculate H_ij @ ekf.P @ H_ij.T more efficiently
+    # This avoids creating the full H_ij (2 x dim_x) matrix repeatedly
+    # Extracting relevant 6x6 blocks from ekf.P directly into the formula
+    S_ij = (Ho @ ekf.P[xi_idx, xi_idx] @ Ho.T +
+            Ho @ ekf.P[xi_idx, xj_idx] @ Ht.T +
+            Ht @ ekf.P[xj_idx, xi_idx] @ Ho.T +
+            Ht @ ekf.P[xj_idx, xj_idx] @ Ht.T) + obs_pair.diag_R_ij
+
+    # Add unit LOS position and velocity vectors. Avoid division by zero.
+    # rhat and vhat are NDArrays, use tolist() inline to make them json serialisable.
+    return ObservationRecord(
+        step=k, observer=obs_pair.i, target=obs_pair.j,
+        nis=float(obs_pair.yij.T @ np.linalg.inv(S_ij) @ obs_pair.yij),
+        dof=obs_pair.yij.shape[0], time=k*config.dt,
+        r_vector=(rho / np.maximum(r, 1e-8)).tolist(),
+        v_vector=(vrel / np.maximum(np.linalg.norm(vrel), 1e-8)).tolist()
+    )
 
 class JointEKF:
     """
@@ -631,8 +708,7 @@ class JointEKF:
         - A list of ObservationRecord objects for the current step.
         """
         y = _ekf_update(self.ekf, z_k, self.config.N)
-        return _log_nis(y, self.ekf, self.config.N, k, self.config.dt,
-                        self.config.sig_r, self.config.sig_rdot)
+        return _log_nis(y, self.ekf, k, self.config)
 
 
 def apply_network_faults(obs_to_submit: ObservationRecord, sid: int, n_sats: int,

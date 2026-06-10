@@ -41,18 +41,26 @@ class TransactionMetadata:
     correctness_score: float = 0.0
     observer_id: Optional[int] = None
 
+@dataclass
+class TransactionAddresses:
+    """
+    Transaction addresses for sender and recipient.
+    """
+    sender_address: int
+    recipient_address: int
+
 class Transaction:
     """
     Transaction containing information to be submitted in the Distributed Ledger.
     Consensus needs to be reached on the validity of the information received.
     """
 
-    def __init__(self, sender_address: int, recipient_address: int,
+    def __init__(self, addresses: TransactionAddresses,
                  sender_private_key: str, tx_data: str,
                  metadata: TransactionMetadata) -> None:
 
-        self.sender_address = sender_address
-        self.recipient_address = recipient_address
+        self.sender_address = addresses.sender_address
+        self.recipient_address = addresses.recipient_address
         self.sender_private_key = sender_private_key
         self.tx_data = tx_data
         self.metadata = metadata
