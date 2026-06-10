@@ -43,6 +43,7 @@ logger = get_logger()
 class MockDAG():
     """A mock DAG object that only holds a ledger for plotting."""
     ledger: dict
+    local_consensus_states: dict = field(default_factory=dict)
 
 @dataclass
 class NISMetricsTracker:
@@ -65,6 +66,10 @@ class DAG():
         # Ledger structure is:
         # key: string hash of transaction, value: list[Transaction]
         self.ledger: dict[str, list[Transaction]] = self.create_genesis_tx()
+
+        # Node-local opinion dictionary
+        # Key: tx_hash -> Value: dict containing local consensus state
+        self.local_consensus_states: dict[str, dict] = {}
 
         # New: Maintain a separate list for chronological order
         self._chronological_txs: list[tuple[datetime, str]] = []
@@ -194,6 +199,14 @@ class DAG():
 
         # Add transaction to the main ledger dictionary
         self.ledger[transaction.hash] = [transaction]
+
+        self.local_consensus_states[transaction.hash] = {
+            "consensus_score": 0.0,
+            "is_confirmed": False,
+            "is_rejected": False,
+            "nis": None,
+            "dof": None
+        }
 
         # Insert into the chronological list to maintain order
         new_item = (transaction.metadata.timestamp, transaction.hash)

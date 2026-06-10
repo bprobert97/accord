@@ -268,9 +268,8 @@ class ConsensusMechanism():
 
         transaction_data: dict = json.loads(transaction.tx_data)
         obs_record = ObservationRecord(**transaction_data)
-        transaction.metadata.observer_id = obs_record.observer
 
-        if not self._is_dof_valid(obs_record, transaction, sat_node):
+        if not self._is_dof_valid(obs_record, transaction, sat_node, dag):
             return False, new_ema_nis
 
         dag.add_tx(transaction)
@@ -283,19 +282,17 @@ class ConsensusMechanism():
             dag, obs_record, sat_node, mean_nis_per_satellite
         )
 
-        self._update_transaction_metadata(transaction, obs_record, consensus_score,
-                                          correctness_score)
+        self._update_local_consensus_state(dag, transaction.hash, obs_record,
+                                           consensus_score, correctness_score)
         self._update_satellite_reputation(sat_node, obs_record)
 
         if consensus_score >= self.consensus_threshold:
-            transaction.metadata.consensus_reached = True
-            transaction.metadata.is_confirmed = True
+            dag.local_consensus_states[transaction.hash]["is_confirmed"] = True
             logger.info("Successful consensus score: %.2f", consensus_score)
             return True, new_ema_nis
 
         logger.info("Consensus score of %.2f does not meet threshold.", consensus_score)
-        transaction.metadata.consensus_reached = False
-        transaction.metadata.is_rejected = True
+        dag.local_consensus_states[transaction.hash]["is_rejected"] = True
         return False, new_ema_nis
 
     def _is_transaction_valid(self, transaction: Transaction, sat_node: SatelliteNode) -> bool:
@@ -318,8 +315,11 @@ class ConsensusMechanism():
             return False
         return True
 
-    def _is_dof_valid(self, obs_record: ObservationRecord,
-                      transaction: Transaction, sat_node: SatelliteNode) -> bool:
+    def _is_dof_valid(self,
+                      obs_record: ObservationRecord,
+                      transaction: Transaction,
+                      sat_node: SatelliteNode,
+                      dag: DAG) -> bool:
         """
         Checks if the degrees of freedom (DOF) of the observation are within expected bounds.
         If the DOF is invalid, applies a penalty to the satellite's reputation.
@@ -328,6 +328,7 @@ class ConsensusMechanism():
         - obs_record: The ObservationRecord extracted from the transaction data.
         - transaction: The Transaction object being evaluated, used for updating metadata.
         - sat_node: The SatelliteNode that submitted the transaction, used for applying penalties.
+        - dag: The local DAG on the satellite node.
 
         Returns:
         - A boolean indicating whether the DOF is valid.
@@ -338,8 +339,16 @@ class ConsensusMechanism():
                 sat_node.rep_manager.apply_negative(sat_node.reputation,
                                                     sat_node.exp_pos,
                                                     sat_node.performance_ema)
-            transaction.metadata.consensus_reached = False
-            transaction.metadata.is_rejected = True
+
+            # Record early rejection locally
+            dag.local_consensus_states[transaction.hash] = {
+                "consensus_score": 0.0,
+                "correctness_score": 0.0,
+                "is_confirmed": False,
+                "is_rejected": True,
+                "nis": obs_record.nis,
+                "dof": obs_record.dof
+            }
             return False
         return True
 
@@ -387,25 +396,33 @@ class ConsensusMechanism():
                                                          sat_node.reputation)
         return consensus_score, correctness_score, new_ema_nis
 
-    def _update_transaction_metadata(self, transaction: Transaction, obs_record: ObservationRecord,
-                                     consensus_score: float, correctness_score: float) -> None:
+    def _update_local_consensus_state(self,
+                                      dag: DAG,
+                                      tx_hash: str,
+                                      obs_record: ObservationRecord,
+                                      consensus_score: float,
+                                      correctness_score: float) -> None:
         """
-        Updates the transaction metadata with the calculated consensus score, correctness score,
-        and NIS value.
+        Updates the local consensus state tracking dictionary.
+
         Args:
-        - transaction: The Transaction object to update.
-        - obs_record: The ObservationRecord containing the NIS and DOF values.
-        - consensus_score: The overall consensus score calculated for this transaction.
-        - correctness_score: The correctness score calculated based on NIS and historical
-        performance.
+        - dag: The local Directed Acyclic Graph of a satellite.
+        - tx_hash: Hash of the transaction.
+        - obs_record: Observation associated with the transaction
+        - consensus_score: The consensus score from PoISE for the transaction.
+        - correctness_score: The correctness from PoISE for the transaction..
 
         Returns:
-        None. Updates the transaction's metadata in place.
+        - None. Updated the consensus state for the local dag.
         """
-        transaction.metadata.consensus_score = consensus_score
-        transaction.metadata.correctness_score = correctness_score
-        transaction.metadata.nis = obs_record.nis
-        transaction.metadata.dof = obs_record.dof
+        dag.local_consensus_states[tx_hash] = {
+            "consensus_score": consensus_score,
+            "correctness_score": correctness_score,
+            "is_confirmed": False,
+            "is_rejected": False,
+            "nis": obs_record.nis,
+            "dof": obs_record.dof
+        }
 
     def _update_satellite_reputation(self, sat_node: SatelliteNode,
                                      obs_record: ObservationRecord) -> None:
@@ -427,19 +444,19 @@ class ConsensusMechanism():
         upper_bound = chi2.ppf(0.975, obs_record.dof)
 
         sat_node.reputation = sat_node.rep_manager.decay(sat_node.reputation)
-        logger.info("Satellite reputation decayed to %.3f.", sat_node.reputation)
+        logger.info("Satellite %s's reputation decayed to %.3f.", sat_node.id, sat_node.reputation)
 
         if lower_bound <= obs_record.nis <= upper_bound:
             sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
                 sat_node.rep_manager.apply_positive(sat_node.reputation,
                                                     sat_node.exp_pos,
                                                     sat_node.performance_ema)
-            logger.info("NIS within bounds. Reputation slowly increased to %.2f",
-                        sat_node.reputation)
+            logger.info("NIS within bounds. Reputation of satellite %s slowly increased to %.2f",
+                        sat_node.id, sat_node.reputation)
         else:
             sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
                 sat_node.rep_manager.apply_negative(sat_node.reputation,
                                                     sat_node.exp_pos,
                                                     sat_node.performance_ema)
-            logger.info("NIS outside bounds. Reputation decreased to %.2f",
-                        sat_node.reputation)
+            logger.info("NIS outside bounds. Reputation of satellite %s decreased to %.2f",
+                        sat_node.id, sat_node.reputation)
