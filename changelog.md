@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.1.1] - 2026-06
+
+### Summary
+This release refactors the codebase without changing any of the underlying functionality. This is to improve readability.
+
+### Added
+- Refactor code to remove pylint errors.
+- Make boxplot colours more readable.
+- Minor bug fix - add ISL_range_m to data that is saved from a run.
+---
+
 ## [3.1] - 2026-05
 
 ### Summary
