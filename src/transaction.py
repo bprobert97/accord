@@ -44,10 +44,11 @@ class TransactionMetadata:
 @dataclass
 class TransactionAddresses:
     """
-    Transaction addresses for sender and recipient.
+    Transaction addresses and keys for sender and recipient.
     """
     sender_address: int
     recipient_address: int
+    sender_private_key: str
 
 class Transaction:
     """
@@ -55,15 +56,18 @@ class Transaction:
     Consensus needs to be reached on the validity of the information received.
     """
 
-    def __init__(self, addresses: TransactionAddresses,
-                 sender_private_key: str, tx_data: str,
-                 metadata: TransactionMetadata) -> None:
+    def __init__(self,
+                 addresses: TransactionAddresses,
+                 tx_data: str,
+                 metadata: TransactionMetadata,
+                 parent_hashes: tuple[str, ...]) -> None:
 
         self.sender_address = addresses.sender_address
         self.recipient_address = addresses.recipient_address
-        self.sender_private_key = sender_private_key
+        self.sender_private_key = addresses.sender_private_key
         self.tx_data = tx_data
         self.metadata = metadata
+        self.parent_hashes = parent_hashes
         self._hash = self.calculate_hash()
 
     def __repr__(self) -> str:
@@ -95,8 +99,12 @@ class Transaction:
 
         Returns: The hash as a string.
         """
+        # Include parent hashes to secure the graph structure against tampering
+        parent_string = "".join(self.parent_hashes)
         return hashlib.sha256(str(self.sender_address).encode() +
                               str(self.metadata.timestamp).encode() +
-                              self.sender_private_key.encode() + self.tx_data.encode() +
-                              str(self.recipient_address).encode()
+                              self.sender_private_key.encode() +
+                              self.tx_data.encode() +
+                              str(self.recipient_address).encode() +
+                              parent_string.encode()
                              ).hexdigest()

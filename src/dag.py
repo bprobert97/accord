@@ -140,16 +140,22 @@ class DAG():
         genesis_metadata = TransactionMetadata(consensus_reached=True,
                                                is_confirmed=True)
 
-        genesis_addresses = TransactionAddresses(sender_address=0, recipient_address=0)
+        genesis_addresses_1 = TransactionAddresses(sender_address=0,
+                                                   recipient_address=0,
+                                                   sender_private_key="1234")
 
-        return {"Genesis Transaction 1": [Transaction(addresses=genesis_addresses,
-                                                      sender_private_key="1234",
+        genesis_addresses_2 = TransactionAddresses(sender_address=0,
+                                                   recipient_address=0,
+                                                   sender_private_key="5678")
+
+        return {"Genesis Transaction 1": [Transaction(addresses=genesis_addresses_1,
                                                       tx_data="Genesis Transaction 1",
-                                                      metadata=genesis_metadata)],
-                "Genesis Transaction 2": [Transaction(addresses=genesis_addresses,
-                                                      sender_private_key="5678",
+                                                      metadata=genesis_metadata,
+                                                      parent_hashes=())],
+                "Genesis Transaction 2": [Transaction(addresses=genesis_addresses_2,
                                                       tx_data="Genesis Transaction 2",
-                                                      metadata=genesis_metadata)]}
+                                                      metadata=genesis_metadata,
+                                                      parent_hashes=())]}
 
     def get_parents(self) -> tuple[str, ...]:
         """
@@ -192,21 +198,18 @@ class DAG():
         Returns:
         - None. Adds transaction to the DAG.
         """
-        parent1, parent2 = self.get_parents()
-
-        # There is guaranteed to be two parents - the genesis transactions in the DAG.
-        transaction.metadata.parent_hashes.extend([parent1, parent2])
-
-        # Add transaction to the main ledger dictionary
+        # Read-only write to prevent parent mutations
         self.ledger[transaction.hash] = [transaction]
 
-        self.local_consensus_states[transaction.hash] = {
-            "consensus_score": 0.0,
-            "is_confirmed": False,
-            "is_rejected": False,
-            "nis": None,
-            "dof": None
-        }
+        # Initialise the local state dictionary entry if it doesn't exist
+        if transaction.hash not in self.local_consensus_states:
+            self.local_consensus_states[transaction.hash] = {
+                "consensus_score": 0.0,
+                "is_confirmed": False,
+                "is_rejected": False,
+                "nis": None,
+                "dof": None
+            }
 
         # Insert into the chronological list to maintain order
         new_item = (transaction.metadata.timestamp, transaction.hash)

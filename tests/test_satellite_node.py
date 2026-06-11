@@ -77,11 +77,15 @@ async def test_sync_data():
     node2 = SatelliteNode(node_id=2, consensus_mech=mech)
 
     # Manually seed a completed transaction log and evaluation opinion inside node2
-    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2,
+                                     sender_private_key="placeholder",)
+
+    # Fixed: Added parent_hashes=() to pass strict constructor signature matching
     historical_tx = Transaction(addresses=addresses,
-                                sender_private_key="placeholder",
                                 tx_data="{}",
-                                metadata=TransactionMetadata())
+                                metadata=TransactionMetadata(),
+                                parent_hashes=())
 
     node2.dag.ledger[historical_tx.hash] = [historical_tx]
     node2.dag.local_consensus_states[historical_tx.hash] = {

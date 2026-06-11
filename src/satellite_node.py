@@ -120,14 +120,19 @@ class SatelliteNode():
 
         addresses = TransactionAddresses(
             sender_address=hash(self.id),
-            recipient_address=recipient_address
+            recipient_address=recipient_address,
+            sender_private_key="PLACEHOLDER_KEY"
         )
 
+        # 1. Use the method to select local tips from this node's view of the graph
+        parent1, parent2 = self.dag.get_parents()
+
+        # 2. Immutable instantiation: freeze the data and edges together
         transaction = Transaction(
             addresses=addresses,
-            sender_private_key="PLACEHOLDER_KEY",
             tx_data=tx_data,
-            metadata=metadata
+            metadata=metadata,
+            parent_hashes=(parent1, parent2)  # Securely bound
         )
 
         # 2. Add our own unvalidated copy to our local ledger

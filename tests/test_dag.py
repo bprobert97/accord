@@ -42,18 +42,28 @@ def test_add_tx(dag):
     Test adding a transaction to the DAG.
     """
     initial_len = len(dag.ledger)
-    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+
+    # 1. Dynamically capture the current parents from the DAG view
+    parents = dag.get_parents()
+
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2,
+                                     sender_private_key="key",)
+
+    # Fixed: Supplied parent_hashes to the constructor call
     new_tx = Transaction(addresses=addresses,
-                         sender_private_key="key",
                          tx_data="data",
-                         metadata=TransactionMetadata())
+                         metadata=TransactionMetadata(),
+                         parent_hashes=parents)
 
     dag.add_tx(new_tx)
 
+    # Assertions updated to target the new direct immutable properties
     assert len(dag.ledger) == initial_len + 1
     assert new_tx.hash in dag.ledger
-    assert len(new_tx.metadata.parent_hashes) == 2
-    assert new_tx.metadata.parent_hashes[0] in ("Genesis Transaction 1", "Genesis Transaction 2")
+    assert len(new_tx.parent_hashes) == 2
+    assert new_tx.parent_hashes[0] in parents
+
 
 def test_get_parents(dag):
     """
@@ -67,17 +77,24 @@ def test_get_parents(dag):
 
     # Add more transactions and check again
     for i in range(5):
+        # 2. Get parents dynamically inside the loop to grow a continuous chain
+        current_parents = dag.get_parents()
+
         addresses = TransactionAddresses(sender_address=i,
-                                         recipient_address=i+1)
+                                         recipient_address=i+1,
+                                         sender_private_key="k")
+
+        # Fixed: Supplied current_parents to the transaction factory loop
         dag.add_tx(Transaction(addresses=addresses,
-                               sender_private_key="k",
                                tx_data=f"d{i}",
-                               metadata=TransactionMetadata()))
+                               metadata=TransactionMetadata(),
+                               parent_hashes=current_parents))
 
     new_parents = dag.get_parents()
     assert len(new_parents) == 2
     assert new_parents[0] in dag.ledger
     assert new_parents[1] in dag.ledger
+
 
 def test_has_bft_quorum(dag):
     """
@@ -88,21 +105,27 @@ def test_has_bft_quorum(dag):
 
     # Add 3 real transactions. Not enough for f=1 (needs 4).
     for i in range(3):
+        current_parents = dag.get_parents()
         addresses = TransactionAddresses(sender_address=i,
-                                         recipient_address=i+1)
+                                         recipient_address=i+1,
+                                         sender_private_key="k",)
 
+        # Fixed: Supplied parent_hashes to constructor
         dag.add_tx(Transaction(addresses=addresses,
-                               sender_private_key="k",
                                tx_data=f"d{i}",
-                               metadata=TransactionMetadata()))
+                               metadata=TransactionMetadata(),
+                               parent_hashes=current_parents))
     assert not dag.has_bft_quorum()
 
     # Add the 4th real transaction. Now we have quorum.
+    final_parents = dag.get_parents()
     addresses = TransactionAddresses(sender_address=4,
-                                     recipient_address=5)
+                                     recipient_address=5,
+                                     sender_private_key="k",)
 
+    # Fixed: Supplied final_parents to constructor
     dag.add_tx(Transaction(addresses=addresses,
-                           sender_private_key="k",
                            tx_data="d4",
-                           metadata=TransactionMetadata()))
+                           metadata=TransactionMetadata(),
+                           parent_hashes=final_parents))
     assert dag.has_bft_quorum()

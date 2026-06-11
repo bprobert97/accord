@@ -163,47 +163,75 @@ def test_calculate_consensus_score(consensus_mech):
     # This should be around or below the threshold
     assert score4 < consensus_mech.consensus_threshold
 
-def test_poise_empty_transaction(consensus_mech, mock_dag, mock_sat_node):
+def test_poise_empty_transaction(consensus_mech) -> None:
     """
-    Test PoISE with an empty transaction, expecting reputation penalty.
+    Test PoISE with an empty transaction, expecting a reputation penalty.
     """
-    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    # 1. Initialize clean explicit mocks
+    dag_mock = MagicMock()
+
+    sat_node_mock = MagicMock()
+    sat_node_mock.id = 1
+    sat_node_mock.reputation = 0.5
+
+    # Pre-configure return tuple to prevent unpacking ValueErrors during early penalty
+    sat_node_mock.rep_manager.apply_negative.return_value = (0.4, 0, 0.5)
+
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2,
+                                     sender_private_key="k",)
+
+    # Fixed: Added parent_hashes=() to pass the updated constructor signature
     empty_tx = Transaction(addresses=addresses,
-                           sender_private_key="k",
                            tx_data="",
-                           metadata=TransactionMetadata())
+                           metadata=TransactionMetadata(),
+                           parent_hashes=())
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
-        mock_dag, mock_sat_node, empty_tx, {}
+        dag_mock, sat_node_mock, empty_tx, {}
     )
 
     assert consensus_reached is False
-    mock_sat_node.rep_manager.apply_negative.assert_called_once()
-    mock_dag.add_tx.assert_not_called()
+    sat_node_mock.rep_manager.apply_negative.assert_called_once()
+    dag_mock.add_tx.assert_not_called()
 
-def test_poise_no_bft_quorum(consensus_mech, mock_dag, mock_sat_node):
+
+def test_poise_no_bft_quorum(consensus_mech) -> None:
     """
     Test PoISE when BFT quorum is not met.
     """
-    mock_dag.has_bft_quorum.return_value = False
+    # 1. Mock the DAG to return False for quorum gate checking
+    dag_mock = MagicMock()
+    dag_mock.has_bft_quorum.return_value = False
+
+    sat_node_mock = MagicMock()
+    sat_node_mock.id = 1
+    sat_node_mock.reputation = 0.5
+
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2,
+                                     sender_private_key="k",)
+
+    # Fixed: Added parent_hashes=() to pass the updated constructor signature
     tx = Transaction(addresses=addresses,
-                     sender_private_key="k",
                      tx_data=tx_data,
-                     metadata=TransactionMetadata())
+                     metadata=TransactionMetadata(),
+                     parent_hashes=())
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
-        mock_dag, mock_sat_node, tx, {}
+        dag_mock, sat_node_mock, tx, {}
     )
 
     assert consensus_reached is False
-    mock_dag.add_tx.assert_called_once_with(tx)
-    # No reputation change should happen
-    mock_sat_node.rep_manager.apply_positive.assert_not_called()
-    mock_sat_node.rep_manager.apply_negative.assert_not_called()
+    dag_mock.add_tx.assert_called_once_with(tx)
+
+    # Ensure reputation remains unchanged because non-quorum transactions are pending, not malicious
+    sat_node_mock.rep_manager.apply_positive.assert_not_called()
+    sat_node_mock.rep_manager.apply_negative.assert_not_called()
+
 
 @patch('src.consensus_mech.chi2')
 def test_poise_consensus_reached(mock_chi2, consensus_mech) -> None:
@@ -236,11 +264,15 @@ def test_poise_consensus_reached(mock_chi2, consensus_mech) -> None:
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2,
+                                     sender_private_key="k",)
+
+    # Fixed: Added parent_hashes=() to pass strict constructor verification
     tx = Transaction(addresses=addresses,
-                     sender_private_key="k",
                      tx_data=tx_data,
-                     metadata=TransactionMetadata())
+                     metadata=TransactionMetadata(),
+                     parent_hashes=())
 
     # Make consensus score high to ensure it passes
     consensus_mech.calculate_consensus_score = MagicMock(return_value=0.8)
@@ -288,11 +320,15 @@ def test_poise_consensus_failed(mock_chi2, consensus_mech) -> None:
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=10.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
     tx_data = json.dumps(obs_record.__dict__)
-    addresses = TransactionAddresses(sender_address=1, recipient_address=2)
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2,
+                                     sender_private_key="k",)
+
+    # Fixed: Added parent_hashes=() to pass strict constructor verification
     tx = Transaction(addresses=addresses,
-                     sender_private_key="k",
                      tx_data=tx_data,
-                     metadata=TransactionMetadata())
+                     metadata=TransactionMetadata(),
+                     parent_hashes=())
 
     # Make consensus score low to ensure it fails
     consensus_mech.calculate_consensus_score = MagicMock(return_value=0.4)

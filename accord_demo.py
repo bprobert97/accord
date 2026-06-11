@@ -685,6 +685,10 @@ async def _process_satellite_interactions(sid: int,
     for other_sat in sat.peers:
         other_sid = other_sat.id
 
+        # When an ISL link is active, ask our peer for historical
+        # data transactions we missed
+        await sat.request_sync_from_peer(other_sat)
+
         # Find the corresponding observation record
         obs_to_submit = next(
             (obs for obs in step_data.obs_by_step.get(step_data.k, []) \
