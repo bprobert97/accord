@@ -73,10 +73,29 @@ def _get_ledger_items(dag: Any) -> Any:
     raise TypeError(f"Object of type {type(dag)} cannot be parsed for ledger data.")
 
 
+def is_state_evaluated(state: dict) -> bool:
+    """
+    Determines if a given consensus state dictionary has been evaluated
+    by clearing the BFT quorum threshold or POISE scoring gates.
+
+    Args:
+    - state (dict): The node-local consensus state dictionary to inspect.
+
+    Returns:
+    - bool: True if the transaction has been evaluated, False if it is a pending placeholder.
+    """
+    return bool(
+        state.get("is_confirmed", False) or
+        state.get("is_rejected", False) or
+        state.get("consensus_score", 0.0) > 0.0
+    )
+
+
 def _get_local_consensus_states(dag: Any) -> dict:
     """
     Helper to extract local consensus states regardless of whether dag is a single
     DAG/MockDAG object, a unified dictionary, or a decentralised dictionary of node DAGs.
+    Implements strict conflict resolution to prevent pending states from overwriting evaluated ones.
 
     Args:
     - dag (Any): The consensus state container structure to unpack.
@@ -87,18 +106,27 @@ def _get_local_consensus_states(dag: Any) -> dict:
     if hasattr(dag, "local_consensus_states"):
         return dag.local_consensus_states
 
-    if isinstance(dag, dict):
-        # Check if it's a decentralised map of satellite IDs -> DAG objects
-        if dag and hasattr(next(iter(dag.values())), "local_consensus_states"):
-            unified_states = {}
-            for local_dag in dag.values():
-                unified_states.update(local_dag.local_consensus_states)
-            return unified_states
+    if not isinstance(dag, dict):
+        return {}
 
-        # Otherwise, assume it is already a raw unified states dictionary
+    # Guard Clause: Handle raw unified dictionaries immediately to reduce indentation nesting
+    first_node = next(iter(dag.values()), None)
+    if not (first_node and hasattr(first_node, "local_consensus_states")):
         return dag
 
-    return {}
+    unified_states: dict[str, dict] = {}
+    for local_dag in dag.values():
+        for tx_hash, current_state in local_dag.local_consensus_states.items():
+            if tx_hash not in unified_states:
+                unified_states[tx_hash] = current_state
+                continue
+
+            # Level 4 Nesting Maximum: Clean, sequential predicate comparison
+            if is_state_evaluated(current_state) and not \
+                is_state_evaluated(unified_states[tx_hash]):
+                unified_states[tx_hash] = current_state
+
+    return unified_states
 
 
 def extract_nis_transactions(dag: Any) -> Iterator[Tuple[Any, dict]]:

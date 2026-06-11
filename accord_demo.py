@@ -34,7 +34,8 @@ from src.plotting import  \
             calculate_convergence_index, \
                 calculate_nis_convergence_index, \
                     calculate_median_percentiles, \
-                        plot_constellation
+                        plot_constellation, \
+                        is_state_evaluated
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG, MockDAG
 from src.filter import FilterConfig, \
@@ -742,27 +743,18 @@ def _save_consensus_results(sim_results_path: str,
                 unified_ledger[tx_hash] = tx_list
                 unified_states[tx_hash] = current_state
             else:
-                # Conflict resolution: check if the alternative copy has been evaluated
                 existing_state = unified_states.get(tx_hash, {})
 
-                existing_evaluated = (existing_state.get("is_confirmed", False) or
-                                      existing_state.get("is_rejected", False) or
-                                      existing_state.get("consensus_score", 0.0) > 0.0)
-
-                current_evaluated = (current_state.get("is_confirmed", False) or
-                                     current_state.get("is_rejected", False) or
-                                     current_state.get("consensus_score", 0.0) > 0.0)
-
-                # If our current node holds a copy validated by the network, swap it in!
-                if current_evaluated and not existing_evaluated:
+                # Replaced duplicate blocks with the clean shared helper evaluation check
+                if is_state_evaluated(current_state) and not is_state_evaluated(existing_state):
                     unified_ledger[tx_hash] = tx_list
                     unified_states[tx_hash] = current_state
 
     np.savez_compressed(
         sim_results_path,
-        dag_ledger=unified_ledger, # type: ignore[arg-type]
-        global_consensus_states=unified_states, # type: ignore[arg-type]
-        rep_history=rep_history, # type: ignore[arg-type]
+        dag_ledger=unified_ledger,  # type: ignore[arg-type]
+        global_consensus_states=unified_states,  # type: ignore[arg-type]
+        rep_history=rep_history,  # type: ignore[arg-type]
         truth=sim_data.truth,
         faulty_ids=np.array(list(sim_data.faulty_ids))
     )
