@@ -121,7 +121,11 @@ def _get_local_consensus_states(dag: Any) -> dict:
                 unified_states[tx_hash] = current_state
                 continue
 
-            # Level 4 Nesting Maximum: Clean, sequential predicate comparison
+            # Check if state has been evaluated.
+            # This performs conflict resolution for overall end-of-sim
+            # statistics, giving us a snapshot of the state of the ledger
+            # globally (even though a true global state may not exist
+            # among all satellites, as some might not have synced recently)
             if is_state_evaluated(current_state) and not \
                 is_state_evaluated(unified_states[tx_hash]):
                 unified_states[tx_hash] = current_state
