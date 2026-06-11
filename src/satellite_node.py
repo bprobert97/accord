@@ -66,7 +66,7 @@ class SatelliteNode():
         self.position = Position()
 
         # DLT and decentralised communication
-        self.local_queue = asyncio.Queue()
+        self.local_queue: asyncio.Queue = asyncio.Queue()
         self.dag = DAG(consensus_mech=consensus_mech,
                        queue=self.local_queue)
         # P2P routing table
@@ -181,10 +181,11 @@ class SatelliteNode():
     async def request_sync_from_peer(self, peer: SatelliteNode) -> None:
         """
         Asks a specific neighbour for any transaction hashes we might have missed
-        while offline or out of alignment.
+        while offline or out of alignment. Pulls both the transaction payload
+        and the peer's consensus state view to catch up database states.
 
         Args:
-        - peer: A satellite node within ISL range that we want to synchronise with.
+        - peer (SatelliteNode): A satellite node within ISL range that we want to synchronise with.
 
         Returns:
         - None. Receives transactions from peer and synchronises.
@@ -193,6 +194,17 @@ class SatelliteNode():
 
         for tx_hash, tx_list in peer_ledger.items():
             if tx_hash not in self.dag.ledger:
-                # We found a transaction we don't have! Process it locally.
-                # TODO - is this the best way?
-                await self.receive_transaction(tx_list[0])
+                if not tx_list:
+                    continue
+
+                # 1. Capture deep copies of the transaction payload and peer state view
+                historical_tx = copy.deepcopy(tx_list[0])
+                peer_state = copy.deepcopy(peer.dag.local_consensus_states.get(tx_hash, {}))
+
+                # 2. Ingest records smoothly using the public DAG encapsulation interface
+                self.dag.import_historical_tx(historical_tx, peer_state)
+
+                logger.info(
+                    "Satellite %d synced historical transaction %s from catch-up peer %d.",
+                    self.id, tx_hash[:8], peer.id
+                )

@@ -283,7 +283,7 @@ class ConsensusMechanism():
         )
 
         self._update_local_consensus_state(dag, transaction.hash, obs_record,
-                                           consensus_score, correctness_score)
+                                           (consensus_score, correctness_score))
         self._update_satellite_reputation(sat_node, obs_record)
 
         if consensus_score >= self.consensus_threshold:
@@ -400,8 +400,7 @@ class ConsensusMechanism():
                                       dag: DAG,
                                       tx_hash: str,
                                       obs_record: ObservationRecord,
-                                      consensus_score: float,
-                                      correctness_score: float) -> None:
+                                      scores: tuple[float, float]) -> None:
         """
         Updates the local consensus state tracking dictionary.
 
@@ -409,12 +408,15 @@ class ConsensusMechanism():
         - dag: The local Directed Acyclic Graph of a satellite.
         - tx_hash: Hash of the transaction.
         - obs_record: Observation associated with the transaction
-        - consensus_score: The consensus score from PoISE for the transaction.
-        - correctness_score: The correctness from PoISE for the transaction..
+        - scores: a tuple of:
+            - consensus_score: The consensus score from PoISE for the transaction.
+            - correctness_score: The correctness from PoISE for the transaction..
 
         Returns:
         - None. Updated the consensus state for the local dag.
         """
+        consensus_score, correctness_score = scores
+
         dag.local_consensus_states[tx_hash] = {
             "consensus_score": consensus_score,
             "correctness_score": correctness_score,

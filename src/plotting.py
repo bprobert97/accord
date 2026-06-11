@@ -32,7 +32,7 @@ import numpy as np
 from scipy.stats import chi2
 import seaborn as sns
 from src.simulation import generate_random_keplerian_elements
-from src.dag import DAG
+from src.dag import DAG, MockDAG
 from src.reputation import ReputationManager, MAX_REPUTATION, \
     ReputationParams
 
@@ -101,7 +101,7 @@ def _get_local_consensus_states(dag: Any) -> dict:
     return {}
 
 
-def extract_nis_transactions(dag: DAG) -> Iterator[Tuple[Any, dict]]:
+def extract_nis_transactions(dag: Any) -> Iterator[Tuple[Any, dict]]:
     """
     Generator that iterates through a DAG ledger and yields
     transactions (and their parsed JSON) that contain NIS metadata.
@@ -189,7 +189,8 @@ def plot_constellation(truth: np.ndarray, n: int) -> None:
     for i in range(n):
         pos_hist = truth[:, i*6:i*6+3]
         ax.plot(pos_hist[:, 0], pos_hist[:, 1], pos_hist[:, 2], color='black', alpha=0.3)
-        ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2], color='black', s=10)
+        ax.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2],
+                   color='black', s=10) # type: ignore[misc]
 
     legend_elements = [
         Line2D([0], [0], marker='o', color='w', label='Satellite',
@@ -249,7 +250,7 @@ def _set_axes_equal(ax: Any) -> None:
     ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
 
-def plot_nis_boxplot(dag: DAG,
+def plot_nis_boxplot(dag: Any,
                      faulty_ids: set[int],
                      convergence_index: Optional[int] = None) -> None:
     """
@@ -311,7 +312,7 @@ def plot_nis_boxplot(dag: DAG,
     plt.show()
 
 
-def extract_nis_data(dag: DAG,
+def extract_nis_data(dag: Any,
                      faulty_ids: Optional[set[int]] = None,
                      start_index: int = 0) -> tuple[list[float], list[float]]:
     """
@@ -368,7 +369,7 @@ def calculate_median_percentiles(dof: int = 2) -> None:
         print(f"{val:<15.3f} | {percentile:<20.4f} | {distance_from_ideal:<20.4f}")
 
 
-def check_consensus_outcomes(dag: DAG,
+def check_consensus_outcomes(dag: Any,
                              consensus_threshold: float = 0.5) -> bool:
     """
     Checks if transaction consensus outcomes (confirmed/rejected) are consistent
@@ -467,7 +468,7 @@ def calculate_convergence_index(
 
 
 def calculate_nis_convergence_index(
-    dag: DAG,
+    dag: Any,
     faulty_ids: set[int],
     confidence: float = 0.95,
     window_size: int = 5
@@ -506,7 +507,7 @@ def calculate_nis_convergence_index(
     return 0
 
 
-def _extract_step_data(dag: DAG,
+def _extract_step_data(dag: DAG | MockDAG,
                        faulty_ids: set[int]
                        ) -> tuple[dict[int, list[float]], dict[int, list[int]]]:
     """
@@ -592,9 +593,9 @@ def plot_aggregated_reputation(
     cmap = plt.get_cmap('viridis')
 
     _plot_reputation_spread(steps, honest_arr[:, start_index:] \
-                            if honest_arr.size else [], cmap(0.5), "Honest")
+                            if honest_arr.size else np.array([]), cmap(0.5), "Honest")
     _plot_reputation_spread(steps, faulty_arr[:, start_index:] \
-                            if faulty_arr.size else [], cmap(0.05), "Faulty")
+                            if faulty_arr.size else np.array([]), cmap(0.05), "Faulty")
 
     plt.axhline(MAX_REPUTATION/2, color="gray", linestyle=":",
                 linewidth=2, label="Neutral (0.5)")

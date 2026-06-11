@@ -206,12 +206,32 @@ def test_poise_no_bft_quorum(consensus_mech, mock_dag, mock_sat_node):
     mock_sat_node.rep_manager.apply_negative.assert_not_called()
 
 @patch('src.consensus_mech.chi2')
-def test_poise_consensus_reached(mock_chi2, consensus_mech, mock_dag, mock_sat_node):
+def test_poise_consensus_reached(mock_chi2, consensus_mech) -> None:
     """
-    Test a successful consensus scenario in PoISE.
+    Test a successful consensus scenario in PoISE using local consensus state storage.
+
+    Args:
+    - mock_chi2 (MagicMock): Mocked scipy chi2 distribution object.
+    - consensus_mech (ConsensusMechanism): The consensus mechanism engine instance under test.
+
+    Returns:
+    - None. Assertions validate local ledger mutations and positive reputation updates.
     """
     # Mock chi2 to ensure NIS is within bounds
     mock_chi2.ppf.side_effect = [0.1, 5.0] # lower, upper bounds
+
+    # Initialise explicit mocks to prevent attribute lookup errors
+    dag_mock = MagicMock()
+    dag_mock.local_consensus_states = {}
+    dag_mock.has_bft_quorum.return_value = True  # Avoid dropping out at quorum validation
+
+    sat_node_mock = MagicMock()
+    sat_node_mock.id = 1
+    sat_node_mock.reputation = 0.5
+
+    # Configure the mock reputation manager to safely return unpacking values
+    sat_node_mock.rep_manager.decay.return_value = 0.5
+    sat_node_mock.rep_manager.apply_positive.return_value = (0.6, 0, 0.5)
 
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
@@ -226,22 +246,44 @@ def test_poise_consensus_reached(mock_chi2, consensus_mech, mock_dag, mock_sat_n
     consensus_mech.calculate_consensus_score = MagicMock(return_value=0.8)
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
-        mock_dag, mock_sat_node, tx, {}
+        dag_mock, sat_node_mock, tx, {}
     )
 
+    # Assert tracking decisions are written locally to the evaluating node's dictionary
     assert consensus_reached is True
-    assert tx.metadata.is_confirmed is True
-    assert tx.metadata.is_rejected is False
-    mock_sat_node.rep_manager.apply_positive.assert_called_once()
-    mock_sat_node.rep_manager.apply_negative.assert_not_called()
+    state = dag_mock.local_consensus_states.get(tx.hash, {})
+    assert state.get("is_confirmed") is True
+    assert state.get("is_rejected") is False
+    sat_node_mock.rep_manager.apply_positive.assert_called_once()
+    sat_node_mock.rep_manager.apply_negative.assert_not_called()
+
 
 @patch('src.consensus_mech.chi2')
-def test_poise_consensus_failed(mock_chi2, consensus_mech, mock_dag, mock_sat_node):
+def test_poise_consensus_failed(mock_chi2, consensus_mech) -> None:
     """
-    Test a failed consensus scenario in PoISE.
+    Test a failed consensus scenario in PoISE using local consensus state storage.
+
+    Args:
+    - mock_chi2 (MagicMock): Mocked scipy chi2 distribution object.
+    - consensus_mech (ConsensusMechanism): The consensus mechanism engine instance under test.
+
+    Returns:
+    - None. Assertions validate local ledger mutations and negative reputation penalties.
     """
     # Mock chi2 to ensure NIS is outside bounds
     mock_chi2.ppf.side_effect = [0.1, 5.0]
+
+    dag_mock = MagicMock()
+    dag_mock.local_consensus_states = {}
+    dag_mock.has_bft_quorum.return_value = True
+
+    sat_node_mock = MagicMock()
+    sat_node_mock.id = 1
+    sat_node_mock.reputation = 0.5
+
+    # Configure the mock reputation manager to safely return unpacking values
+    sat_node_mock.rep_manager.decay.return_value = 0.5
+    sat_node_mock.rep_manager.apply_negative.return_value = (0.4, 0, 0.5)
 
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=10.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
@@ -256,11 +298,12 @@ def test_poise_consensus_failed(mock_chi2, consensus_mech, mock_dag, mock_sat_no
     consensus_mech.calculate_consensus_score = MagicMock(return_value=0.4)
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
-        mock_dag, mock_sat_node, tx, {}
+        dag_mock, sat_node_mock, tx, {}
     )
 
     assert consensus_reached is False
-    assert tx.metadata.is_confirmed is False
-    assert tx.metadata.is_rejected is True
-    mock_sat_node.rep_manager.apply_positive.assert_not_called()
-    mock_sat_node.rep_manager.apply_negative.assert_called_once()
+    state = dag_mock.local_consensus_states.get(tx.hash, {})
+    assert state.get("is_confirmed") is False
+    assert state.get("is_rejected") is True
+    sat_node_mock.rep_manager.apply_positive.assert_not_called()
+    sat_node_mock.rep_manager.apply_negative.assert_called_once()

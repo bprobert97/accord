@@ -143,8 +143,11 @@ class DemoFilePaths:
 
 async def run_consensus_demo(config: FilterConfig,
                              toggles: DemoToggles,
-                             file_paths: DemoFilePaths) -> \
-        tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
+                             file_paths: DemoFilePaths
+                             ) -> tuple[Optional[dict[int, DAG]],
+                                        Optional[dict[str, list[float]]],
+                                        Optional[np.ndarray],
+                                        Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
@@ -757,9 +760,9 @@ def _save_consensus_results(sim_results_path: str,
 
     np.savez_compressed(
         sim_results_path,
-        dag_ledger=unified_ledger,
-        global_consensus_states=unified_states, # <--- CRITICAL ADDITION
-        rep_history=rep_history,
+        dag_ledger=unified_ledger, # type: ignore[arg-type]
+        global_consensus_states=unified_states, # type: ignore[arg-type]
+        rep_history=rep_history, # type: ignore[arg-type]
         truth=sim_data.truth,
         faulty_ids=np.array(list(sim_data.faulty_ids))
     )
@@ -770,7 +773,7 @@ def _save_consensus_results(sim_results_path: str,
 if __name__ == "__main__":
     accord_logger = get_logger()
 
-    FINAL_DAG: DAG | MockDAG | None = None
+    FINAL_DAG: dict[int, DAG] | MockDAG | None = None
     REP_HIST: Optional[dict] = None
     TRUTH: Optional[np.ndarray] = None
     FAULTY_IDS: Optional[set[int]] = None

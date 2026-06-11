@@ -232,3 +232,30 @@ class DAG():
         - A dictionary representing the ledger.
         """
         return self.ledger
+
+    def import_historical_tx(self,
+                             transaction: Transaction,
+                             state: dict) -> None:
+        """
+        Safely imports a historical transaction and its consensus state from a peer
+        during synchronisation, maintaining internal chronological order without
+        violating class encapsulation boundaries.
+
+        Args:
+        - transaction (Transaction): The historical transaction object to import.
+        - state (dict): The consensus state dictionary associated with the transaction.
+
+        Returns:
+        - None. Updates internal ledger, chronology, and consensus states in place.
+        """
+        tx_hash = transaction.hash
+
+        # Enforce ledger dict structure layout matching: dict[str, list[Transaction]]
+        self.ledger[tx_hash] = [transaction]
+
+        # Maintain chronological sorting order inside the class owning the attribute
+        new_item = (transaction.metadata.timestamp, tx_hash)
+        bisect.insort_left(self._chronological_txs, new_item)
+
+        # Ingest the peer's consensus state view
+        self.local_consensus_states[tx_hash] = state
