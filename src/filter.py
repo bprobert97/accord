@@ -522,7 +522,7 @@ def check_line_of_sight(r_obs: np.ndarray,
     # t represents the fraction along the segment from observer to target
     t = -np.dot(r_obs, u) / rho_norm
 
-    # If the closest point to the Earth's centere lies between the two satellites
+    # If the closest point to the Earth's centre lies between the two satellites
     if 0.0 <= t <= 1.0:
         # Compute the minimum distance vector from the Earth's centre to the chord segment
         closest_point = r_obs + t * rho
