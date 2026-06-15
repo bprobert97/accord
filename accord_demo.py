@@ -55,14 +55,14 @@ EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 DEFAULT_CONFIG = FilterConfig(
-        N=100,
+        N=400,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
         sig_rdot=0.2,
         q_acc_target=1e-5,
         seed=42,
-        ISL_range_m=2000e3
+        ISL_range_m=1000e3
     )
 #------------------
 # Helper functions
@@ -287,8 +287,73 @@ def _load_ekf_results(ekf_results_path: str,
     return None, None, None, None
 
 
-def _simulate_ekf_filter(config: FilterConfig, logger: Any) -> \
-        tuple[np.ndarray, np.ndarray, list[ObservationRecord], np.ndarray]:
+def _cluster_by_orbital_physics(truth_0: np.ndarray,
+                                N: int,
+                                cluster_size: int
+                                ) -> list[list[int]]:
+    """
+    Groups random satellites into EKF clusters based on their orbital planes.
+    Calculates the angular momentum vector (h = r x v) for each satellite.
+    Satellites with similar angular momentum vectors will organically stay
+    within physical line-of-sight of each other during the simulation.
+
+    Args:
+    - truth_0 (np.ndarray): The initial stacked true state vectors (position and
+                            velocity) for all satellites at time step 0.
+    - N (int): The total number of satellites in the constellation.
+    - cluster_size (int): The desired maximum number of satellites per EKF cluster.
+
+    Returns:
+    - list[list[int]]: A list of generated satellite clusters. Each inner list
+                       represents a single EKF cluster and contains the integer IDs
+                       of the assigned satellites.
+    """
+    sat_data = []
+    for i in range(N):
+        h = np.cross(truth_0[i*6 : i*6+3], truth_0[i*6+3 : i*6+6])
+        # Normalise the vector to focus purely on the plane's orientation
+        h_norm = h / np.linalg.norm(h)
+        sat_data.append((i, h_norm))
+
+    unassigned = set(range(N))
+    clusters = []
+
+    # Greedy grouping: Pick a seed satellite, find the (cluster_size - 1)
+    # closest matches based on their orbital plane alignment (dot product)
+    while unassigned:
+        if len(unassigned) <= cluster_size:
+            clusters.append(list(unassigned))
+            break
+
+        seed_id = unassigned.pop()
+        seed_h = next(h for sid, h in sat_data if sid == seed_id)
+
+        alignments = []
+        for sid in unassigned:
+            h = next(h for s, h in sat_data if s == sid)
+            alignments.append((sid, np.dot(seed_h, h)))
+
+        # Sort by dot product approaching 1.0 (highly aligned orbital planes)
+        alignments.sort(key=lambda x: x[1], reverse=True)
+
+        current_cluster = [seed_id]
+        for i in range(cluster_size - 1):
+            if i < len(alignments):
+                best_peer_id = alignments[i][0]
+                current_cluster.append(best_peer_id)
+                unassigned.remove(best_peer_id)
+
+        clusters.append(current_cluster)
+
+    return clusters
+
+
+def _simulate_ekf_filter(config: FilterConfig,
+                         logger: logging.Logger
+                         ) -> tuple[np.ndarray,
+                                    np.ndarray,
+                                    list[ObservationRecord],
+                                    np.ndarray]:
     """
     Simulate the satellite constellation and run the Clustered EKF to generate
     observation records.
@@ -310,9 +375,8 @@ def _simulate_ekf_filter(config: FilterConfig, logger: Any) -> \
     # --- Start of Clustered EKF Implementation ---
     logger.info("Initialising Clustered EKF with cluster size %s", CLUSTER_SIZE)
 
-    # 1. Create clusters of satellite IDs
-    all_sat_ids = list(range(config.N))
-    clusters = [all_sat_ids[i:i + CLUSTER_SIZE] for i in range(0, config.N, CLUSTER_SIZE)]
+    # 1. Cluster by Orbital Physics
+    clusters = _cluster_by_orbital_physics(truth[0], config.N, CLUSTER_SIZE)
 
     # 2. Create a list of EKF instances, one for each cluster
     cluster_ekfs = _create_cluster_ekfs(config, truth, clusters, logger)
@@ -704,8 +768,8 @@ async def _process_satellite_interactions(sid: int,
                                  sim_data.faulty_ids)
 
             sat.load_sensor_data(obs_to_submit)
-            sim_data.logger.info("Satellite %s: submitting transaction \
-                                 and broadcasting to peers.", sid)
+            sim_data.logger.info("Satellite %s: submitting transaction of target %s\
+                                 and broadcasting to peers.", sid, other_sid)
 
             # This saves locally and calls peer.receive_transaction() across the network
             await sat.submit_transaction(recipient_address=other_sid)
