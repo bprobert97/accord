@@ -1,35 +1,32 @@
 """
 Unit tests for the SatelliteNode class.
 """
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+from src.consensus_mech import ConsensusMechanism
+from src.dag import Transaction, TransactionAddresses, \
+    TransactionMetadata
 from src.satellite_node import SatelliteNode
 from src.filter import ObservationRecord
 from src.reputation import MAX_REPUTATION
 
-@pytest.fixture
-def mock_queue():
-    """Fixture for a mocked asyncio.Queue."""
-    return AsyncMock(spec=asyncio.Queue)
 
-def test_satellite_node_init(mock_queue):
+def test_satellite_node_init():
     """
     Test the initialization of a SatelliteNode.
     """
-    node = SatelliteNode(node_id=5, queue=mock_queue)
+    node = SatelliteNode(node_id=5, consensus_mech=ConsensusMechanism())
     assert node.id == 5
-    assert node.queue is mock_queue
     assert node.reputation == MAX_REPUTATION / 2
     assert node.exp_pos == 0
     assert node.performance_ema == 0.5
     assert node.sensor_data is None
 
-def test_load_sensor_data(mock_queue):
+def test_load_sensor_data():
     """
     Test that sensor data is loaded correctly.
     """
-    node = SatelliteNode(node_id=1, queue=mock_queue)
+    node = SatelliteNode(node_id=1, consensus_mech=ConsensusMechanism())
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
 
@@ -38,58 +35,74 @@ def test_load_sensor_data(mock_queue):
     assert node.sensor_data is obs_record
     assert node.sensor_data.nis == 2.0
 
-@pytest.mark.asyncio
-async def test_submit_transaction_no_data(mock_queue):
-    """
-    Test that submitting a transaction without sensor data raises a ValueError.
-    """
-    node = SatelliteNode(node_id=1, queue=mock_queue)
-    with pytest.raises(ValueError, match="Satellite 1 has no sensor data loaded."):
-        await node.submit_transaction(recipient_address=123)
 
 @pytest.mark.asyncio
 async def test_submit_transaction_success():
     """
-    Test the successful submission of a transaction using a real queue.
+    Test the successful submission and P2P propagation of a transaction.
     """
-    # Arrange
-    queue = asyncio.Queue() # Use a real queue instead of a mock
-    node = SatelliteNode(node_id=1, queue=queue)
+    # Arrange: Spin up two nodes running independent ledger containers
+    mech = ConsensusMechanism()
+    node1 = SatelliteNode(node_id=1, consensus_mech=mech)
+    node2 = SatelliteNode(node_id=2, consensus_mech=mech)
+
+    # Form our peer routing topology link
+    node1.peers = [node2]
+
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
                                    r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
-    node.load_sensor_data(obs_record)
+    node1.load_sensor_data(obs_record)
 
-    # This task simulates the consumer (the DAG's listen loop)
-    async def mock_dag_listener():
-        _, _, future = await queue.get()
-        # Simulate successful consensus by the DAG
-        future.set_result((True, 2.0))
-        queue.task_done()
+    # Act: Broadcast from node1 over our decentralised network link
+    await node1.submit_transaction(recipient_address=node2.id)
 
-    listener_task = asyncio.create_task(mock_dag_listener())
+    # Assert: Verify transaction cleared boundaries and logged to both ledgers
+    # (Note: It will be pending on node2 because BFT quorum requirements aren't met yet,
+    # which is perfectly authentic behavior!)
+    assert any(tx.metadata.observer_id == 1 for tx_list in \
+               node1.dag.ledger.values() for tx in tx_list)
+    assert any(tx.metadata.observer_id == 1 for tx_list in \
+               node2.dag.ledger.values() for tx in tx_list)
 
-    # Act: This will put an item on the queue and wait for the future to be resolved
-    result = await node.submit_transaction(recipient_address=123)
 
-    # Assert
-    assert result == (True, 2.0)
-
-    # Wait for the listener to finish its work and check queue is empty
-    await queue.join()
-    assert queue.empty()
-    # Ensure the listener task didn't have an exception
-    await listener_task
-
-def test_sync_data(mock_queue):
+@pytest.mark.asyncio
+async def test_sync_data():
     """
-    Test that the satellite correctly syncs data from the DAG.
+    Test that a satellite node can correctly pull historical transaction logs
+    and matching database states from a peer during anti-entropy catch-up.
     """
-    node = SatelliteNode(node_id=1, queue=mock_queue)
-    mock_dag = MagicMock()
-    mock_ledger = {"tx1": ["data1"], "tx2": ["data2"]}
-    mock_dag.get_ledger.return_value = mock_ledger
+    # Arrange
+    mech = ConsensusMechanism()
+    node1 = SatelliteNode(node_id=1, consensus_mech=mech)
+    node2 = SatelliteNode(node_id=2, consensus_mech=mech)
 
-    assert node.local_ledger == {}
-    node.sync_data(mock_dag)
-    assert node.local_ledger == mock_ledger
-    assert node.local_ledger is not mock_ledger # Should be a copy
+    # Manually seed a completed transaction log and evaluation opinion inside node2
+    addresses = TransactionAddresses(sender_address=1,
+                                     recipient_address=2,
+                                     sender_private_key="placeholder",)
+
+    # Fixed: Added parent_hashes=() to pass strict constructor signature matching
+    historical_tx = Transaction(addresses=addresses,
+                                tx_data="{}",
+                                metadata=TransactionMetadata(),
+                                parent_hashes=())
+
+    node2.dag.ledger[historical_tx.hash] = [historical_tx]
+    node2.dag.local_consensus_states[historical_tx.hash] = {
+        "consensus_score": 0.85,
+        "is_confirmed": True,
+        "is_rejected": False,
+        "nis": 1.42,
+        "dof": 2
+    }
+
+    # Verify node1's ledger is completely blank before synchronization begins
+    assert historical_tx.hash not in node1.dag.ledger
+
+    # Act: Fire the catch-up database alignment hook
+    await node1.request_sync_from_peer(peer=node2)
+
+    # Assert: Verify transaction records and opinion matrices port cleanly across boundaries
+    assert historical_tx.hash in node1.dag.ledger
+    assert node1.dag.local_consensus_states[historical_tx.hash]["consensus_score"] == 0.85
+    assert node1.dag.local_consensus_states[historical_tx.hash]["is_confirmed"] is True

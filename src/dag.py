@@ -43,6 +43,7 @@ logger = get_logger()
 class MockDAG():
     """A mock DAG object that only holds a ledger for plotting."""
     ledger: dict
+    local_consensus_states: dict = field(default_factory=dict)
 
 @dataclass
 class NISMetricsTracker:
@@ -65,6 +66,10 @@ class DAG():
         # Ledger structure is:
         # key: string hash of transaction, value: list[Transaction]
         self.ledger: dict[str, list[Transaction]] = self.create_genesis_tx()
+
+        # Node-local opinion dictionary
+        # Key: tx_hash -> Value: dict containing local consensus state
+        self.local_consensus_states: dict[str, dict] = {}
 
         # New: Maintain a separate list for chronological order
         self._chronological_txs: list[tuple[datetime, str]] = []
@@ -135,16 +140,22 @@ class DAG():
         genesis_metadata = TransactionMetadata(consensus_reached=True,
                                                is_confirmed=True)
 
-        genesis_addresses = TransactionAddresses(sender_address=0, recipient_address=0)
+        genesis_addresses_1 = TransactionAddresses(sender_address=0,
+                                                   recipient_address=0,
+                                                   sender_private_key="1234")
 
-        return {"Genesis Transaction 1": [Transaction(addresses=genesis_addresses,
-                                                      sender_private_key="1234",
+        genesis_addresses_2 = TransactionAddresses(sender_address=0,
+                                                   recipient_address=0,
+                                                   sender_private_key="5678")
+
+        return {"Genesis Transaction 1": [Transaction(addresses=genesis_addresses_1,
                                                       tx_data="Genesis Transaction 1",
-                                                      metadata=genesis_metadata)],
-                "Genesis Transaction 2": [Transaction(addresses=genesis_addresses,
-                                                      sender_private_key="5678",
+                                                      metadata=genesis_metadata,
+                                                      parent_hashes=())],
+                "Genesis Transaction 2": [Transaction(addresses=genesis_addresses_2,
                                                       tx_data="Genesis Transaction 2",
-                                                      metadata=genesis_metadata)]}
+                                                      metadata=genesis_metadata,
+                                                      parent_hashes=())]}
 
     def get_parents(self) -> tuple[str, ...]:
         """
@@ -187,13 +198,18 @@ class DAG():
         Returns:
         - None. Adds transaction to the DAG.
         """
-        parent1, parent2 = self.get_parents()
-
-        # There is guaranteed to be two parents - the genesis transactions in the DAG.
-        transaction.metadata.parent_hashes.extend([parent1, parent2])
-
-        # Add transaction to the main ledger dictionary
+        # Read-only write to prevent parent mutations
         self.ledger[transaction.hash] = [transaction]
+
+        # Initialise the local state dictionary entry if it doesn't exist
+        if transaction.hash not in self.local_consensus_states:
+            self.local_consensus_states[transaction.hash] = {
+                "consensus_score": 0.0,
+                "is_confirmed": False,
+                "is_rejected": False,
+                "nis": None,
+                "dof": None
+            }
 
         # Insert into the chronological list to maintain order
         new_item = (transaction.metadata.timestamp, transaction.hash)
@@ -219,3 +235,30 @@ class DAG():
         - A dictionary representing the ledger.
         """
         return self.ledger
+
+    def import_historical_tx(self,
+                             transaction: Transaction,
+                             state: dict) -> None:
+        """
+        Safely imports a historical transaction and its consensus state from a peer
+        during synchronisation, maintaining internal chronological order without
+        violating class encapsulation boundaries.
+
+        Args:
+        - transaction (Transaction): The historical transaction object to import.
+        - state (dict): The consensus state dictionary associated with the transaction.
+
+        Returns:
+        - None. Updates internal ledger, chronology, and consensus states in place.
+        """
+        tx_hash = transaction.hash
+
+        # Enforce ledger dict structure layout matching: dict[str, list[Transaction]]
+        self.ledger[tx_hash] = [transaction]
+
+        # Maintain chronological sorting order inside the class owning the attribute
+        new_item = (transaction.metadata.timestamp, tx_hash)
+        bisect.insort_left(self._chronological_txs, new_item)
+
+        # Ingest the peer's consensus state view
+        self.local_consensus_states[tx_hash] = state

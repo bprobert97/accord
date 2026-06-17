@@ -34,7 +34,8 @@ from src.plotting import  \
             calculate_convergence_index, \
                 calculate_nis_convergence_index, \
                     calculate_median_percentiles, \
-                        plot_constellation
+                        plot_constellation, \
+                        is_state_evaluated
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG, MockDAG
 from src.filter import FilterConfig, \
@@ -42,6 +43,7 @@ from src.filter import FilterConfig, \
     apply_network_faults
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
+from src.transaction import Transaction
 #------------------
 # Constants
 CLUSTER_SIZE = 10
@@ -53,7 +55,7 @@ EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
 SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 DEFAULT_CONFIG = FilterConfig(
-        N=50,
+        N=400,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
@@ -113,7 +115,6 @@ class SimData:
     """
     truth: np.ndarray
     faulty_ids: set[int]
-    dag: DAG
     logger: logging.Logger
     satellites: dict[int, SatelliteNode] = field(default_factory=dict)
 
@@ -143,8 +144,11 @@ class DemoFilePaths:
 
 async def run_consensus_demo(config: FilterConfig,
                              toggles: DemoToggles,
-                             file_paths: DemoFilePaths) -> \
-        tuple[Optional[DAG], Optional[dict], Optional[np.ndarray], Optional[set[int]]]:
+                             file_paths: DemoFilePaths
+                             ) -> tuple[Optional[dict[int, DAG]],
+                                        Optional[dict[str, list[float]]],
+                                        Optional[np.ndarray],
+                                        Optional[set[int]]]:
     """
     Run a demo of the consensus mechanism with multiple satellite nodes
     submitting transactions to the DAG.
@@ -283,8 +287,73 @@ def _load_ekf_results(ekf_results_path: str,
     return None, None, None, None
 
 
-def _simulate_ekf_filter(config: FilterConfig, logger: Any) -> \
-        tuple[np.ndarray, np.ndarray, list[ObservationRecord], np.ndarray]:
+def _cluster_by_orbital_physics(truth_0: np.ndarray,
+                                N: int,
+                                cluster_size: int
+                                ) -> list[list[int]]:
+    """
+    Groups random satellites into EKF clusters based on their orbital planes.
+    Calculates the angular momentum vector (h = r x v) for each satellite.
+    Satellites with similar angular momentum vectors will organically stay
+    within physical line-of-sight of each other during the simulation.
+
+    Args:
+    - truth_0 (np.ndarray): The initial stacked true state vectors (position and
+                            velocity) for all satellites at time step 0.
+    - N (int): The total number of satellites in the constellation.
+    - cluster_size (int): The desired maximum number of satellites per EKF cluster.
+
+    Returns:
+    - list[list[int]]: A list of generated satellite clusters. Each inner list
+                       represents a single EKF cluster and contains the integer IDs
+                       of the assigned satellites.
+    """
+    sat_data = []
+    for i in range(N):
+        h = np.cross(truth_0[i*6 : i*6+3], truth_0[i*6+3 : i*6+6])
+        # Normalise the vector to focus purely on the plane's orientation
+        h_norm = h / np.linalg.norm(h)
+        sat_data.append((i, h_norm))
+
+    unassigned = set(range(N))
+    clusters = []
+
+    # Greedy grouping: Pick a seed satellite, find the (cluster_size - 1)
+    # closest matches based on their orbital plane alignment (dot product)
+    while unassigned:
+        if len(unassigned) <= cluster_size:
+            clusters.append(list(unassigned))
+            break
+
+        seed_id = unassigned.pop()
+        seed_h = next(h for sid, h in sat_data if sid == seed_id)
+
+        alignments = []
+        for sid in unassigned:
+            h = next(h for s, h in sat_data if s == sid)
+            alignments.append((sid, np.dot(seed_h, h)))
+
+        # Sort by dot product approaching 1.0 (highly aligned orbital planes)
+        alignments.sort(key=lambda x: x[1], reverse=True)
+
+        current_cluster = [seed_id]
+        for i in range(cluster_size - 1):
+            if i < len(alignments):
+                best_peer_id = alignments[i][0]
+                current_cluster.append(best_peer_id)
+                unassigned.remove(best_peer_id)
+
+        clusters.append(current_cluster)
+
+    return clusters
+
+
+def _simulate_ekf_filter(config: FilterConfig,
+                         logger: logging.Logger
+                         ) -> tuple[np.ndarray,
+                                    np.ndarray,
+                                    list[ObservationRecord],
+                                    np.ndarray]:
     """
     Simulate the satellite constellation and run the Clustered EKF to generate
     observation records.
@@ -306,9 +375,8 @@ def _simulate_ekf_filter(config: FilterConfig, logger: Any) -> \
     # --- Start of Clustered EKF Implementation ---
     logger.info("Initialising Clustered EKF with cluster size %s", CLUSTER_SIZE)
 
-    # 1. Create clusters of satellite IDs
-    all_sat_ids = list(range(config.N))
-    clusters = [all_sat_ids[i:i + CLUSTER_SIZE] for i in range(0, config.N, CLUSTER_SIZE)]
+    # 1. Cluster by Orbital Physics
+    clusters = _cluster_by_orbital_physics(truth[0], config.N, CLUSTER_SIZE)
 
     # 2. Create a list of EKF instances, one for each cluster
     cluster_ekfs = _create_cluster_ekfs(config, truth, clusters, logger)
@@ -542,7 +610,7 @@ async def _run_consensus_phase(config: FilterConfig,
                                all_obs_records: list[ObservationRecord],
                                save_sim_results: bool,
                                sim_results_path: str) -> \
-        tuple[DAG, dict, np.ndarray, set[int]]:
+        tuple[dict[int, DAG], dict, np.ndarray, set[int]]:
     """
     Run the consensus simulation phase where satellite nodes submit transactions to the DAG
     based on the observation records generated by the EKF.
@@ -556,43 +624,35 @@ async def _run_consensus_phase(config: FilterConfig,
 
     Returns:
     - A tuple containing:
-        - The final DAG object after all transactions have been processed.
+        - A dict of DAG objects
         - A dictionary containing the reputation history for each satellite.
         - The ground truth trajectory history.
         - A set of faulty satellite IDs.
     """
     faulty_ids: set[int] = set()
-    poise = ConsensusMechanism()
-    queue: asyncio.Queue = asyncio.Queue()
-    dag = DAG(queue=queue, consensus_mech=poise)
-    listen_task = asyncio.create_task(dag.listen())
     sim_data = SimData(
         truth=truth,
-        dag=dag,
         faulty_ids=faulty_ids,
         logger=get_logger())
 
-    try:
-        rep_history = await _execute_consensus_loop(
-            config, sim_data, all_obs_records, queue
-        )
+    rep_history = await _execute_consensus_loop(
+        config, sim_data, all_obs_records
+    )
 
-        # Save Consensus Simulation results
-        if save_sim_results:
-            _save_consensus_results(sim_results_path, sim_data, rep_history)
-    finally:
-        listen_task.cancel()
-        try:
-            await listen_task
-        except asyncio.CancelledError:
-            pass
+    # For saving/plotting, we collect all localised DAGs
+    # Key: Satellite ID, Value: That satellite's local DAG instance
+    nodes_dags = {sid: sat.dag for sid, sat in sim_data.satellites.items()}
 
-    return dag, rep_history, truth, faulty_ids
+    if save_sim_results:
+        _save_consensus_results(sim_results_path, sim_data, rep_history, nodes_dags)
+
+    return nodes_dags, rep_history, truth, faulty_ids
 
 
-async def _execute_consensus_loop(config: FilterConfig, sim_data: SimData,
-                                  all_obs_records: list[ObservationRecord],
-                                  queue: asyncio.Queue) -> dict[str, list[float]]:
+async def _execute_consensus_loop(config: FilterConfig,
+                                  sim_data: SimData,
+                                  all_obs_records: list[ObservationRecord]
+                                  ) -> dict[str, list[float]]:
     """
     Execute the main consensus loop where satellite nodes interact based on the EKF
     observation records.
@@ -601,7 +661,6 @@ async def _execute_consensus_loop(config: FilterConfig, sim_data: SimData,
     - config: FilterConfig object with simulation parameters.
     - sim_data: The fixed simulation data
     - all_obs_records: The list of observation records generated by the EKF.
-    - queue: The asyncio.Queue used for communication with the DAG.
 
     Returns:
     - A dictionary containing the reputation history for each satellite,
@@ -612,12 +671,13 @@ async def _execute_consensus_loop(config: FilterConfig, sim_data: SimData,
     # Create one SatelliteNode for each of the N satellites in the simulation.
     unique_ids = sorted(list(range(config.N)))
 
-    sim_data.satellites = {sid: SatelliteNode(node_id=sid, queue=queue) \
-                           for sid in unique_ids}
+    # Every satellite gets its own fresh node and its own internal consensus processor
+    sim_data.satellites = {
+        sid: SatelliteNode(node_id=sid, consensus_mech=ConsensusMechanism()) \
+        for sid in unique_ids
+    }
 
-    # Initialise rep_history with the starting reputation for all satellites.
-    rep_history: dict[str, list[float]] = {str(sid): [sim_data.satellites[sid].reputation] \
-                                           for sid in unique_ids}
+    rep_history = {str(sid): [sim_data.satellites[sid].reputation] for sid in unique_ids}
 
     # Group observations by step
     obs_by_step: dict[int, list[ObservationRecord]] = {i: [] for i in range(config.steps)}
@@ -625,18 +685,26 @@ async def _execute_consensus_loop(config: FilterConfig, sim_data: SimData,
         obs_by_step[obs.step].append(obs)
 
     for k in range(config.steps):
-        # Update satellite positions at each step
+        # 1. Update positions based on orbital truth data
         for sid, sat in sim_data.satellites.items():
             sat.update_position(sim_data.truth[k, sid*6:(sid+1)*6])
 
+        # 2. Dynamic P2P Topology Discovery
+        # Before sending messages, calculate which satellites are in view of each other at step k
+        for sid, sat in sim_data.satellites.items():
+            sat.peers = [
+                other_sat for other_sid, other_sat in sim_data.satellites.items()
+                if sid != other_sid and is_in_isl_range(config.ISL_range_m, sat, other_sat)
+            ]
+
         transactions_submitted_this_step = {sid: False for sid in unique_ids}
         step_data = StepData(
-            k = k,
+            k=k,
             obs_by_step=obs_by_step,
             tx_this_step=transactions_submitted_this_step
         )
 
-        # Iterate through satellites to check for ISL opportunities
+        # 3. Process Interactions
         for sid, sat in sim_data.satellites.items():
             await _process_satellite_interactions(
                 sid=sid,
@@ -646,11 +714,9 @@ async def _execute_consensus_loop(config: FilterConfig, sim_data: SimData,
                 sim_data=sim_data
             )
 
-            # If no transaction submitted, reputation decays towards neutral
             if not transactions_submitted_this_step[sid]:
                 sat.reputation = sat.rep_manager.decay(sat.reputation)
 
-        # Record reputation for all satellites at the end of the step
         for sid in unique_ids:
             rep_history[str(sid)].append(sim_data.satellites[sid].reputation)
 
@@ -676,40 +742,44 @@ async def _process_satellite_interactions(sid: int,
     - sim_data: Fixed data for the simulation.
 
     Returns:
-    - None. The function updates the state of the satellite and interacts with the DAG as needed.
+    - None. The function updates the state of the satellite and interacts
+            with the satellite's DAG as needed.
     """
-    for other_sid, other_sat in sim_data.satellites.items():
-        if sid == other_sid:
-            continue
+    # Look through the peers we calculated are currently in range
+    for other_sat in sat.peers:
+        other_sid = other_sat.id
 
-        if is_in_isl_range(config.ISL_range_m, sat, other_sat):
-            # Find the corresponding observation record
-            obs_to_submit = next(
-                (obs for obs in step_data.obs_by_step.get(step_data.k, []) \
-                 if obs.observer == sid and obs.target == other_sid),
-                None
-            )
+        # When an ISL link is active, ask our peer for historical
+        # data transactions we missed
+        await sat.request_sync_from_peer(other_sat)
 
-            if obs_to_submit:
-                # Inject dishonest behaviour profiles
-                apply_network_faults(obs_to_submit,
-                                     sid, config.N,
-                                     step_data.k,
-                                     sim_data.faulty_ids)
+        # Find the corresponding observation record
+        obs_to_submit = next(
+            (obs for obs in step_data.obs_by_step.get(step_data.k, []) \
+             if obs.observer == sid and obs.target == other_sid),
+            None
+        )
 
-                sat.load_sensor_data(obs_to_submit)
-                sim_data.logger.info("Satellite %s: submitting transaction \
-                            for witness of %s.", sid, other_sid)
-                await sat.submit_transaction(recipient_address=other_sid)
-                step_data.tx_this_step[sid] = True
+        if obs_to_submit:
+            # Inject dishonest behaviour profiles
+            apply_network_faults(obs_to_submit,
+                                 sid, config.N,
+                                 step_data.k,
+                                 sim_data.faulty_ids)
 
-            # Once observation submitted, synchronise the DAG on the satellite
-            sat.sync_data(sim_data.dag)
+            sat.load_sensor_data(obs_to_submit)
+            sim_data.logger.info("Satellite %s: submitting transaction of target %s\
+                                 and broadcasting to peers.", sid, other_sid)
+
+            # This saves locally and calls peer.receive_transaction() across the network
+            await sat.submit_transaction(recipient_address=other_sid)
+            step_data.tx_this_step[sid] = True
 
 
 def _save_consensus_results(sim_results_path: str,
                             sim_data: SimData,
-                            rep_history: dict[str, list[float]]
+                            rep_history: dict[str, list[float]],
+                            nodes_dags: dict[int, DAG]
                             ) -> None:
     """
     Save the consensus simulation results to a .npz file.
@@ -722,26 +792,48 @@ def _save_consensus_results(sim_results_path: str,
         - faulty_ids: A set of satellite IDs that exhibited faulty behaviour during the simulation.
         - logger: Logger object for logging messages.
     - rep_history: A dictionary containing the reputation history for each satellite.
+    - nodes_dags: A dictionary of the local DAGs for each satellite in the simulation.
 
     Returns:
     - None. The results are saved to the specified file path.
     """
     sim_data.logger.info("Saving Simulation results to %s", sim_results_path)
     os.makedirs(os.path.dirname(sim_results_path), exist_ok=True)
+
+    unified_ledger: dict[str, list[Transaction]] = {}
+    unified_states: dict[str, dict] = {}  # Store the network's consensus opinions
+
+    for _, local_dag in nodes_dags.items():
+        for tx_hash, tx_list in local_dag.ledger.items():
+            current_state = local_dag.local_consensus_states.get(tx_hash, {})
+
+            if tx_hash not in unified_ledger:
+                unified_ledger[tx_hash] = tx_list
+                unified_states[tx_hash] = current_state
+            else:
+                existing_state = unified_states.get(tx_hash, {})
+
+                # Replaced duplicate blocks with the clean shared helper evaluation check
+                if is_state_evaluated(current_state) and not is_state_evaluated(existing_state):
+                    unified_ledger[tx_hash] = tx_list
+                    unified_states[tx_hash] = current_state
+
     np.savez_compressed(
         sim_results_path,
-        dag_ledger=sim_data.dag.ledger, # type: ignore[arg-type]
-        rep_history=rep_history, # type: ignore[arg-type]
+        dag_ledger=unified_ledger,  # type: ignore[arg-type]
+        global_consensus_states=unified_states,  # type: ignore[arg-type]
+        rep_history=rep_history,  # type: ignore[arg-type]
         truth=sim_data.truth,
         faulty_ids=np.array(list(sim_data.faulty_ids))
     )
-    sim_data.logger.info("Simulation results saved successfully.")
+    sim_data.logger.info("Simulation results saved successfully with \
+                         %d unique evaluated transactions.", len(unified_ledger))
 
 # Run demo
 if __name__ == "__main__":
     accord_logger = get_logger()
 
-    FINAL_DAG: DAG | MockDAG | None = None
+    FINAL_DAG: dict[int, DAG] | MockDAG | None = None
     REP_HIST: Optional[dict] = None
     TRUTH: Optional[np.ndarray] = None
     FAULTY_IDS: Optional[set[int]] = None
@@ -756,7 +848,13 @@ if __name__ == "__main__":
                 saved_N = int(simulated_data['truth'].shape[1] / 6)
                 if saved_N == DEFAULT_CONFIG.N:
                     dag_ledger = simulated_data['dag_ledger'].item()
-                    FINAL_DAG = MockDAG(dag_ledger)
+
+                    # Fetch states, default to empty dict if older sim data file
+                    states = simulated_data.get('global_consensus_states', np.array({})).item()
+                    if not isinstance(states, dict):
+                        states = {}
+
+                    FINAL_DAG = MockDAG(ledger=dag_ledger, local_consensus_states=states)
                     REP_HIST = simulated_data['rep_history'].item()
                     TRUTH = simulated_data['truth']
                     FAULTY_IDS = set(simulated_data['faulty_ids'])

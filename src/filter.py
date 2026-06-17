@@ -493,6 +493,47 @@ def _generate_noisy_measurements(config: FilterConfig,
 
     return z_hist
 
+
+def check_line_of_sight(r_obs: np.ndarray,
+                        r_tgt: np.ndarray) -> bool:
+    """
+    Determines if a line-of-sight vector between two satellites is clear
+    or occluded by the spherical body of the Earth.
+
+    Args:
+    - r_obs (np.ndarray): 3D position vector of the observer
+                          satellite [x, y, z] in meters.
+    - r_tgt (np.ndarray): 3D position vector of the target
+                          satellite [x, y, z] in meters.
+
+    Returns:
+    - bool: True if line-of-sight is clear, False if occluded by the Earth.
+    """
+    # Vector pointing from observer to target
+    rho = r_tgt - r_obs
+    rho_norm = np.linalg.norm(rho)
+    if rho_norm == 0:
+        return False
+
+    # Normalised line of sight vector
+    u = rho / rho_norm
+
+    # Calculate projection parameter of the Earth's centre onto the LOS line segment
+    # t represents the fraction along the segment from observer to target
+    t = -np.dot(r_obs, u) / rho_norm
+
+    # If the closest point to the Earth's centre lies between the two satellites
+    if 0.0 <= t <= 1.0:
+        # Compute the minimum distance vector from the Earth's centre to the chord segment
+        closest_point = r_obs + t * rho
+        min_dist = np.linalg.norm(closest_point)
+
+        # If the minimum distance is less than Earth's radius, the link is blocked
+        if min_dist < RE:
+            return False
+
+    return True
+
 # ----------------------- EKF ------------------------------
 def joseph_update(P: NDArray[np.float64],
                   K: NDArray[np.float64],
@@ -638,6 +679,11 @@ def _process_observation_pair(obs_pair: ObservationPair,
 
     # Skip records for satellites further than 5000km apart
     if r > MAX_ISL_RANGE:
+        return None
+
+    # If the Earth is in the way, the sensor cannot acquire the measurement.
+    if not check_line_of_sight(ekf.x[STATE_DIM*obs_pair.i : STATE_DIM*obs_pair.i+3],
+                               ekf.x[STATE_DIM*obs_pair.j : STATE_DIM*obs_pair.j+3]):
         return None
 
     # vrel is a relative velocity vector

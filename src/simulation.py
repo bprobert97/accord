@@ -57,7 +57,7 @@ def generate_random_keplerian_elements(seed: int) -> KeplerianElements:
     altitude = rng.uniform(180e3, 2000e3)
     a = RE + altitude
 
-    e = rng.uniform(0, 0.05)
+    e = 0.0
     i = rng.uniform(0, np.pi) # inclination in radians
     raan = rng.uniform(0, 2 * np.pi)
     argp = rng.uniform(0, 2 * np.pi)
