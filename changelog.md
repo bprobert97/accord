@@ -7,11 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [3.2] - 2026-06
 
 ### Summary
-This release performs a major refactoring to decentralise the DAG and ConsensusMechanism classes to eahc SatelliteNode, instead of having centralised class instances that SatelliteNodes Interact with.
+This release performs a major refactoring to decentralise the DAG and ConsensusMechanism classes to each SatelliteNode, instead of having centralised class instances that SatelliteNodes Interact with.
 
 ### Added
 - Remove centralised DAG and ConsensusMechanism class instances and put them on board each SatelliteNode
-- Change how satellites are clustered for EKF truth genertion to make it more efficient and base din orbital physics
+- Change how satellites are clustered for EKF truth generation to make it more efficient and base din orbital physics
 - Change how stats are calculated
 - Fix get_parents() function and make has load on Transaction initialisation
 - Get chi squared plots to use curved text
