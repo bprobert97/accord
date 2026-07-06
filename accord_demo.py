@@ -889,16 +889,16 @@ if __name__ == "__main__":
 
     # Use the results for plotting
     if FINAL_DAG is not None and FAULTY_IDS is not None:
-        plot_nis_boxplot(FINAL_DAG, faulty_ids=FAULTY_IDS)
+        plot_nis_boxplot(FINAL_DAG, compromised_ids=FAULTY_IDS)
         NIS_CONVERGENCE_INDEX = calculate_nis_convergence_index(FINAL_DAG,\
-            faulty_ids=FAULTY_IDS)
-        plot_nis_boxplot(FINAL_DAG, faulty_ids=FAULTY_IDS, \
+            compromised_ids=FAULTY_IDS)
+        plot_nis_boxplot(FINAL_DAG, compromised_ids=FAULTY_IDS, \
             convergence_index=NIS_CONVERGENCE_INDEX)
         calculate_median_percentiles()
         check_consensus_outcomes(FINAL_DAG)
     if REP_HIST and FAULTY_IDS is not None:
-        CONVERGENCE_IDX = calculate_convergence_index(REP_HIST, faulty_ids=FAULTY_IDS)
-        plot_aggregated_reputation(REP_HIST, faulty_ids=FAULTY_IDS,
+        CONVERGENCE_IDX = calculate_convergence_index(REP_HIST, compromised_ids=FAULTY_IDS)
+        plot_aggregated_reputation(REP_HIST, compromised_ids=FAULTY_IDS,
                                    start_at_full_constellation=False,
                                    convergence_index=CONVERGENCE_IDX)
     if TRUTH is not None and FAULTY_IDS is not None:
