@@ -37,6 +37,7 @@ If you use this work, please cite it as:
 ├── 📁 images/                      # Image assets
 │
 ├── 📁 src/                        # Main source code
+│   └── 📁 legacy/                 # Legacy code maintained for easy plot generation
 │   └── __init__.py                # Empty file, for module creation
 │   └── consensus_mech.py          # Code for the PoISE consensus mechanism
 │   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure

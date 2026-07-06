@@ -5,17 +5,6 @@ participant "Filter" as filter
 participant "Satellite" as sat
 participant "Satellite Peers" as peers
 
-== Initialisation & Truth Generation ==
-sim -> sim: simulate_truth_and_meas(N, steps, dt)
-note right
-  Generates truth_hist (ground truth orbits)
-  and z_hist (noisy ISL measurements)
-end note
-
-sim -> filter: Create EKF instances (initialised with truth[0])
-sim -> sat: Create Satellite nodes
-sat -> sat: Initialise onboard DAG
-
 == Simulation Loop ==
 /'
 The simulation generates all possible observation records for a
@@ -28,27 +17,24 @@ This is sufficient and efficient for research and testing.
 '/
 
 loop for each timestep k
-    sim -> filter: predict() & update(z_hist[k])
-    note right: Filter estimates state based on noisy measurements
-    filter -->> sim: ObservationRecords (with NIS)
-    note right: Observation records generated for Max ISL for 5000km
+    sim -> filter: EKF predict and update steps
+    filter -->> sim: ObservationRecords
+    note right: Based on EKF generated measurements
 
-    sim -> sat: update_position(truth_hist[k])
+    sim -> sat: update_position(ground_truth)
 
     group Connection within ISL range
         sat -> peers: request_sync_from_peer()
-        peers --> sat: peer.dag.transactions()
-        note left: Requests data sync, then submits new observation data
-        sat -> sat: Update on-board DAG
+        peers --> sat: peer.transactions()
+        sat -> sat: Update on-board ledger
 
         sim -> sat: load_sensor_data(ObservationRecord)
-        sat -> peers: submit_transaction()
+        sat -> peers ++: submit_transaction()
     end
 end
 
 == Consensus (Async) ==
 peers -> peers: receive_transaction()
 peers -> peers: PoISE(transaction, reputation)
-peers -> sat: update_reputation()
-
+peers -> peers: update_reputation(sat)
 @enduml

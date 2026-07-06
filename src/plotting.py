@@ -24,7 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import json
 import os
 import re
-from typing import Optional, List, Dict, Any, Iterator, Tuple
+from typing import Optional, Any, Iterator, Tuple
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -281,40 +281,55 @@ def _set_axes_equal(ax: Any) -> None:
     ax.set_ylim(mid_y - max_range, mid_y + max_range)
     ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
+def _draw_scatter_underneath(ax: Any, plot_data: list) -> None:
+    """
+    Helper to draw raw scatter points underneath box plots with viridis colors.
+
+    Args:
+    - ax (Any): The Axes of the subplot.
+    - plot_data (list): The lists of values to plot.
+
+    Returns:
+    - None: Modifies the plot in-place.
+    """
+    scatter_colors = [
+        plt.get_cmap('viridis')(val) for val in np.linspace(0.8, 0.6, len(plot_data))
+    ]
+    for i, data in enumerate(plot_data):
+        ax.scatter(np.random.normal(loc=i + 1, scale=0.02, size=len(data)),
+                   data, alpha=0.3, color=scatter_colors[i], s=20, zorder=2)
+
 
 def plot_nis_boxplot(dag: Any,
-                     faulty_ids: set[int],
+                     compromised_ids: set[int],
                      convergence_index: Optional[int] = None) -> None:
     """
-    Generates a grouped box plot for NIS values, separating honest and faulty satellites.
+    Generates a grouped box plot for NIS values, separating honest and compromised satellites.
 
     Args:
     - dag (DAG): The DAG object containing transaction data.
-    - faulty_ids (set[int]): A set of IDs for faulty satellites.
+    - compromised_ids (set[int]): A set of IDs for compromised satellites.
     - convergence_index (Optional[int]): Optional index to only plot data after filter convergence.
 
     Returns:
     - None: Displays a matplotlib plot.
     """
-    start_index = convergence_index if convergence_index is not None else 0
-    honest_nis, faulty_nis = extract_nis_data(dag, faulty_ids, start_index)
+    raw_data = extract_nis_data(
+        dag, compromised_ids, convergence_index if convergence_index is not None else 0
+    )
 
-    if not honest_nis and not faulty_nis:
+    if not raw_data[0] and not raw_data[1]:
         print("No NIS data available to create a box plot.")
         return
 
-    plot_data = []
-    labels = []
+    plot_data = [d for d in raw_data if d]
+    labels = [l for d, l in zip(raw_data, ["Honest Satellites", "Compromised Satellites"]) if d]
 
-    if honest_nis:
-        plot_data.append(honest_nis)
-        labels.append("Honest Satellites")
-    if faulty_nis:
-        plot_data.append(faulty_nis)
-        labels.append("Faulty Satellites")
+    ax = plt.subplots(figsize=(10, 6))[1]
+    parts = ax.boxplot(plot_data, showfliers=False, zorder=3)
 
-    _, ax = plt.subplots(figsize=(10, 6))
-    parts = ax.boxplot(plot_data)
+    # 2. Plot raw scatter points underneath using helper
+    _draw_scatter_underneath(ax, plot_data)
 
     ax.set_xticks(range(1, len(labels) + 1))
     ax.set_xticklabels(labels)
@@ -324,11 +339,19 @@ def plot_nis_boxplot(dag: Any,
             parts[partname].set_color('black')
             parts[partname].set_linewidth(1.5)
 
-    colour_bound = plt.get_cmap('viridis')(0.1)
-
-    ax.axhline(chi2.ppf((1 - 0.95) / 2, df=2), color=colour_bound, linestyle='--',
-               alpha=0.7, label='95% Confidence Interval Bounds')
-    ax.axhline(chi2.ppf((1 + 0.95) / 2, df=2), color=colour_bound, linestyle='--', alpha=0.7)
+    ax.axhline(
+        chi2.ppf((1 - 0.95) / 2, df=2),
+        color=plt.get_cmap('viridis')(0.1),
+        linestyle='--',
+        alpha=0.7,
+        label='95% Confidence Interval Bounds'
+    )
+    ax.axhline(
+        chi2.ppf((1 + 0.95) / 2, df=2),
+        color=plt.get_cmap('viridis')(0.1),
+        linestyle='--',
+        alpha=0.7
+    )
     ax.axhline(1.386, color='black', linestyle=':', label='Expected Median (1.386)')
 
     ax.set_xticks(np.arange(1, len(labels) + 1))
@@ -345,22 +368,22 @@ def plot_nis_boxplot(dag: Any,
 
 
 def extract_nis_data(dag: Any,
-                     faulty_ids: Optional[set[int]] = None,
+                     compromised_ids: Optional[set[int]] = None,
                      start_index: int = 0) -> tuple[list[float], list[float]]:
     """
-    Parses the DAG and extracts honest and faulty NIS values.
+    Parses the DAG and extracts honest and compromised NIS values.
 
     Args:
     - dag (DAG): The DAG object containing transaction data.
-    - faulty_ids (Optional[set[int]]): A set of IDs for faulty satellites.
+    - compromised_ids (Optional[set[int]]): A set of IDs for compromised satellites.
     - start_index (int): Index to start plotting or extracting data from.
 
     Returns:
-    - tuple[list[float], list[float]]: A tuple of honest and faulty NIS data lists.
+    - tuple[list[float], list[float]]: A tuple of honest and compromised NIS data lists.
     """
     honest_nis = []
-    faulty_nis = []
-    f_ids = faulty_ids or set()
+    compromised_nis = []
+    f_ids = compromised_ids or set()
     states = _get_local_consensus_states(dag)
 
     for tx, tx_data in extract_nis_transactions(dag):
@@ -372,11 +395,11 @@ def extract_nis_data(dag: Any,
             continue
 
         if int(sid) in f_ids:
-            faulty_nis.append(float(nis))
+            compromised_nis.append(float(nis))
         else:
             honest_nis.append(float(nis))
 
-    return honest_nis[start_index:], faulty_nis[start_index:]
+    return honest_nis[start_index:], compromised_nis[start_index:]
 
 
 def calculate_median_percentiles(dof: int = 2) -> None:
@@ -470,7 +493,7 @@ def check_consensus_outcomes(dag: Any,
 
 def calculate_convergence_index(
     rep_history: dict[str, list[float]],
-    faulty_ids: set[int],
+    compromised_ids: set[int],
     threshold: float = 0.5
 ) -> int:
     """
@@ -479,13 +502,13 @@ def calculate_convergence_index(
 
     Args:
     - rep_history (dict[str, list[float]]): Dictionary of reputation histories.
-    - faulty_ids (set[int]): Set of faulty satellite IDs.
+    - compromised_ids (set[int]): Set of compromised satellite IDs.
     - threshold (float): Reputation threshold to consider "converged".
 
     Returns:
     - int: The index of the first step where convergence is detected.
     """
-    honest_sids = [sid for sid in rep_history.keys() if int(sid) not in faulty_ids]
+    honest_sids = [sid for sid in rep_history.keys() if int(sid) not in compromised_ids]
     if not honest_sids:
         return 0
 
@@ -501,7 +524,7 @@ def calculate_convergence_index(
 
 def calculate_nis_convergence_index(
     dag: Any,
-    faulty_ids: set[int],
+    compromised_ids: set[int],
     confidence: float = 0.95,
     window_size: int = 5
 ) -> int:
@@ -511,14 +534,14 @@ def calculate_nis_convergence_index(
 
     Args:
     - dag (DAG): The DAG object containing transactions with NIS metadata.
-    - faulty_ids (set[int]): Set of faulty satellite IDs to exclude.
+    - compromised_ids (set[int]): Set of compromised satellite IDs to exclude.
     - confidence (float): Confidence level for chi-square bounds (default=0.95).
     - window_size (int): Number of consecutive steps NIS must be within bounds.
 
     Returns:
     - int: The first step where convergence is detected.
     """
-    step_nis_data, step_dof_data = _extract_step_data(dag, faulty_ids)
+    step_nis_data, step_dof_data = _extract_step_data(dag, compromised_ids)
 
     if not step_nis_data:
         return 0
@@ -540,14 +563,14 @@ def calculate_nis_convergence_index(
 
 
 def _extract_step_data(dag: DAG | MockDAG,
-                       faulty_ids: set[int]
+                       compromised_ids: set[int]
                        ) -> tuple[dict[int, list[float]], dict[int, list[int]]]:
     """
     Helper to parse the ledger and group honest NIS and DOF data by step.
 
     Args:
     - dag (DAG): The DAG object containing transactions with NIS metadata.
-    - faulty_ids (set[int]): Set of faulty satellite IDs to exclude.
+    - compromised_ids (set[int]): Set of compromised satellite IDs to exclude.
 
     Returns:
     - tuple[dict[int, list[float]], dict[int, list[int]]]: A tuple
@@ -570,7 +593,7 @@ def _extract_step_data(dag: DAG | MockDAG,
 
             sid = tx_data.get("observer")
             step = tx_data.get("step")
-            if sid is None or step is None or int(sid) in faulty_ids:
+            if sid is None or step is None or int(sid) in compromised_ids:
                 continue
 
             nis = state.get("nis")
@@ -586,16 +609,16 @@ def _extract_step_data(dag: DAG | MockDAG,
 
 def plot_aggregated_reputation(
     rep_history: dict[str, list[float]],
-    faulty_ids: set[int],
+    compromised_ids: set[int],
     start_at_full_constellation: bool = False,
     convergence_index: Optional[int] = None
 ) -> None:
     """
-    Plots the aggregated median reputation over time for honest vs. faulty satellites.
+    Plots the aggregated median reputation over time for honest vs. compromised satellites.
 
     Args:
     - rep_history (dict[str, list[float]]): Maps satellite IDs to their reputation histories.
-    - faulty_ids (set[int]): Set of satellite IDs that are considered faulty.
+    - compromised_ids (set[int]): Set of satellite IDs that are considered compromised.
     - start_at_full_constellation (bool): If True, chops pre-convergence step indexes from display.
     - convergence_index (Optional[int]): Optional index pointing out filter convergence point.
 
@@ -606,7 +629,8 @@ def plot_aggregated_reputation(
         print("No reputation data to plot.")
         return
 
-    honest_arr, faulty_arr, max_len = _prepare_reputation_matrices(rep_history, faulty_ids)
+    honest_arr, compromised_arr, max_len = _prepare_reputation_matrices(rep_history,
+                                                                        compromised_ids)
 
     start_index = 0
     if start_at_full_constellation:
@@ -626,17 +650,17 @@ def plot_aggregated_reputation(
 
     _plot_reputation_spread(steps, honest_arr[:, start_index:] \
                             if honest_arr.size else np.array([]), cmap(0.5), "Honest")
-    _plot_reputation_spread(steps, faulty_arr[:, start_index:] \
-                            if faulty_arr.size else np.array([]), cmap(0.05), "Faulty")
+    _plot_reputation_spread(steps, compromised_arr[:, start_index:] \
+                            if compromised_arr.size else np.array([]), cmap(0.05), "Faulty")
 
     plt.axhline(MAX_REPUTATION/2, color="gray", linestyle=":",
-                linewidth=2, label="Neutral (0.5)")
+                linewidth=2, label="Neutral Reputation(0.5)")
     if convergence_index is not None and not start_at_full_constellation:
         plt.axvline(x=convergence_index, color="black", linestyle="--",
                     linewidth=1, label="Filter Convergence")
 
     plt.xlabel("Chronological Transaction Index [-]", fontsize=20)
-    plt.ylabel("Reputation Score [-]", fontsize=20)
+    plt.ylabel("Reputation [-]", fontsize=20)
     plt.tick_params(axis='both', labelsize=16)
     plt.legend(loc="lower right", fontsize=14)
     plt.grid(True, linestyle=":", alpha=0.7)
@@ -645,28 +669,29 @@ def plot_aggregated_reputation(
 
 
 def _prepare_reputation_matrices(rep_history: dict[str, list[float]],
-                                 faulty_ids: set[int]) -> Tuple[np.ndarray, np.ndarray, int]:
+                                 compromised_ids: set[int]) -> Tuple[np.ndarray, np.ndarray, int]:
     """
-    Prepares separate matrices for honest and faulty satellite reputations.
+    Prepares separate matrices for honest and compromised satellite reputations.
 
     Args:
     - rep_history (dict[str, list[float]]): History map containing chronological values.
-    - faulty_ids (set[int]): Evaluated unique identification numbers for standard deviations.
+    - compromised_ids (set[int]): Evaluated unique identification numbers for standard deviations.
 
     Returns:
-    - Tuple[np.ndarray, np.ndarray, int]: Padded matrices for honest, faulty, and length bounds.
+    - Tuple[np.ndarray, np.ndarray, int]: Padded matrices for honest, compromised,
+      and length bounds.
     """
     max_len = max(len(h) for h in rep_history.values())
-    honest_matrix, faulty_matrix = [], []
+    honest_matrix, compromised_matrix = [], []
 
     for sid, history in rep_history.items():
         padded_history = history + [history[-1]] * (max_len - len(history))
-        if int(sid) in faulty_ids:
-            faulty_matrix.append(padded_history)
+        if int(sid) in compromised_ids:
+            compromised_matrix.append(padded_history)
         else:
             honest_matrix.append(padded_history)
 
-    return np.array(honest_matrix), np.array(faulty_matrix), max_len
+    return np.array(honest_matrix), np.array(compromised_matrix), max_len
 
 
 def _plot_reputation_spread(steps: np.ndarray,
@@ -781,58 +806,7 @@ def _plot_satellite_tracks(ax: Any, truth: np.ndarray, n: int) -> None:
                    linewidth=0.5, zorder=6)
 
 
-def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
-    """
-    Plots the distribution of median NIS values across multiple Monte Carlo runs.
 
-    Args:
-    - all_kpis (List[Dict[str, Any]]): A list of KPI dictionaries containing run statistics.
-
-    Returns:
-    - None: Displays a box plot tracking historical data arrays.
-    """
-    all_honest_medians = []
-    all_faulty_medians = []
-
-    for kpi in all_kpis:
-        h_stats = kpi.get("honest_nis_stats", {})
-        f_stats = kpi.get("faulty_nis_stats", {})
-
-        if h_stats["median"]:
-            all_honest_medians.append(h_stats["median"])
-        if f_stats["median"]:
-            all_faulty_medians.append(f_stats["median"])
-
-    if not all_honest_medians and not all_faulty_medians:
-        print("No MC NIS data available to plot.")
-        return
-
-    plot_data = []
-    labels = []
-    if all_honest_medians:
-        plot_data.append(all_honest_medians)
-        labels.append("Honest Medians")
-    if all_faulty_medians:
-        plot_data.append(all_faulty_medians)
-        labels.append("Faulty Medians")
-
-    _, ax = plt.subplots(figsize=(10, 6))
-    ax.boxplot(plot_data)
-
-    dof = 2
-    expected_median = chi2.ppf(0.5, df=dof)
-    ax.axhline(expected_median, color='black', linestyle=':',
-               label=f'Expected Median ({expected_median:.3f})')
-
-    ax.set_ylabel("Median NIS per Run [-]", fontsize=20)
-    ax.set_yscale("log")
-    ax.set_xticklabels(labels, fontsize=18)
-    ax.tick_params(axis='y', labelsize=16)
-    ax.grid(True, linestyle=":", alpha=0.7)
-    ax.legend(fontsize=14)
-
-    plt.tight_layout()
-    plt.show()
 
 
 def generate_constellation_df(num_sats: int, seed: int) -> pd.DataFrame:
@@ -912,6 +886,80 @@ def generate_corner_plot(num_sats_per_run: int = 400,
     plt.subplots_adjust(top=0.92, bottom=0.08, wspace=0.15, hspace=0.15)
 
     plt.savefig("images/orbital_elements_corner_plot.png", dpi=300, bbox_inches='tight')
+    plt.show()
+
+def plot_integrated_walker_delta(truth: np.ndarray,
+                                 n: int,
+                                 data_dir: str = "images") -> None:
+    """
+    Plots both the 3D spatial distribution and 2D ground tracks of a
+    satellite constellation on a single figure.
+
+    Args:
+    - truth (np.ndarray): The history of true stacked state vectors.
+    - n (int): The number of satellites.
+    - data_dir (str): Directory to save the output image.
+
+    Returns:
+    - None: Displays and saves the integrated matplotlib plot.
+    """
+    # Create a wider figure to accommodate side-by-side subplots comfortably
+    fig = plt.figure(figsize=(18, 8))
+
+    # Left Subplot: 3D Spatial Distribution
+    ax1 = fig.add_subplot(121, projection='3d')
+    _plot_earth_surface(ax1)
+
+    for i in range(n):
+        pos_hist = truth[:, i*6:i*6+3]
+        ax1.plot(pos_hist[:, 0], pos_hist[:, 1], pos_hist[:, 2], color='black', alpha=0.3)
+        ax1.scatter(pos_hist[-1, 0], pos_hist[-1, 1], pos_hist[-1, 2],
+                    color='black', s=10) # type: ignore[misc]
+
+    legend_elements_3d = [
+        Line2D([0], [0], marker='o', color='w', label='Satellite',
+               markerfacecolor='black', markersize=8),
+        Line2D([0], [0], color='black', lw=1.5, label='Simulated Orbit')
+    ]
+    ax1.legend(handles=legend_elements_3d, loc='upper right')
+
+    ax1.set_xlabel("X (m)")
+    ax1.set_ylabel("Y (m)")
+    ax1.set_zlabel("Z (m)")
+    ax1.set_title("a)", y=-0.15, fontsize=16)
+
+    _set_axes_equal(ax1)
+
+    # Right subplot: 2D Ground Track
+    ax2 = fig.add_subplot(122)
+    ax2.set_xlim(-180, 180)
+    ax2.set_ylim(-90, 90)
+
+    _plot_map_background(ax2)
+    _plot_satellite_tracks(ax2, truth, n)
+
+    legend_elements_2d = [
+        Line2D([0], [0], marker='o', color='w', label='Satellite',
+               markerfacecolor='black', markersize=10),
+        Line2D([0], [0], color='black', lw=2, label='Simulated Orbit')
+    ]
+    leg = ax2.legend(handles=legend_elements_2d, loc='upper right', framealpha=0.7,
+                     facecolor='white', fontsize=14)
+    leg.set_zorder(10)
+
+    ax2.set_xlabel("Longitude [Degrees]", fontsize=16)
+    ax2.set_ylabel("Latitude [Degrees]", fontsize=16)
+    ax2.tick_params(axis='both', labelsize=14)
+    ax2.grid(True, linestyle=":", alpha=0.4, color='white')
+    ax2.set_title("b)", y=-0.18, fontsize=16)
+
+    plt.tight_layout()
+
+    # Ensure the output directory exists
+    os.makedirs(data_dir, exist_ok=True)
+    save_path = os.path.join(data_dir, "integrated_walker_delta.png")
+
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
 
 

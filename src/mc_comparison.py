@@ -68,14 +68,14 @@ def get_aggregated_reps(results: List[Dict[str, Any]]) -> tuple[np.ndarray,
 
     Returns:
         Two arrays: One for the mean reputation values of the honest nodes,
-        and another for the faulty nodes.
+        and another for the compromised nodes.
     """
     honest_means = []
-    faulty_means = []
+    compromised_means = []
     for kpi in results:
         honest_means.append(np.mean(kpi["honest_matrix"], axis=0))
-        faulty_means.append(np.mean(kpi["faulty_matrix"], axis=0))
-    return np.array(honest_means), np.array(faulty_means)
+        compromised_means.append(np.mean(kpi["faulty_matrix"], axis=0))
+    return np.array(honest_means), np.array(compromised_means)
 
 
 def plot_reputation_comparison(results_a: List[Dict[str, Any]],
@@ -107,10 +107,11 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
         if res:
             _plot_single_dataset(res, start_step, color, label)
 
-    plt.axhline(0.5, color="gray", linestyle=":", label="Neutral")
-    plt.xlabel("Timestep [-]", fontsize=14)
-    plt.ylabel("Reputation [-]", fontsize=14)
-    plt.legend(loc='upper left')
+    plt.axhline(0.5, color="gray", linestyle=":", label="Neutral Reputation")
+    plt.xlabel("Timestep [-]", fontsize=18)
+    plt.ylabel("Reputation [-]", fontsize=18)
+    plt.tick_params(axis='both', which='major', labelsize=14)
+    plt.legend(loc='upper left', fontsize=16)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "reputation_comparison.png"))
@@ -130,7 +131,7 @@ def _plot_single_dataset(res: List[Dict[str, Any]],
     - colour: The Matplotlib color identifier (e.g., an RGBA tuple) used for the
              plot lines and the shaded standard deviation regions.
     - label: A string descriptor (e.g., "1000km") used to label the honest and
-             faulty lines in the plot's legend.
+             compromised lines in the plot's legend.
 
     Returns:
     - None. The function adds plotted lines and fill_between regions directly
@@ -146,9 +147,9 @@ def _plot_single_dataset(res: List[Dict[str, Any]],
     plt.plot(steps, h_mean, color=colour, label=f"Honest ({label} ISL)")
     plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color=colour, alpha=0.1)
 
-    # Plot Faulty
+    # Plot Compromised
     f_mean, f_std = np.mean(f, axis=0), np.std(f, axis=0)
-    plt.plot(steps, f_mean, color=colour, linestyle="--", label=f"Faulty ({label} ISL)")
+    plt.plot(steps, f_mean, color=colour, linestyle="--", label=f"Compromised ({label} ISL)")
     plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color=colour, alpha=0.1)
 
 
@@ -205,10 +206,11 @@ def _plot_kpi_bar_chart(results_a: List[Dict[str, Any]],
     ax.bar(x - width/2, means_a, width, label='1000km ISL', color=cmap(0.25))
     ax.bar(x + width/2, means_b, width, label='2000km ISL', color=cmap(0.85))
 
-    ax.set_ylabel('Percentage [%]')
+    ax.set_ylabel('Percentage [%]', fontsize=18)
+    ax.tick_params(axis='y', which='major', labelsize=18)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.legend()
+    ax.set_xticklabels(labels, fontsize=18)
+    ax.legend(fontsize=18)
     ax.grid(axis='y', alpha=0.1)
     ax.set_ylim(0, 105)
 

@@ -24,7 +24,8 @@ import os
 from typing import Dict, List, Optional, Any
 import numpy as np
 import matplotlib.pyplot as plt
-from src.plotting import plot_mc_nis_boxplot
+from scipy.stats import chi2
+from src.plotting import _draw_scatter_underneath
 
 DATA_DIR = os.path.join("sim_data", "mc_results")
 
@@ -32,7 +33,7 @@ def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
                                 threshold: float = 0.5,
                                 start_step: int = 0) -> None:
     """
-    Plot the full reputation history of every undetected faulty satellite across all runs,
+    Plot the full reputation history of every undetected compromised satellite across all runs,
     colour-coded by satellite ID.
 
     Args:
@@ -52,7 +53,7 @@ def plot_undetected_reputations(all_kpis: List[Dict[str, Any]],
     )))
 
     if not unique_ids:
-        plt.text(0.5, 0.5, "No undetected faulty satellites found",
+        plt.text(0.5, 0.5, "No undetected compromised satellites found",
                  ha="center", va="center", transform=plt.gca().transAxes)
     else:
         # Delegate the plotting logic to isolate local variables
@@ -75,7 +76,7 @@ def _plot_undetected_lines(all_kpis: List[Dict[str, Any]],
 
     Args:
     - all_kpis: List of KPI dictionaries from MC runs.
-    - unique_ids: IDs of faulty satellites that went undetected.
+    - unique_ids: IDs of compromised satellites that went undetected.
     - threshold: The detection threshold used.
     - start_step: The step to start plotting from.
 
@@ -118,7 +119,7 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]],
     Aggregate results from all Monte Carlo runs and generate summary plots.
 
     Generates summary plots for reputation spread, KPI distributions, and
-    undetected faulty nodes.
+    undetected compromised nodes.
 
     Args:
     - all_kpis_raw: A list of KPI dictionaries from multiple simulation runs.
@@ -143,7 +144,7 @@ def plot_mc_results(all_kpis_raw: List[Optional[Dict[str, Any]]],
 
 def _plot_reputation_histories(all_kpis: List[Dict[str, Any]], start_step: int) -> None:
     """
-    Plot the mean reputation history for honest and faulty satellites across all runs,
+    Plot the mean reputation history for honest and compromised satellites across all runs,
     with shaded areas representing the standard deviation spread.
 
     Args:
@@ -154,10 +155,10 @@ def _plot_reputation_histories(all_kpis: List[Dict[str, Any]], start_step: int) 
     - None. Saves the plot to disk and displays it.
     """
     honest_means_list = [np.mean(kpi["honest_matrix"], axis=0) for kpi in all_kpis]
-    faulty_means_list = [np.mean(kpi["faulty_matrix"], axis=0) for kpi in all_kpis]
+    compromised_means_list = [np.mean(kpi["faulty_matrix"], axis=0) for kpi in all_kpis]
 
     all_honest_means = np.array(honest_means_list)[:, start_step:]
-    all_faulty_means = np.array(faulty_means_list)[:, start_step:]
+    all_compromised_means = np.array(compromised_means_list)[:, start_step:]
     steps = np.arange(start_step, start_step + all_honest_means.shape[1])
 
     plt.figure(figsize=(10, 6))
@@ -168,11 +169,11 @@ def _plot_reputation_histories(all_kpis: List[Dict[str, Any]], start_step: int) 
     plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color="green",
                      alpha=0.2, label="Honest Pop. 1 Std. Dev. Spread")
 
-    f_mean = np.mean(all_faulty_means, axis=0)
-    f_std = np.std(all_faulty_means, axis=0)
-    plt.plot(steps, f_mean, color="red", label="Faulty (MC Mean)")
+    f_mean = np.mean(all_compromised_means, axis=0)
+    f_std = np.std(all_compromised_means, axis=0)
+    plt.plot(steps, f_mean, color="red", label="Compromised (MC Mean)")
     plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color="red",
-                     alpha=0.2, label="Faulty Pop. 1 Std. Dev. Spread")
+                     alpha=0.2, label="Compromised Pop. 1 Std. Dev. Spread")
 
     plt.axhline(0.5, color="gray", linestyle="--")
     plt.xlabel("Step")
@@ -265,5 +266,61 @@ def _print_mc_summary(all_kpis: List[Dict[str, Any]]) -> None:
                                                    for k in all_kpis]):.2f}")
     print(f"Avg Final Honest Rep: {np.mean([float(k.get('final_honest_rep', 0)) \
                                             for k in all_kpis]):.4f}")
-    print(f"Avg Final Faulty Rep: {np.mean([float(k.get('final_faulty_rep', 0)) \
+    print(f"Avg Final Compromised Rep: {np.mean([float(k.get('final_compromised_rep', 0)) \
                                             for k in all_kpis]):.4f}")
+
+
+def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
+    """
+    Plots the distribution of median NIS values across multiple Monte Carlo runs,
+    with viridis-colored raw scatter distributions underneath.
+
+    Args:
+    - all_kpis (List[Dict[str, Any]]): A list of KPI dictionaries containing run statistics.
+
+    Returns:
+    - None: Displays a box plot tracking historical data arrays.
+    """
+    raw_medians = (
+        [
+            kpi.get("honest_nis_stats", {}).get("median")
+            for kpi in all_kpis
+            if isinstance(kpi.get("honest_nis_stats"), dict)
+            and kpi.get("honest_nis_stats", {}).get("median") is not None
+        ],
+        [
+            kpi.get("faulty_nis_stats", {}).get("median")
+            for kpi in all_kpis
+            if isinstance(kpi.get("faulty_nis_stats"), dict)
+            and kpi.get("faulty_nis_stats", {}).get("median") is not None
+        ]
+    )
+
+    if not raw_medians[0] and not raw_medians[1]:
+        print("No MC NIS data available to plot.")
+        return
+
+    plot_data = [m for m in raw_medians if m]
+    labels = [l for m, l in zip(raw_medians, ["Honest Medians", "Compromised Medians"]) if m]
+
+    ax = plt.subplots(figsize=(10, 6))[1]
+
+    # 1. Plot the Boxplot on top (zorder=3)
+    ax.boxplot(plot_data, zorder=3)
+
+    # 2. Plot the raw scatter points underneath using helper (zorder=2)
+    _draw_scatter_underneath(ax, plot_data)
+
+    expected_median = chi2.ppf(0.5, df=2)
+    ax.axhline(expected_median, color='black', linestyle=':',
+               label=f'Expected Median ({expected_median:.3f})', zorder=1)
+
+    ax.set_ylabel("Median NIS per run [-]", fontsize=20)
+    ax.set_yscale("log")
+    ax.set_xticklabels(labels, fontsize=18)
+    ax.tick_params(axis='y', labelsize=16)
+    ax.grid(True, linestyle=":", alpha=0.7)
+    ax.legend(fontsize=14)
+
+    plt.tight_layout()
+    plt.show()

@@ -365,7 +365,7 @@ def run_single_consensus(run_idx: int,
     - fpr_offset: The percentage of initial steps to ignore when calculating false positives.
 
     Returns:
-    - KPIs for the conensus run, if successful. Else None.
+    - KPIs for the consensus run, if successful. Else None.
     """
     ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
     log_file = os.path.join(SIM_DIR, f"sim_run_{run_idx}.log")
