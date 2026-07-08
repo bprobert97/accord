@@ -20,7 +20,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
+import argparse
 import asyncio
+from enum import Enum
 import logging
 import math
 import os
@@ -38,24 +40,29 @@ from src.plotting import  \
                         is_state_evaluated
 from src.consensus_mech import ConsensusMechanism
 from src.dag import DAG, MockDAG
-from src.filter import FilterConfig, \
-    simulate_truth_and_meas, JointEKF, ObservationRecord, \
+from src.filters.filter_interface import FilterConfig, \
+    simulate_truth_and_meas, ObservationRecord, \
     apply_network_faults
+from src.filters.ekf import JointEKF
+from src.filters.ukf import JointUKF
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
 from src.transaction import Transaction
+
+class FilterType(str, Enum):
+    """
+    A class to store the filter type as a string.
+    """
+    UKF = "ukf"
+    EKF = "ekf"
+
 #------------------
 # Constants
 CLUSTER_SIZE = 10
-
 DATA_DIR = "sim_data"
-DATA_FILENAME = "ekf_simulation_results.npz"
-EKF_RESULTS_PATH = os.path.join(DATA_DIR, DATA_FILENAME)
-
-SIM_RESULTS_PATH = os.path.join(DATA_DIR, "sim_results.npz")
 
 DEFAULT_CONFIG = FilterConfig(
-        N=400,
+        N=50,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
@@ -66,7 +73,6 @@ DEFAULT_CONFIG = FilterConfig(
     )
 #------------------
 # Helper functions
-
 
 def clear_log(log_file_path: str = "app.log") -> None:
     """
@@ -124,8 +130,8 @@ class DemoToggles:
     A dataclass for storing toggle values when
     running the consensus demo.
     """
-    save_ekf_results: bool = True
-    load_ekf_results: bool = False
+    save_filter_results: bool = True
+    load_filter_results: bool = False
     clear_logs: bool = True
     save_sim_results: bool = True
     run_consensus: bool = True
@@ -133,12 +139,13 @@ class DemoToggles:
 @dataclass
 class DemoFilePaths:
     """
-    A datacl;ass for storing file paths
+    A dataclass for storing file paths
     used in the consensus demo.
     """
-    ekf_results_path: str = EKF_RESULTS_PATH
+    filter_type: FilterType = FilterType.EKF
+    filter_results_path: str = ""
     log_file: str = "app.log"
-    sim_results_path: str = SIM_RESULTS_PATH
+    sim_results_path: str = ""
 #------------------
 # Main demo function
 
@@ -171,21 +178,23 @@ async def run_consensus_demo(config: FilterConfig,
     if toggles.clear_logs:
         clear_log(file_paths.log_file)
 
-    # Attempt to load or generate EKF data
-    truth, _, all_obs_records, x_hist = _resolve_ekf_phase(
-        config, toggles.load_ekf_results,
-        file_paths.ekf_results_path,
-        toggles.save_ekf_results, logger
+    # Attempt to load or generate filter data
+    truth, _, all_obs_records, x_hist = _resolve_filter_phase(
+        config,
+        file_paths,
+        toggles.load_filter_results,
+        toggles.save_filter_results,
+        logger
     )
 
-    # Early return if only EKF was requested
+    # Early return if only filter was requested
     if not toggles.run_consensus:
-        logger.info("run_consensus is False. Returning early after EKF phase.")
+        logger.info("run_consensus is False. Returning early after filter phase.")
         return None, None, truth, None
 
     # Ensure data is available for the consensus part
     if all_obs_records is None or x_hist is None or truth is None:
-        logger.error("EKF simulation data is not available after loading or running. Exiting.")
+        logger.error("Filter simulation data is not available after loading or running. Exiting.")
         return None, None, None, None
 
     return await _run_consensus_phase(
@@ -195,22 +204,23 @@ async def run_consensus_demo(config: FilterConfig,
     )
 
 
-def _resolve_ekf_phase(config: FilterConfig,
-                       load_ekf_results: bool,
-                       ekf_results_path: str,
-                       save_ekf_results: bool,
-                       logger: logging.Logger) -> \
+def _resolve_filter_phase(config: FilterConfig,
+                          path_toggles: DemoFilePaths,
+                          load_filter_results: bool,
+                          save_filter_results: bool,
+                          logger: logging.Logger) -> \
         tuple[Optional[np.ndarray], Optional[np.ndarray],
               Optional[list[ObservationRecord]], Optional[np.ndarray]]:
 
     """
-    Resolves the EKF phase by either loading results from a file or running the simulation.
+    Resolves the filter phase by either loading results from a file or running the simulation.
 
     Args:
     - config: FilterConfig object with simulation parameters.
-    - load_ekf_results: If True, attempts to load EKF results from ekf_results_path.
-    - ekf_results_path: Path to the .npz file for loading/saving EKF results.
-    - save_ekf_results: If True, saves EKF results to ekf_results_path after running simulation.
+    - path_toggles: An instance of DemoFilePaths containing the desired file paths.
+    - load_filter_results: If True, attempts to load filter results from filter_results_path.
+    - save_filter_results: If True, saves filter results to filter_results_path after
+    running simulation.
     - logger: Logger object for logging messages.
 
     Returns:
@@ -218,37 +228,40 @@ def _resolve_ekf_phase(config: FilterConfig,
         - truth: The ground truth trajectory history (or None if loading failed).
         - z_hist: The measurement history (or None if loading failed).
         - all_obs_records: The list of observation records (or None if loading failed).
-        - x_hist: The EKF state estimate history (or None if loading failed).
+        - x_hist: The filter state estimate history (or None if loading failed).
     """
 
     truth, z_hist, all_obs_records, x_hist = None, None, None, None
 
-    # Attempt to load EKF results if requested
-    if load_ekf_results and os.path.exists(ekf_results_path):
-        truth, z_hist, all_obs_records, x_hist = _load_ekf_results(ekf_results_path, config, logger)
+    # Attempt to load filter results if requested
+    if load_filter_results and os.path.exists(path_toggles.filter_results_path):
+        truth, z_hist, \
+            all_obs_records, x_hist = _load_filter_results(path_toggles.filter_results_path,
+                                                           config, logger)
 
-    # If EKF results were not loaded or loading failed, run the EKF simulation
+    # If filter results were not loaded or loading failed, run the filter simulation
     if truth is None or z_hist is None or all_obs_records is None or x_hist is None:
-        truth, z_hist, all_obs_records, x_hist = _simulate_ekf_filter(config, logger)
+        truth, z_hist, all_obs_records, x_hist = _simulate_filter(path_toggles.filter_type,
+                                                                  config, logger)
 
-        # Save EKF results if requested
-        if save_ekf_results:
-            _save_ekf_results(ekf_results_path, config,
+        # Save filter results if requested
+        if save_filter_results:
+            _save_filter_results(path_toggles.filter_results_path, config,
                               (truth, z_hist, all_obs_records, x_hist))
 
     return truth, z_hist, all_obs_records, x_hist
 
 
-def _load_ekf_results(ekf_results_path: str,
+def _load_filter_results(filter_results_path: str,
                       config: FilterConfig,
                       logger: logging.Logger) -> \
         tuple[Optional[np.ndarray], Optional[np.ndarray],
               Optional[list[ObservationRecord]], Optional[np.ndarray]]:
     """
-    Load EKF simulation results from a .npz file and validate the configuration.
+    Load filter simulation results from a .npz file and validate the configuration.
 
     Args:
-    - ekf_results_path: Path to the .npz file containing EKF results.
+    - filter_results_path: Path to the .npz file containing filter results.
     - config: The current FilterConfig to validate against the loaded config.
     - logger: Logger object for logging messages.
 
@@ -257,11 +270,11 @@ def _load_ekf_results(ekf_results_path: str,
         - truth: The ground truth trajectory history (or None if loading failed).
         - z_hist: The measurement history (or None if loading failed).
         - all_obs_records: The list of observation records (or None if loading failed).
-        - x_hist: The EKF state estimate history (or None if loading failed).
+        - x_hist: The filter state estimate history (or None if loading failed).
     """
-    logger.info("Attempting to load EKF simulation results from %s", ekf_results_path)
+    logger.info("Attempting to load filter simulation results from %s", filter_results_path)
     try:
-        with np.load(ekf_results_path, allow_pickle=True) as data:
+        with np.load(filter_results_path, allow_pickle=True) as data:
             # Reconstruct FilterConfig from saved attributes
             loaded_config = FilterConfig(
                 N=data['config_N'], steps=data['config_steps'], dt=data['config_dt'],
@@ -272,17 +285,18 @@ def _load_ekf_results(ekf_results_path: str,
 
             # Check if loaded config matches current config
             if loaded_config == config:
-                logger.info("Successfully loaded EKF simulation results.")
+                logger.info("Successfully loaded filter simulation results.")
                 # Ensure all_obs_records is converted back to a list of dataclasses
                 return data['truth'], data['z_hist'], data['all_obs_records'], data['x_hist']
 
-            logger.warning("Loaded EKF config does not match current config. \
-                        Rerunning EKF simulation.")
+            logger.warning("Loaded filter config does not match current config. \
+                        Rerunning filter simulation.")
     except (OSError, ValueError) as e:
-        logger.error("Corrupt or unreadable EKF results file. \
-                     Rerunning EKF simulation. Error: %s", e)
+        logger.error("Corrupt or unreadable filter results file. \
+                     Rerunning filter simulation. Error: %s", e)
     except KeyError as e:
-        logger.error("EKF results file is missing expected key %s. Rerunning EKF simulation.", e)
+        logger.error("Filter results file is missing expected key %s. \
+                     Rerunning filter simulation.", e)
 
     return None, None, None, None
 
@@ -292,7 +306,7 @@ def _cluster_by_orbital_physics(truth_0: np.ndarray,
                                 cluster_size: int
                                 ) -> list[list[int]]:
     """
-    Groups random satellites into EKF clusters based on their orbital planes.
+    Groups random satellites into filter clusters based on their orbital planes.
     Calculates the angular momentum vector (h = r x v) for each satellite.
     Satellites with similar angular momentum vectors will organically stay
     within physical line-of-sight of each other during the simulation.
@@ -301,11 +315,11 @@ def _cluster_by_orbital_physics(truth_0: np.ndarray,
     - truth_0 (np.ndarray): The initial stacked true state vectors (position and
                             velocity) for all satellites at time step 0.
     - N (int): The total number of satellites in the constellation.
-    - cluster_size (int): The desired maximum number of satellites per EKF cluster.
+    - cluster_size (int): The desired maximum number of satellites per filter cluster.
 
     Returns:
     - list[list[int]]: A list of generated satellite clusters. Each inner list
-                       represents a single EKF cluster and contains the integer IDs
+                       represents a single filter cluster and contains the integer IDs
                        of the assigned satellites.
     """
     sat_data = []
@@ -348,17 +362,19 @@ def _cluster_by_orbital_physics(truth_0: np.ndarray,
     return clusters
 
 
-def _simulate_ekf_filter(config: FilterConfig,
-                         logger: logging.Logger
-                         ) -> tuple[np.ndarray,
-                                    np.ndarray,
-                                    list[ObservationRecord],
-                                    np.ndarray]:
+def _simulate_filter(filter_type: FilterType,
+                     config: FilterConfig,
+                     logger: logging.Logger
+                     ) -> tuple[np.ndarray,
+                                np.ndarray,
+                                list[ObservationRecord],
+                                np.ndarray]:
     """
-    Simulate the satellite constellation and run the Clustered EKF to generate
+    Simulate the satellite constellation and run the Clustered filter to generate
     observation records.
 
     Args:
+    - filter_type: The type of filter to run.
     - config: FilterConfig object with simulation parameters.
     - logger: Logger object for logging messages.
 
@@ -366,48 +382,50 @@ def _simulate_ekf_filter(config: FilterConfig,
     - A tuple containing:
         - truth: The ground truth trajectory history.
         - z_hist: The measurement history.
-        - all_obs_records: The list of observation records generated by the EKF.
-        - x_hist: The EKF state estimate history.
+        - all_obs_records: The list of observation records generated by the filter.
+        - x_hist: The filter state estimate history.
     """
     logger.info("Simulating satellite constellation to get truth")
     truth, z_hist = simulate_truth_and_meas(config)
 
-    # --- Start of Clustered EKF Implementation ---
-    logger.info("Initialising Clustered EKF with cluster size %s", CLUSTER_SIZE)
+    # --- Start of Clustered filter Implementation ---
+    logger.info("Initialising Clustered filter with cluster size %s", CLUSTER_SIZE)
 
     # 1. Cluster by Orbital Physics
     clusters = _cluster_by_orbital_physics(truth[0], config.N, CLUSTER_SIZE)
 
-    # 2. Create a list of EKF instances, one for each cluster
-    cluster_ekfs = _create_cluster_ekfs(config, truth, clusters, logger)
+    # 2. Create a list of filter instances, one for each cluster
+    cluster_filters = _create_cluster_filters(filter_type, config, truth, clusters, logger)
 
     # 3. Pre-calculate the mapping from (observer, target) to z_hist index
     z_map = _create_z_map(config.N)
 
     # 4. Main simulation loop
-    logger.info("Collecting observation records using Clustered EKF")
-    all_obs_records, x_hist = _run_ekf_main_loop(config, clusters, cluster_ekfs,
+    logger.info("Collecting observation records using Clustered filter")
+    all_obs_records, x_hist = _run_filter_main_loop(config, clusters, cluster_filters,
                                                  z_map, z_hist)
-    # --- End of Clustered EKF Implementation ---
+    # --- End of Clustered filter Implementation ---
 
     return truth, z_hist, all_obs_records, x_hist
 
 
-def _create_cluster_ekfs(config: FilterConfig, truth: np.ndarray,
-                         clusters: list[list[int]], logger: Any) -> list[JointEKF]:
+def _create_cluster_filters(filter_type: FilterType,
+                            config: FilterConfig, truth: np.ndarray,
+                            clusters: list[list[int]], logger: Any) -> list[Any]:
     """
-    Create a list of JointEKF instances, one for each cluster of satellites.
+    Factory function to create the requested filter instances for each cluster of satellites.
 
     Args:
+    - filter_type: The type of filter to create (e.g., UKF or EKF).
     - config: FilterConfig object with simulation parameters.
     - truth: The ground truth trajectory history.
     - clusters: A list of lists, where each inner list contains the satellite IDs for that cluster.
     - logger: Logger object for logging messages.
 
     Returns:
-    - A list of JointEKF instances, one for each cluster.
+    - A list of filter instances, one for each cluster.
     """
-    cluster_ekfs = []
+    cluster_filters: list[JointEKF | JointUKF | None] = []
     for i, cluster_sat_ids in enumerate(clusters):
         cluster_n = len(cluster_sat_ids)
         cluster_config = FilterConfig(
@@ -420,10 +438,16 @@ def _create_cluster_ekfs(config: FilterConfig, truth: np.ndarray,
         initial_state_slices = [truth[0, sat_id*6:(sat_id+1)*6] for sat_id in cluster_sat_ids]
         cluster_truth_0 = np.concatenate(initial_state_slices)
 
-        cluster_ekfs.append(JointEKF(cluster_config, cluster_truth_0))
-        logger.info("Initialised EKF for cluster %d with %d satellites: %s",
-                    i, cluster_n, cluster_sat_ids)
-    return cluster_ekfs
+        if filter_type == FilterType.UKF:
+            cluster_filters.append(JointUKF(cluster_config, cluster_truth_0))
+        elif filter_type == FilterType.EKF:
+            cluster_filters.append(JointEKF(cluster_config, cluster_truth_0))
+        else:
+            raise ValueError(f"Unsupported filter type: {filter_type}")
+
+        logger.info("Initialised %s for cluster %d with %d satellites: %s",
+                    filter_type.upper(), i, cluster_n, cluster_sat_ids)
+    return cluster_filters
 
 
 def _create_z_map(n_satellites: int) -> dict[tuple[int, int], slice]:
@@ -449,21 +473,21 @@ def _create_z_map(n_satellites: int) -> dict[tuple[int, int], slice]:
     return z_map
 
 
-def _run_ekf_main_loop(config: FilterConfig,
+def _run_filter_main_loop(config: FilterConfig,
                        clusters: list[list[int]],
-                       cluster_ekfs: list[JointEKF],
+                       cluster_filters: list[Any],
                        z_map: dict, z_hist: np.ndarray
                        ) -> tuple[list[ObservationRecord],
                                   np.ndarray]:
     """
-    Run the main loop of the EKF simulation, where each cluster EKF processes its
+    Run the main loop of the filter simulation, where each cluster filter processes its
     predictions and updates based on the measurements.
 
     Args:
     - config: FilterConfig object with simulation parameters.
     - clusters: A list of lists, where each inner list contains the satellite
                 IDs for that cluster.
-    - cluster_ekfs: A list of EKF instances corresponding to each cluster.
+    - cluster_filters: A list of filter instances corresponding to each cluster.
     - z_map: A dictionary mapping (observer_id, target_id) to slices of the
              z_hist array.
     - z_hist: The measurement history array.
@@ -471,33 +495,33 @@ def _run_ekf_main_loop(config: FilterConfig,
     Returns:
     - A tuple containing:
         - all_obs_records: A list of all ObservationRecord instances generated by
-          the EKF.
-        - x_hist: The EKF state estimate history array.
+          the filter.
+        - x_hist: The filter state estimate history array.
     """
     all_obs_records = []
     x_hist = np.zeros((config.steps, config.N * 6))
     logger = get_logger()
 
     for k in range(config.steps):
-        for cluster_sat_ids, ekf in zip(clusters, cluster_ekfs):
+        for cluster_sat_ids, current_filter in zip(clusters, cluster_filters):
 
             # Delegate the heavy processing to the helper function
             records = _process_cluster_step(
                 cluster_sat_ids=cluster_sat_ids,
-                ekf=ekf,
+                current_filter=current_filter,
                 z_map=z_map,
                 histories = (x_hist, z_hist),
                 k=k
             )
             all_obs_records.extend(records)
 
-        logger.info("Completed EKF step %d/%d", k + 1, config.steps)
+        logger.info("Completed filter step %d/%d", k + 1, config.steps)
 
     return all_obs_records, x_hist
 
 
 def _process_cluster_step(cluster_sat_ids: list[int],
-                          ekf: JointEKF,
+                          current_filter: Any,
                           z_map: dict,
                           histories: tuple[np.ndarray, np.ndarray],
                           k: int) -> list[ObservationRecord]:
@@ -507,20 +531,20 @@ def _process_cluster_step(cluster_sat_ids: list[int],
     Args:
     - cluster_sat_ids: A list of lists, where each inner list contains the satellite
                 IDs for that cluster.
-    - ekf: The EKF instance for the cluster.
+    - current_filter: The filter instance for the cluster.
     - z_map: A dictionary mapping (observer_id, target_id) to slices of the
              z_hist array.
     - histories: A tuple of x_hist and z_hist
     - k: The current simulation step
 
     Returns:
-    - A list of all ObservationRecord instances generated by the EKF for this step.
+    - A list of all ObservationRecord instances generated by the filter for this step.
     """
     # Unpack the tuple
     x_hist, z_hist = histories
 
     # Predict step for the cluster
-    ekf.predict()
+    current_filter.predict()
 
     # Build the measurement vector `z_k_cluster` for this cluster
     z_k_cluster_list = _get_cluster_measurements(cluster_sat_ids, z_map, z_hist, k)
@@ -529,7 +553,7 @@ def _process_cluster_step(cluster_sat_ids: list[int],
         return []
 
     # Update step for the cluster (inlining the concatenation)
-    obs_records_step = ekf.update(np.concatenate(z_k_cluster_list), k)
+    obs_records_step = current_filter.update(np.concatenate(z_k_cluster_list), k)
 
     # Remap local satellite IDs in records to global IDs and store
     for record in obs_records_step:
@@ -538,9 +562,18 @@ def _process_cluster_step(cluster_sat_ids: list[int],
 
     # Update the global state history `x_hist`
     for sat_idx_local, sat_idx_global in enumerate(cluster_sat_ids):
+
+        # Dynamically fetch the state array depending on the filter type
+        if hasattr(current_filter, 'ukf'):
+            local_x = current_filter.ukf.x
+        elif hasattr(current_filter, 'ekf'):
+            local_x = current_filter.ekf.x
+        else:
+            raise ValueError("Filter instance must have either 'ukf' or 'ekf' attribute.")
+
         # Inline the slice definitions directly into the array access
         x_hist[k, sat_idx_global * 6 : (sat_idx_global + 1) * 6] = \
-            ekf.ekf.x[sat_idx_local * 6 : (sat_idx_local + 1) * 6]
+            local_x[sat_idx_local * 6 : (sat_idx_local + 1) * 6]
 
     return obs_records_step
 
@@ -568,41 +601,41 @@ def _get_cluster_measurements(cluster_sat_ids: list[int], z_map: dict,
     return z_k_cluster_list
 
 
-def _save_ekf_results(ekf_results_path: str,
+def _save_filter_results(filter_results_path: str,
                       config: FilterConfig,
-                      ekf_data: tuple[np.ndarray, np.ndarray,
+                      filter_data: tuple[np.ndarray, np.ndarray,
                                       list[ObservationRecord], np.ndarray]
                       ) -> None:
     """
-    Save the EKF simulation results to a .npz file.
+    Save the filter simulation results to a .npz file.
 
     Args:
-    - ekf_results_path: The path to the .npz file where results will be saved.
+    - filter_results_path: The path to the .npz file where results will be saved.
     - config: The FilterConfig used for the simulation (saved for reproducibility).
-    - ekf_data: A tuple of:
+    - filter_data: A tuple of:
         - truth: The ground truth trajectory history.
         - z_hist: The measurement history.
-        - all_obs_records: The list of observation records generated by the EKF.
-        - x_hist: The EKF state estimate history.
+        - all_obs_records: The list of observation records generated by the filter.
+        - x_hist: The filter state estimate history.
 
     Returns:
     - None. The results are saved to the specified file path.
     """
     # Unpack the tuple
-    truth, z_hist, all_obs_records, x_hist = ekf_data
+    truth, z_hist, all_obs_records, x_hist = filter_data
 
     logger = get_logger()
-    logger.info("Saving EKF simulation results to %s", ekf_results_path)
-    os.makedirs(os.path.dirname(ekf_results_path), exist_ok=True)
+    logger.info("Saving filter simulation results to %s", filter_results_path)
+    os.makedirs(os.path.dirname(filter_results_path), exist_ok=True)
     np.savez_compressed(
-        ekf_results_path, config_N=config.N, config_steps=config.steps,
+        filter_results_path, config_N=config.N, config_steps=config.steps,
         config_dt=config.dt, config_sig_r=config.sig_r, config_sig_rdot=config.sig_rdot,
         config_q_acc_target=config.q_acc_target, config_seed=config.seed,
         config_ISL_range_m=config.ISL_range_m, truth=truth, z_hist=z_hist,
         all_obs_records=np.array(all_obs_records, dtype=object), # Save as object array
         x_hist=x_hist
     )
-    logger.info("EKF simulation results saved successfully.")
+    logger.info("Filter simulation results saved successfully.")
 
 
 async def _run_consensus_phase(config: FilterConfig,
@@ -613,12 +646,12 @@ async def _run_consensus_phase(config: FilterConfig,
         tuple[dict[int, DAG], dict, np.ndarray, set[int]]:
     """
     Run the consensus simulation phase where satellite nodes submit transactions to the DAG
-    based on the observation records generated by the EKF.
+    based on the observation records generated by the filter.
 
     Args:
     - config: FilterConfig object with simulation parameters.
     - truth: The ground truth trajectory history.
-    - all_obs_records: The list of observation records generated by the EKF.
+    - all_obs_records: The list of observation records generated by the filter.
     - save_sim_results: If True, saves the consensus simulation results to sim_results_path.
     - sim_results_path: Path to save consensus simulation results.
 
@@ -654,13 +687,13 @@ async def _execute_consensus_loop(config: FilterConfig,
                                   all_obs_records: list[ObservationRecord]
                                   ) -> dict[str, list[float]]:
     """
-    Execute the main consensus loop where satellite nodes interact based on the EKF
+    Execute the main consensus loop where satellite nodes interact based on the filter
     observation records.
 
     Args:
     - config: FilterConfig object with simulation parameters.
     - sim_data: The fixed simulation data
-    - all_obs_records: The list of observation records generated by the EKF.
+    - all_obs_records: The list of observation records generated by the filter.
 
     Returns:
     - A dictionary containing the reputation history for each satellite,
@@ -831,7 +864,26 @@ def _save_consensus_results(sim_results_path: str,
 
 # Run demo
 if __name__ == "__main__":
+    # Set up argument parsing
+    parser = argparse.ArgumentParser(description="ACCORD Filter Demonstration")
+    parser.add_argument(
+        "--filter-type",
+        type=str,
+        choices=["ukf", "ekf"],
+        default="ekf",
+        help="Which filter to use (ukf or ekf)"
+    )
+    args = parser.parse_args()
+
     accord_logger = get_logger()
+
+    # Define which filter to use based on the command line argument
+    SELECTED_FILTER = FilterType(args.filter_type)
+    accord_logger.info("Selected filter type: %s", SELECTED_FILTER.value)
+
+    # Dynamically build the paths based on the selected filter
+    FILTER_RESULTS_PATH = os.path.join(DATA_DIR, f"{SELECTED_FILTER.value}_simulation_results.npz")
+    SIM_RESULTS_PATH = os.path.join(DATA_DIR, f"sim_results_{SELECTED_FILTER.value}.npz")
 
     FINAL_DAG: dict[int, DAG] | MockDAG | None = None
     REP_HIST: Optional[dict] = None
@@ -877,8 +929,14 @@ if __name__ == "__main__":
 
     # If simulation results were not loaded or loading failed, run the consensus simulation
     if TRUTH is None or REP_HIST is None or FINAL_DAG is None or FAULTY_IDS is None:
-        toggle = DemoToggles(load_ekf_results=True)
-        paths = DemoFilePaths()
+        toggle = DemoToggles(load_filter_results=True)
+        # Pass our dynamically generated paths to DemoFilePaths
+        paths = DemoFilePaths(
+            filter_type=SELECTED_FILTER,
+            filter_results_path=FILTER_RESULTS_PATH,
+            sim_results_path=SIM_RESULTS_PATH
+        )
+
         FINAL_DAG, REP_HIST, TRUTH, FAULTY_IDS = asyncio.run(
             run_consensus_demo(DEFAULT_CONFIG, toggles=toggle, file_paths=paths))
 

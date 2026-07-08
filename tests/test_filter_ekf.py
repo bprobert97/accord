@@ -3,14 +3,17 @@ Unit and integration tests for the JointEKF class and related functions in src/f
 """
 import numpy as np
 import pytest
-from src.filter import (
-    FilterConfig,
+from src.filters.ekf import (
     JointEKF,
-    simulate_truth_and_meas,
-    hx_joint,
     H_joint,
-    STATE_DIM
 )
+from src.filters.filter_interface import(
+    simulate_truth_and_meas,
+    STATE_DIM,
+    hx_joint,
+    FilterConfig
+)
+from .utilities import validate_observation_records
 
 @pytest.fixture
 def filter_config():
@@ -79,11 +82,7 @@ def test_joint_ekf_update(ekf, filter_config):
 
     # Check the observation records
     # Not all records are created due to the 5000km distance check
-    assert 0 < len(obs_records) <= filter_config.N * (filter_config.N - 1)
-    for record in obs_records:
-        assert record.step == 1
-        assert record.nis >= 0
-        assert record.dof == 2
+    validate_observation_records(obs_records, filter_config.N, expected_step=1)
 
 def test_hx_and_h_joint_shapes(filter_config):
     """

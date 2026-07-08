@@ -26,7 +26,7 @@ from typing import List, Optional
 import numpy as np
 from scipy.stats import chi2
 from .dag import DAG
-from .filter import ObservationRecord
+from .filters.filter_interface import ObservationRecord
 from .logger import get_logger
 from .satellite_node import SatelliteNode
 from .transaction import Transaction

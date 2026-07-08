@@ -33,7 +33,7 @@ from src.reputation import ReputationManager, MAX_REPUTATION, \
     ReputationParams
 from src.transaction import Transaction, TransactionMetadata, \
     TransactionAddresses
-from src.filter import ObservationRecord
+from src.filters.filter_interface import ObservationRecord
 from src.logger import get_logger
 
 if TYPE_CHECKING:
