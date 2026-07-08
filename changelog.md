@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.0] - 2026-07
+
+### Summary
+This release introduces the ability to choose between multiple Kalman Filter implementations in a plug and play style.
+
+### Added
+- Changes to figures to make plots more readable/
+- Introduction of a UKF implementation and the ability to switch between Kalman Filters in simulations.
+---
+
 ## [3.2] - 2026-06
 
 ### Summary

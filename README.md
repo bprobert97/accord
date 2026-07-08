@@ -85,4 +85,4 @@ The project is currently at TRL 0. The PoISE consensus mechanism is in the early
 
 ## Citation
 If you use this work, please cite it as:
-> B. Probert, bprobert97/accord: v3.1. (May 28, 2026). Python. University of Strathclyde, Glasgow. [DOI: 10.5281/zenodo.17816885](https://doi.org/10.5281/zenodo.17816885)
+> B. Probert, bprobert97/accord: v4.0. (July 08, 2026). Python. University of Strathclyde, Glasgow. [DOI: 10.5281/zenodo.17816885](https://doi.org/10.5281/zenodo.17816885)
