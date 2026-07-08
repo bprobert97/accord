@@ -15,3 +15,4 @@ app.log
 .coverage
 coverage.xml
 /sim_data
+src/filters/__pycache__
