@@ -7,7 +7,7 @@ from src.consensus_mech import ConsensusMechanism
 from src.dag import Transaction, TransactionAddresses, \
     TransactionMetadata
 from src.satellite_node import SatelliteNode
-from src.filter import ObservationRecord
+from src.filters.filter_interface import ObservationRecord
 from src.reputation import MAX_REPUTATION
 
 

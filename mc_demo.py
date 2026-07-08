@@ -34,7 +34,7 @@ from src.logger import get_logger
 from src.mc_plotting import plot_mc_results, DATA_DIR
 from src.plotting import generate_corner_plot, extract_nis_data
 from accord_demo import run_consensus_demo, DEFAULT_CONFIG, \
-    DemoFilePaths, DemoToggles
+    DemoFilePaths, DemoToggles, FilterType
 
 # Limit NumPy to 1 thread per process to prevent over-subscription
 # This is needed for parallel processing using ProcessPoolExecutor.
@@ -53,9 +53,13 @@ ISL_RANGE_KM = DEFAULT_CONFIG.ISL_range_m // 1000
 # --- MC Configuration ---
 NUM_RUNS = 40
 NUM_PROCESSES = 4
-EKF_DIR = os.path.join(DATA_DIR, "ekf")
-SIM_DIR = os.path.join(DATA_DIR, "sim")
-MC_RESULTS_PATH = os.path.join(SIM_DIR, f"mc_results_{ISL_RANGE_KM}km.npz")
+
+@dataclass
+class RunContext:
+    """Stores directory and filter settings for a single Monte Carlo run."""
+    filter_type: FilterType
+    filter_dir: str
+    sim_dir: str
 
 @dataclass
 class SatellitePopulationData:
@@ -318,26 +322,31 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
         new_results.append(new_kpis)
     return new_results
 
-def run_single_ekf(run_idx: int) -> bool:
+def run_single_filter(run_idx: int, filter_type: FilterType, filter_dir: str) -> bool:
     """
-    Run the EKF phase for a single Monte Carlo iteration.
+    Run the filter phase for a single Monte Carlo iteration.
     """
-    ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
-    log_file = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.log")
+    filter_path = os.path.join(filter_dir, f"{filter_type.value}_run_{run_idx}.npz")
+    log_file = os.path.join(filter_dir, f"{filter_type.value}_run_{run_idx}.log")
 
-    if os.path.exists(ekf_path):
+    if os.path.exists(filter_path):
         return True
 
-    logger = get_logger(name=f"EKF_{run_idx}", log_file=log_file)
+    logger = get_logger(name=f"{filter_type.value}_{run_idx}", log_file=log_file)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     config = DEFAULT_CONFIG
     config.seed += run_idx
     toggle = DemoToggles(save_sim_results=False, run_consensus=False)
-    fpath = DemoFilePaths(log_file=log_file, ekf_results_path=ekf_path)
+    fpath = DemoFilePaths(
+        filter_type=filter_type,
+        filter_results_path=filter_path,
+        log_file=log_file
+    )
 
-    logger.info("Starting EKF Generation for Run %d with Seed %d", run_idx, config.seed)
+    logger.info("Starting %s Generation for Run %d with Seed %d",
+                filter_type.value, run_idx, config.seed)
     try:
         loop.run_until_complete(
             run_consensus_demo(config, toggle, fpath)
@@ -346,13 +355,14 @@ def run_single_ekf(run_idx: int) -> bool:
     except Exception as e: # pylint: disable=broad-exception-caught
         # We catch everything here so one failed MC iteration doesn't
         # crash the whole pool
-        print(f"EKF Run {run_idx} failed: {e}")
+        print(f"Filter Run {run_idx} failed: {e}")
         traceback.print_exc()
         return False
     finally:
         loop.close()
 
 def run_single_consensus(run_idx: int,
+                         context: RunContext,
                          threshold: float = 0.5,
                          fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
     """
@@ -360,6 +370,7 @@ def run_single_consensus(run_idx: int,
 
     Args:
     - run_idx: The index of the run in a series of Monte Carlo runs.
+    - context: A RunContext object containing filter type and directory settings.
     - threshold: The reputation threshold below which a satellite is considered
                  detected as faulty.
     - fpr_offset: The percentage of initial steps to ignore when calculating false positives.
@@ -367,11 +378,12 @@ def run_single_consensus(run_idx: int,
     Returns:
     - KPIs for the consensus run, if successful. Else None.
     """
-    ekf_path = os.path.join(EKF_DIR, f"ekf_run_{run_idx}.npz")
-    log_file = os.path.join(SIM_DIR, f"sim_run_{run_idx}.log")
+    # Use the dynamic variables passed in
+    filter_path = os.path.join(context.filter_dir, f"{context.filter_type.value}_run_{run_idx}.npz")
+    log_file = os.path.join(context.sim_dir, f"sim_run_{run_idx}.log")
 
-    if not os.path.exists(ekf_path):
-        print(f"Missing EKF data for run {run_idx}. Skipping.")
+    if not os.path.exists(filter_path):
+        print(f"Missing {context.filter_type.value.upper()} data for run {run_idx}. Skipping.")
         return None
 
     logger = get_logger(name=f"SIM_{run_idx}", log_file=log_file)
@@ -388,10 +400,11 @@ def run_single_consensus(run_idx: int,
         dag, rep_history, _, faulty_ids = loop.run_until_complete(
             run_consensus_demo(
                 config,
-                DemoToggles(save_ekf_results=False,
-                            load_ekf_results=True,
+                DemoToggles(save_filter_results=False,
+                            load_filter_results=True,
                             save_sim_results=False),
-                DemoFilePaths(ekf_results_path=ekf_path,
+                DemoFilePaths(filter_type=context.filter_type,
+                              filter_results_path=filter_path,
                               log_file=log_file)
             )
         )
@@ -439,9 +452,20 @@ if __name__ == "__main__":
                         default=0, help="Step to start plotting from (convergence)")
     parser.add_argument("--recalculate", action="store_true",
                         help="Recalculate KPIs from saved data")
+    parser.add_argument("--filter-type", type=str, choices=["ukf", "ekf"],
+                        default="ekf", help="Which filter to use (ukf or ekf)")
     args = parser.parse_args()
 
-    os.makedirs(EKF_DIR, exist_ok=True)
+    # Convert string to Enum
+    selected_filter = FilterType(args.filter_type)
+    print(f"Selected filter type: {selected_filter.value.upper()}")
+
+    # Dynamic directories
+    FILTER_DIR = os.path.join(DATA_DIR, selected_filter.value)
+    SIM_DIR = os.path.join(DATA_DIR, f"sim_{selected_filter.value}")
+    MC_RESULTS_PATH = os.path.join(SIM_DIR, f"mc_results_{ISL_RANGE_KM}km.npz")
+
+    os.makedirs(FILTER_DIR, exist_ok=True)
     os.makedirs(SIM_DIR, exist_ok=True)
 
     RESULTS = None
@@ -481,23 +505,35 @@ if __name__ == "__main__":
     if RESULTS is None:
         start_time = time.time()
 
-        # Phase 1: EKF Generation
-        print(f"Phase 1: Generating EKF data for {args.num_runs} runs...")
+        # Phase 1: Filter Generation
+        print(f"Phase 1: Generating {selected_filter.value.upper()} \
+              data for {args.num_runs} runs...")
         runs_to_gen = [i for i in range(args.num_runs)
-                       if not os.path.exists(os.path.join(EKF_DIR, f"ekf_run_{i}.npz"))]
+                       if not os.path.exists(os.path.join(FILTER_DIR,
+                                                          f"{selected_filter.value}_run_{i}.npz"))]
 
         if runs_to_gen:
+            # Bind the filter arguments just like we do in Phase 2
+            filter_func = functools.partial(run_single_filter,
+                                            filter_type=selected_filter,
+                                            filter_dir=FILTER_DIR)
             with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-                list(executor.map(run_single_ekf, runs_to_gen))
-            print(f"EKF generation completed for {len(runs_to_gen)} runs.")
+                list(executor.map(filter_func, runs_to_gen))
+            print(f"{selected_filter.value.upper()} generation completed for \
+                  {len(runs_to_gen)} runs.")
         else:
-            print("All EKF data already exists. Skipping Phase 1.")
+            print(f"All {selected_filter.value.upper()} data already exists. Skipping Phase 1.")
 
         # Phase 2: Consensus Simulation
         print(f"Phase 2: Running Consensus simulations for {args.num_runs} runs...")
+        run_context = RunContext(filter_type=selected_filter,
+                                filter_dir=FILTER_DIR,
+                                sim_dir=SIM_DIR)
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-            # Use partial to pass threshold and fpr_offset to run_single_consensus
-            sim_func = functools.partial(run_single_consensus, threshold=args.threshold,
+            # Add filter_type, filter_dir, and sim_dir to the partial execution
+            sim_func = functools.partial(run_single_consensus,
+                                         context=run_context,
+                                         threshold=args.threshold,
                                          fpr_offset=args.fpr_offset)
             RESULTS = list(executor.map(sim_func, range(args.num_runs)))
 

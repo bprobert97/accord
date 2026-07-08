@@ -25,14 +25,31 @@ jobs:
     - name: Run mypy static type checker
       run: |
         mypy .
-    - name: Run pytest with coverage and generate XML report
+    - name: Run pytest with coverage and generate report
       run: |
-        pytest --cov=src --cov-report=xml tests/
-    - name: Publish Code Coverage Summary
-      uses: irongut/CodeCoverageSummary@v1.3.0
+        pytest --cov=src --cov-report=json tests/
+    - name: Upload code coverage
+      uses: actions/upload-artifact@v7
       with:
-        # Use the file generated in the previous step
-        filename: coverage.xml
-        # Optional: Display a badge and format the output as markdown
-        badge: true
-        format: markdown
+        name: coverage-${{ matrix.python-version }}
+        path: |
+          ./coverage.json
+    - name: Parse coverage percentage
+      id: get-coverage
+      run: |
+        COVERAGE=$(jq -r '.totals.percent_covered_display' coverage.json)
+        echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+
+    - name: Update Coverage Badge
+      # Only run this on the main branch so PRs don't overwrite the main badge
+      if: github.ref == 'refs/heads/main'
+      uses: Schneegans/dynamic-badges-action@v1.7.0
+      with:
+        auth: ${{ secrets.GIST_SECRET }}
+        gistID: 335ad3bc77d4305c53eeb8715939592e
+        filename: accord-coverage.json
+        label: coverage
+        message: ${{ steps.get-coverage.outputs.coverage }}%
+        valColorRange: ${{ steps.get-coverage.outputs.coverage }}
+        maxColorRange: 90
+        minColorRange: 50

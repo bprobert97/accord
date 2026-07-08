@@ -2,3 +2,6 @@
 source = src
 omit =
     src/plotting.py
+    src/mc_comparison.py
+    src/mc_plotting.py
+    src/visualise_orbits.py

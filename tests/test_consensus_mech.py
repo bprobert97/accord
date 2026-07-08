@@ -10,7 +10,7 @@ from src.reputation import MAX_REPUTATION
 from src.satellite_node import SatelliteNode
 from src.transaction import Transaction, TransactionMetadata, \
     TransactionAddresses
-from src.filter import ObservationRecord
+from src.filters.filter_interface import ObservationRecord
 
 @pytest.fixture
 def consensus_mech():

@@ -2,16 +2,21 @@
 Unit tests for the filter dynamics and measurement model functions.
 """
 import numpy as np
-from src.filter import (
-    two_body_f,
+from src.filters.ekf import (
     F_jacobian_6,
-    hx_block,
-    van_loan_discretization,
-    _initialise_state_and_cov,
-    rk4_step,
+    van_loan_discretisation,
     H_blocks_target_obs,
-    MU_EARTH,
+)
+from src.filters.filter_interface import (
+    initialise_state_and_cov,
+    rk4_step,
+    hx_block,
+    two_body_f,
+    check_line_of_sight,
+    apply_network_faults,
+    ObservationRecord,
     STATE_DIM,
+    MU_EARTH
 )
 
 from src.simulation import RE
@@ -117,7 +122,7 @@ def test_f_jacobian_6():
     # Check that the bottom-right (d(a)/d(v)) is zero
     assert np.all(F[3:, 3:] == 0)
 
-def test_van_loan_discretization():
+def test_van_loan_discretisation():
     """
     Test the Van Loan discretisation method.
     """
@@ -126,7 +131,7 @@ def test_van_loan_discretization():
     L = np.random.randn(6, 3)
     Qc = np.eye(3)
 
-    Phi, Q = van_loan_discretization(F, L, Qc, dt)
+    Phi, Q = van_loan_discretisation(F, L, Qc, dt)
 
     # Check shapes
     assert Phi.shape == (6, 6)
@@ -141,7 +146,7 @@ def test_initialise_state_and_cov():
     """
     N = 3
     truth = np.random.randn(1, STATE_DIM * N)
-    x0_est, P0 = _initialise_state_and_cov(N, truth)
+    x0_est, P0 = initialise_state_and_cov(N, truth)
 
     # Check shapes
     assert x0_est.shape == (STATE_DIM * N,)
@@ -158,3 +163,49 @@ def test_initialise_state_and_cov():
     for i in range(N):
         block = P0[STATE_DIM*i:STATE_DIM*(i+1), STATE_DIM*i:STATE_DIM*(i+1)]
         assert np.count_nonzero(block - np.diag(np.diagonal(block))) == 0
+
+def test_check_line_of_sight():
+    """
+    Test the line of sight calculation considering Earth blockage.
+    """
+    # Observer and target close to each other, high altitude
+    r_obs = np.array([RE + 1000e3, 0, 0])
+    r_tgt = np.array([RE + 1000e3, 1000e3, 0])
+    assert check_line_of_sight(r_obs, r_tgt) is True
+
+    # Observer and target on opposite sides of the Earth
+    r_obs2 = np.array([RE + 500e3, 0, 0])
+    r_tgt2 = np.array([-RE - 500e3, 0, 0])
+    assert check_line_of_sight(r_obs2, r_tgt2) is False
+
+def test_apply_network_faults():
+    """
+    Test the injection of deterministic faults based on satellite ID.
+    """
+    obs = ObservationRecord(
+        step=10, time=100.0, observer=1, target=2,
+        nis=1.0, dof=2, r_vector=[1,0,0], v_vector=[0,1,0]
+    )
+    faulty_ids = set()
+
+    # Case 1: sid ends in 1 -> NIS drops to 0.01 (too perfect)
+    apply_network_faults(obs, sid=11, n_sats=15, k=250, faulty_ids=faulty_ids)
+    assert obs.nis == 0.01
+    assert 11 in faulty_ids
+
+    # Case 2: sid ends in 2, n_sats >= 7 -> NIS spikes to 50.0
+    obs.nis = 1.0
+    apply_network_faults(obs, sid=12, n_sats=10, k=250, faulty_ids=faulty_ids)
+    assert obs.nis == 50.0
+    assert 12 in faulty_ids
+
+    # Case 3: sid ends in 3, n_sats >= 10, time window 200 <= k < 400
+    obs.nis = 3.0
+    apply_network_faults(obs, sid=13, n_sats=15, k=300, faulty_ids=faulty_ids)
+    assert obs.nis == 30.0 # 3.0 > 2.0, so multiplied by 10
+    assert 13 in faulty_ids
+
+    obs.nis = 1.5
+    apply_network_faults(obs, sid=23, n_sats=15, k=300, faulty_ids=faulty_ids)
+    assert obs.nis == 0.15 # 1.5 < 2.0, so divided by 10
+    assert 23 in faulty_ids
