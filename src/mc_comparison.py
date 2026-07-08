@@ -144,12 +144,13 @@ def _plot_single_dataset(res: List[Dict[str, Any]],
 
     # Plot Honest
     h_mean, h_std = np.mean(h, axis=0), np.std(h, axis=0)
-    plt.plot(steps, h_mean, color=colour, label=f"Honest ({label} ISL)")
+    plt.plot(steps, h_mean, color=colour, label=f"Honest ({label} ISL)", linewidth=3.5)
     plt.fill_between(steps, h_mean - h_std, h_mean + h_std, color=colour, alpha=0.1)
 
     # Plot Compromised
     f_mean, f_std = np.mean(f, axis=0), np.std(f, axis=0)
-    plt.plot(steps, f_mean, color=colour, linestyle="--", label=f"Compromised ({label} ISL)")
+    plt.plot(steps, f_mean, color=colour, linestyle="--", label=f"Compromised ({label} ISL)",
+             linewidth=3.5)
     plt.fill_between(steps, f_mean - f_std, f_mean + f_std, color=colour, alpha=0.1)
 
 
