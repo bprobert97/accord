@@ -62,7 +62,7 @@ CLUSTER_SIZE = 10
 DATA_DIR = "sim_data"
 
 DEFAULT_CONFIG = FilterConfig(
-        N=50,
+        N=400,
         steps=1000,
         dt=60.0,
         sig_r=10.0,
