@@ -14,5 +14,6 @@ app.log
 /tests/__pycache__
 .coverage
 coverage.xml
+coverage.json
 /sim_data
 src/filters/__pycache__

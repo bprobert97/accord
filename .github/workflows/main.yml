@@ -27,7 +27,7 @@ jobs:
         mypy .
     - name: Run pytest with coverage and generate report
       run: |
-        pytest --cov=src --cov-report=json tests/
+        pytest --cov-config=.coveragerc --cov=src --cov-report=json tests/
     - name: Upload code coverage
       uses: actions/upload-artifact@v7
       with:
