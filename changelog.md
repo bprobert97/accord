@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.1] - 2026-07
+
+### Summary
+This is a bug fix release.
+
+### Added
+- Fixed bug that caused the seed in the DEFAULT_CONFIG to be overwritten when doing monte carlo runs in parallel.
+- Added new file for generating plots comparing performance of different estimation filters.
+---
+
 ## [4.0] - 2026-07
 
 ### Summary
