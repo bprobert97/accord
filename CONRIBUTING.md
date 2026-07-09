@@ -53,24 +53,25 @@ For context when navigating the codebase, here is the structure of the ACCORD re
 │
 ├── 📁 images/                  # Image assets
 │
-├── 📁 src/                        # Main source code
-│   └── 📁 filters/                # Implementation files for different Kalman Filters
-│       └── ekf.py                 # Implementation of an Extended Kalman Filter
-│       └── filter_interface.py    # Reusable code for implementing different Kalman Filters and interfacing with PoISE
-│       └── ukf.py                 # Implementation of an Unscented Kalman Filter
-│   └── 📁 legacy/                 # Legacy code maintained for easy plot generation
-│   └── __init__.py                # Empty file, for module creation
-│   └── consensus_mech.py          # Code for the PoISE consensus mechanism
-│   └── dag.py                     # Code for the Directed Acyclic Graph ledger structure
-│   └── logger.py                  # Code for the app logger
-│   └── filter_mc_comparison.py    # Code for generating comparison plots for Monte Carlo data sets wih varying estimation filters
-│   └── isl_mc_comparison.py       # Code for generating comparison plots for Monte Carlo data sets wih varying ISLs
-│   └── mc_plotting.py             # Code for plotting aggregated Monte Carlo simulation results
-|   └── plotting.py                # Code for plotting individual simulation results
-│   └── reputation.py              # Code for the satellite reputation manager
-│   └── satellite_node.py          # Code representing a satellite in the network
-│   └── simulation.py              # Helper functions for generating and converting satellite orbital elements
-│   └── transaction.py             # Code representing a transaction submitted by a satellite
+├── 📁 src/                          # Main source code
+│   └── 📁 filters/                  # Implementation files for different Kalman Filters
+│       └── ekf.py                   # Implementation of an Extended Kalman Filter
+│       └── filter_interface.py      # Reusable code for implementing different Kalman Filters and interfacing with PoISE
+│       └── ukf.py                   # Implementation of an Unscented Kalman Filter
+│   └── 📁 legacy/                   # Legacy code maintained for easy plot generation
+│   └── 📁 plotting/                 # Code for generating plots
+│       └── filter_mc_comparison.py  # Code for generating comparison plots for Monte Carlo data sets wih varying estimation filters
+│       └── isl_mc_comparison.py     # Code for generating comparison plots for Monte Carlo data sets wih varying ISLs
+│       └── mc_plotting.py           # Code for plotting aggregated Monte Carlo simulation results
+|       └── plotting.py              # Code for plotting individual simulation results
+│   └── __init__.py                  # Empty file, for module creation
+│   └── consensus_mech.py            # Code for the PoISE consensus mechanism
+│   └── dag.py                       # Code for the Directed Acyclic Graph ledger structure
+│   └── logger.py                    # Code for the app logger
+│   └── reputation.py                # Code for the satellite reputation manager
+│   └── satellite_node.py            # Code representing a satellite in the network
+│   └── simulation.py                # Helper functions for generating and converting satellite orbital elements
+│   └── transaction.py               # Code representing a transaction submitted by a satellite
 │   └── visualise_orbits.py        # Code for generating a gif of truth orbits
 │
 ├── 📁 tests/                  # Unit tests, written with pytest
