@@ -26,13 +26,13 @@ import time
 import argparse
 import functools
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Any
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from src.logger import get_logger
-from src.mc_plotting import plot_mc_results, DATA_DIR
-from src.plotting import generate_corner_plot, extract_nis_data
+from src.plotting.mc_plotting import plot_mc_results, DATA_DIR
+from src.plotting.plotting import generate_corner_plot, extract_nis_data
 from accord_demo import run_consensus_demo, DEFAULT_CONFIG, \
     DemoFilePaths, DemoToggles, FilterType
 
@@ -336,8 +336,7 @@ def run_single_filter(run_idx: int, filter_type: FilterType, filter_dir: str) ->
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    config = DEFAULT_CONFIG
-    config.seed += run_idx
+    config = replace(DEFAULT_CONFIG, seed=DEFAULT_CONFIG.seed + run_idx)
     toggle = DemoToggles(save_sim_results=False, run_consensus=False)
     fpath = DemoFilePaths(
         filter_type=filter_type,
@@ -390,8 +389,7 @@ def run_single_consensus(run_idx: int,
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    config = DEFAULT_CONFIG
-    config.seed += run_idx
+    config = replace(DEFAULT_CONFIG, seed=DEFAULT_CONFIG.seed + run_idx)
 
     logger.info("Starting Consensus Simulation for Run %d", run_idx)
 

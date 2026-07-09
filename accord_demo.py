@@ -30,7 +30,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Optional, Any
 import numpy as np
-from src.plotting import  \
+from src.plotting.plotting import  \
     plot_aggregated_reputation, check_consensus_outcomes, \
         plot_nis_boxplot, plot_ground_tracks, \
             calculate_convergence_index, \
@@ -288,9 +288,8 @@ def _load_filter_results(filter_results_path: str,
                 logger.info("Successfully loaded filter simulation results.")
                 # Ensure all_obs_records is converted back to a list of dataclasses
                 return data['truth'], data['z_hist'], data['all_obs_records'], data['x_hist']
-
-            logger.warning("Loaded filter config does not match current config. \
-                        Rerunning filter simulation.")
+            logger.warning("Loaded filter config does not match current config." \
+            "Loaded config: %s, config: %s Rerunning filter simulation.", loaded_config, config)
     except (OSError, ValueError) as e:
         logger.error("Corrupt or unreadable filter results file. \
                      Rerunning filter simulation. Error: %s", e)

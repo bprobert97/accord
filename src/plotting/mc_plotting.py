@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Any
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
-from src.plotting import _draw_scatter_underneath
+from src.plotting.plotting import _draw_scatter_underneath
 
 DATA_DIR = os.path.join("sim_data", "mc_results")
 
@@ -324,3 +324,21 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
 
     plt.tight_layout()
     plt.show()
+
+def get_aggregated_reps(results: List[Dict[str, Any]]) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Collects aggregated reputations across different satellite populations.
+
+    Args:
+        results: The results to extract aggregated reputation values from.
+
+    Returns:
+        Two arrays: One for the mean reputation values of the honest nodes,
+        and another for the compromised nodes.
+    """
+    honest_means = []
+    compromised_means = []
+    for kpi in results:
+        honest_means.append(np.mean(kpi["honest_matrix"], axis=0))
+        compromised_means.append(np.mean(kpi["faulty_matrix"], axis=0))
+    return np.array(honest_means), np.array(compromised_means)

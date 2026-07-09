@@ -17,9 +17,8 @@ This is sufficient and efficient for research and testing.
 '/
 
 loop for each timestep k
-    sim -> filter: EKF predict and update steps
+    sim -> filter: Filter predict and update steps
     filter -->> sim: ObservationRecords
-    note right: Based on EKF generated measurements
 
     sim -> sat: update_position(ground_truth)
 
