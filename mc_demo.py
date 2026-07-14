@@ -450,8 +450,8 @@ if __name__ == "__main__":
                         default=0, help="Step to start plotting from (convergence)")
     parser.add_argument("--recalculate", action="store_true",
                         help="Recalculate KPIs from saved data")
-    parser.add_argument("--filter-type", type=str, choices=["ukf", "ekf"],
-                        default="ekf", help="Which filter to use (ukf or ekf)")
+    parser.add_argument("--filter-type", type=str, choices=["ukf", "ekf", "ckf"],
+                        default="ekf", help="Which filter to use (ukf or ekf or ckf)")
     args = parser.parse_args()
 
     # Convert string to Enum

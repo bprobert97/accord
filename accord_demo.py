@@ -45,6 +45,7 @@ from src.filters.filter_interface import FilterConfig, \
     apply_network_faults
 from src.filters.ekf import JointEKF
 from src.filters.ukf import JointUKF
+from src.filters.ckf import JointCKF
 from src.logger import get_logger
 from src.satellite_node import SatelliteNode
 from src.transaction import Transaction
@@ -53,6 +54,7 @@ class FilterType(str, Enum):
     """
     A class to store the filter type as a string.
     """
+    CKF = "ckf"
     UKF = "ukf"
     EKF = "ekf"
 
@@ -415,7 +417,7 @@ def _create_cluster_filters(filter_type: FilterType,
     Factory function to create the requested filter instances for each cluster of satellites.
 
     Args:
-    - filter_type: The type of filter to create (e.g., UKF or EKF).
+    - filter_type: The type of filter to create (e.g., CKF, UKF or EKF).
     - config: FilterConfig object with simulation parameters.
     - truth: The ground truth trajectory history.
     - clusters: A list of lists, where each inner list contains the satellite IDs for that cluster.
@@ -424,7 +426,7 @@ def _create_cluster_filters(filter_type: FilterType,
     Returns:
     - A list of filter instances, one for each cluster.
     """
-    cluster_filters: list[JointEKF | JointUKF | None] = []
+    cluster_filters: list[JointEKF | JointUKF | JointCKF | None] = []
     for i, cluster_sat_ids in enumerate(clusters):
         cluster_n = len(cluster_sat_ids)
         cluster_config = FilterConfig(
@@ -441,6 +443,8 @@ def _create_cluster_filters(filter_type: FilterType,
             cluster_filters.append(JointUKF(cluster_config, cluster_truth_0))
         elif filter_type == FilterType.EKF:
             cluster_filters.append(JointEKF(cluster_config, cluster_truth_0))
+        elif filter_type == FilterType.CKF:
+            cluster_filters.append(JointCKF(cluster_config, cluster_truth_0))
         else:
             raise ValueError(f"Unsupported filter type: {filter_type}")
 
@@ -567,8 +571,10 @@ def _process_cluster_step(cluster_sat_ids: list[int],
             local_x = current_filter.ukf.x
         elif hasattr(current_filter, 'ekf'):
             local_x = current_filter.ekf.x
+        elif hasattr(current_filter, 'ckf'):
+            local_x = current_filter.ckf.x
         else:
-            raise ValueError("Filter instance must have either 'ukf' or 'ekf' attribute.")
+            raise ValueError("Filter instance must have either 'ukf' or 'ekf' or 'ckf' attribute.")
 
         # Inline the slice definitions directly into the array access
         x_hist[k, sat_idx_global * 6 : (sat_idx_global + 1) * 6] = \
@@ -868,9 +874,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--filter-type",
         type=str,
-        choices=["ukf", "ekf"],
+        choices=["ukf", "ekf", "ckf"],
         default="ekf",
-        help="Which filter to use (ukf or ekf)"
+        help="Which filter to use (ukf or ekf or ckf)"
     )
     args = parser.parse_args()
 

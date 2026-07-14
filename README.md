@@ -47,7 +47,7 @@ To run the Monte Carlo Simulation, execute:
 * `python mc_demo.py`
 
 You can customise the simulation and KPI extraction using the following arguments:
-* `--filter-type`: Which orbit determination filter to use, either `ekf` or `ukf` (default: `ekf`).
+* `--filter-type`: Which orbit determination filter to use, either `ckf` or `ekf` or `ukf` (default: `ekf`).
 * `--num-runs`: The number of Monte Carlo runs you wish to execute (default: 40).
 * `--threshold`: Reputation detection threshold for KPIs (default: 0.5).
 * `--fpr-offset`: False Positive Rate offset percent to ignore the initialisation effects of the filter (default: 0.2).

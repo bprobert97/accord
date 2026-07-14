@@ -55,7 +55,9 @@ For context when navigating the codebase, here is the structure of the ACCORD re
 │
 ├── 📁 src/                          # Main source code
 │   └── 📁 filters/                  # Implementation files for different Kalman Filters
+│       └── ckf.py                   # Implementation of a Cubature Kalman Filter
 │       └── ekf.py                   # Implementation of an Extended Kalman Filter
+│       └── ukf.py                   # Implementation of an Unscented Kalman Filter
 │       └── filter_interface.py      # Reusable code for implementing different Kalman Filters and interfacing with PoISE
 │       └── ukf.py                   # Implementation of an Unscented Kalman Filter
 │   └── 📁 legacy/                   # Legacy code maintained for easy plot generation
