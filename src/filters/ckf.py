@@ -29,6 +29,27 @@ the filter uses a continuous white noise acceleration kinematic model and robust
 Cholesky decomposition to handle the numerical scaling challenges inherent in
 orbital mechanics, updating the network's joint state based on inter-satellite
 line-of-sight measurements.
+
+Design Note: CKF Implementation via UKF Wrapper
+-----------------------------------------------
+This implementation deliberately uses FilterPy's `UnscentedKalmanFilter` with
+`kappa=0.0` rather than its native `CubatureKalmanFilter` for three critical reasons:
+
+1. Numerical Stability: FilterPy's native CKF hardcodes standard Cholesky
+   decomposition, which crashes (LinAlgError) if the high-dimensional covariance
+   matrix loses strict positive-definiteness due to floating-point drift. The UKF
+   class allows the injection of a `robust_cholesky` method to prevent this.
+2. Array Broadcasting: The native CKF class has brittle internal shape handling
+   that forces column vectors, leading to broadcasting errors during the residual
+   calculation when using standard 1D measurement arrays.
+   The UKF class cleanly handles flat 1D NumPy arrays without reshaping hacks.
+3. Sigma Point Selection: While the standard UKF in this framework uses
+   `MerweScaledSigmaPoints` to finely tune point spread via alpha/beta scaling,
+   this CKF implementation strictly requires `JulierSigmaPoints`. Using Julier
+   with `kappa=0.0` ensures the weights and point locations exactly match the
+   spherical-radial cubature rule (a centre weight of 0, and 2n points at
+   ±sqrt(n*P) weighted at 1/2n). The Merwe scaling would alter these weights
+   and break the mathematical equivalence to a true CKF.
 """
 from typing import List
 import numpy as np
