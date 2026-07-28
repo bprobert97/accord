@@ -155,7 +155,8 @@ def plot_kpi_comparison(results_a: List[Dict[str, Any]],
 def _plot_kpi_bar_chart(results_a: List[Dict[str, Any]],
                         results_b: List[Dict[str, Any]]) -> None:
     """
-    Plots a bar chart comparison of recall, precision, FPR, and TTD percentage.
+    Plots a bar chart comparison of recall, precision, FPR, and TTD percentage,
+    with error bars representing standard deviation.
 
     Args:
     - results_a: Dataset A
@@ -167,26 +168,44 @@ def _plot_kpi_bar_chart(results_a: List[Dict[str, Any]],
     metrics = ["recall", "precision", "fpr"]
     labels = ["Recall", "Precision", "False Positive Rate", "Normalised TTD"]
 
+    # 1. Calculate means
     means_a = [np.mean([k[m] for k in results_a]) for m in metrics]
     means_b = [np.mean([k[m] for k in results_b]) for m in metrics]
 
-    def get_ttd_percent(results):
+    # 2. Calculate standard deviations for the error bars
+    stds_a = [np.std([k[m] for k in results_a]) for m in metrics]
+    stds_b = [np.std([k[m] for k in results_b]) for m in metrics]
+
+    # 3. Helper function updated to return both mean and std for TTD
+    def get_ttd_stats(results):
         ttd_pcts = [
             (k["avg_ttd"] / k["honest_matrix"].shape[1]) * 100
             for k in results if k.get("avg_ttd") is not None
         ]
-        return np.mean(ttd_pcts) if ttd_pcts else 0
+        if not ttd_pcts:
+            return 0.0, 0.0
+        return np.mean(ttd_pcts), np.std(ttd_pcts)
 
-    means_a.append(get_ttd_percent(results_a))
-    means_b.append(get_ttd_percent(results_b))
+    # 4. Append TTD stats to the lists
+    ttd_mean_a, ttd_std_a = get_ttd_stats(results_a)
+    ttd_mean_b, ttd_std_b = get_ttd_stats(results_b)
+
+    means_a.append(ttd_mean_a)
+    means_b.append(ttd_mean_b)
+
+    stds_a.append(ttd_std_a)
+    stds_b.append(ttd_std_b)
 
     x = np.arange(len(labels))
     width = 0.35
     _, ax = plt.subplots(figsize=(12, 6))
     cmap = plt.get_cmap('viridis')
 
-    ax.bar(x - width/2, means_a, width, label='1000km ISL', color=cmap(0.25))
-    ax.bar(x + width/2, means_b, width, label='2000km ISL', color=cmap(0.85))
+    # 5. Plot bars with yerr (error bars), capsize, and alpha for better contrast
+    ax.bar(x - width/2, means_a, width, yerr=stds_a, capsize=5, alpha=0.9,
+           label='1000km ISL', color=cmap(0.25))
+    ax.bar(x + width/2, means_b, width, yerr=stds_b, capsize=5, alpha=0.9,
+           label='2000km ISL', color=cmap(0.85))
 
     ax.set_ylabel('Percentage [%]', fontsize=18)
     ax.tick_params(axis='y', which='major', labelsize=18)
@@ -257,9 +276,9 @@ def main():
     python src/mc_comparison.py
     """
     parser = argparse.ArgumentParser(description="Compare Monte Carlo results.")
-    parser.add_argument("--start-step-a", type=int, default=210,
+    parser.add_argument("--start-step-a", type=int, default=0,
                         help="Step to start plotting from for dataset A (1000km).")
-    parser.add_argument("--start-step-b", type=int, default=125,
+    parser.add_argument("--start-step-b", type=int, default=0,
                         help="Step to start plotting from for dataset B (2000km).")
     args = parser.parse_args()
 

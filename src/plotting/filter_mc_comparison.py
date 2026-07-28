@@ -77,7 +77,7 @@ def plot_reputation_comparison(results_ekf: List[Dict[str, Any]],
 
     # Reordered so CKF is plotted last, placing it on top of UKF visually
     datasets = [
-        (results_ekf, start_step_ekf, cmap(0.1), "EKF"),
+        (results_ekf, start_step_ekf, cmap(0.2), "EKF"),
         (results_ukf, start_step_ukf, cmap(0.9), "UKF"),
         (results_ckf, start_step_ckf, cmap(0.5), "CKF")
     ]
@@ -206,9 +206,9 @@ def _plot_kpi_bar_chart(results_ekf: List[Dict[str, Any]],
     cmap = plt.get_cmap('plasma')
 
     # 5. Plot bars with yerr (error bars) and capsize (horizontal caps on error bars)
-    ax.bar(x - width, means_ekf, width, yerr=stds_ekf, capsize=5, label='EKF', color=cmap(0.1))
-    ax.bar(x, means_ckf, width, yerr=stds_ckf, capsize=5, label='CKF', color=cmap(0.5))
-    ax.bar(x + width, means_ukf, width, yerr=stds_ukf, capsize=5, label='UKF', color=cmap(0.9))
+    ax.bar(x - width, means_ekf, width, yerr=stds_ekf, capsize=5, label='EKF', color=cmap(0.2), alpha=0.85)
+    ax.bar(x, means_ckf, width, yerr=stds_ckf, capsize=5, label='CKF', color=cmap(0.5), alpha=0.85)
+    ax.bar(x + width, means_ukf, width, yerr=stds_ukf, capsize=5, label='UKF', color=cmap(0.9), alpha=0.85)
 
     ax.set_ylabel('Percentage [%]', fontsize=18)
     ax.tick_params(axis='y', which='major', labelsize=18)

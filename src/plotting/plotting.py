@@ -39,7 +39,7 @@ from src.reputation import ReputationManager, MAX_REPUTATION, \
 # === Configuration ===
 DATA_DIR = "sim_data"
 FILENAME = "sim_data/app.log"  # your log file path
-THRESHOLD = 0.5                # consensus threshold
+THRESHOLD = 0.3                # consensus threshold
 CMAP = "viridis"               # colour map for correctness
 REP_PARAMS = ReputationParams()
 REP_MGR = ReputationManager(REP_PARAMS)
@@ -425,7 +425,7 @@ def calculate_median_percentiles(dof: int = 2) -> None:
 
 
 def check_consensus_outcomes(dag: Any,
-                             consensus_threshold: float = 0.5) -> bool:
+                             consensus_threshold: float = 0.3) -> bool:
     """
     Checks if transaction consensus outcomes (confirmed/rejected) are consistent
     with their consensus scores and reports any discrepancies.
@@ -651,7 +651,7 @@ def plot_aggregated_reputation(
     _plot_reputation_spread(steps, honest_arr[:, start_index:] \
                             if honest_arr.size else np.array([]), cmap(0.5), "Honest")
     _plot_reputation_spread(steps, compromised_arr[:, start_index:] \
-                            if compromised_arr.size else np.array([]), cmap(0.05), "Faulty")
+                            if compromised_arr.size else np.array([]), cmap(0.05), "Compromised")
 
     plt.axhline(MAX_REPUTATION/2, color="gray", linestyle=":",
                 linewidth=2, label="Neutral Reputation(0.5)")
@@ -804,9 +804,6 @@ def _plot_satellite_tracks(ax: Any, truth: np.ndarray, n: int) -> None:
         ax.plot(lon_plot, lat_plot, color='black', alpha=0.1, lw=1.2, zorder=5)
         ax.scatter(lon[-1], lat[-1], color='black', s=20, edgecolor='white',
                    linewidth=0.5, zorder=6)
-
-
-
 
 
 def generate_constellation_df(num_sats: int, seed: int) -> pd.DataFrame:
