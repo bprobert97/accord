@@ -38,7 +38,7 @@ class ConsensusMechanism():
     The Proof of Inter-Satellite Evaluation (PoISE) consensus mechanism.
     """
     def __init__(self) -> None:
-        self.consensus_threshold: float = 0.5
+        self.consensus_threshold: float = 0.3
         self.ema_alpha: float = 0.1  # Smoothing factor for EMA
         # Define a simple mapping: normalise by a maximum useful DOF
         # Theoretically, this could be up to 6 (full 3D position+velocity), but
@@ -146,7 +146,8 @@ class ConsensusMechanism():
 
         Returns:
         - A float representing the normalised dot product, which indicates
-          the change in direction of the vector.
+          the change in direction of the vector. This value is absolute and
+          so is always in [0,1].
         """
         dot_prod = sum(c * p for c, p in zip(curr, prev))
         v1_sq_norm = sum(c * c for c in curr)
@@ -172,18 +173,18 @@ class ConsensusMechanism():
         - previous_data: A dictionary containing the previous r_vector, v_vector, and
                          timestamp for the same observer-target pair.
         - decay_rate: Rate at which the DOF score decays if the measurement
-          direction changes significantly.
+          direction changes significantly. Must be positive.
         - velocity_weight: Weighting factor for the velocity vector in the blended
           persistence of excitation calculation. Should be in [0,1].
 
         Returns:
         - DOF score 0 = low DOF/ highly redundant, 1+ = high DOF/novelty.
-        - Note: assumed to be bounded in [0,1] where max k is assumed to be 3.
+        - Note: assumed to be bounded in [0,1] where max k is assumed to be 6.
         """
 
-        # Calculate base score of (k-1)/2
-        # dof = 1 returns 0, dof = 2 returns 0.5 and dof = 3 returns 1.
-        base_score = (obs_record.dof - 1) / 2
+        # Calculate base score of (k-1)/5
+        # dof = 1 returns 0.0, dof = 2 returns 0.2, dof = 6 returns 1.0.
+        base_score = (obs_record.dof - 1) / 5.0
 
         if previous_data is None:
             return base_score
