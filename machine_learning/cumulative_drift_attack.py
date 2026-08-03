@@ -18,16 +18,13 @@ class PoISEAttackEnv(gym.Env):
     def __init__(self):
         super().__init__()
 
-        # Action Space: Small incremental adjustments to position
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
-
-        # Observation Space: Current true position + current cumulative drift
         self.observation_space = spaces.Box(
             low=-20000.0, high=20000.0, shape=(6,), dtype=np.float32
         )
 
         self.consensus_engine = ConsensusMechanism()
-        self.max_steps = 100
+        self.max_steps = 360  # Expanded to 360 steps for a full 360-degree LEO orbit loop
         self.current_step = 0
         self.sim_clock = 1600000000.0
 
@@ -52,23 +49,37 @@ class PoISEAttackEnv(gym.Env):
             "rewards": []
         }
 
-        self.nominal_r_vector = [7000.0, 0.0, 0.0]
-        self.nominal_v_vector = [0.0, 7.5, 0.0]
+        radius = 7000.0
+        orbital_rate = (2.0 * math.pi) / 5400.0
 
-        # Warm up the DAG instantly
+        # Set initial step 0 vectors matching the LEO equations
+        initial_angle = 0.0
+        self.nominal_r_vector = [
+            radius * math.cos(initial_angle),
+            radius * math.sin(initial_angle),
+            radius * 0.1 * math.sin(initial_angle)
+        ]
+        self.nominal_v_vector = [
+            -radius * orbital_rate * math.sin(initial_angle),
+            radius * orbital_rate * math.cos(initial_angle),
+            radius * 0.1 * 2.0 * orbital_rate * math.cos(initial_angle)
+        ]
+
+        # Warm up the DAG instantly using continuous orbital timing
         for i in range(4):
-            warmup_angle = (i - 4) * 0.05
-            radius = 7000.0
+            # Step backward relative to step 0 for the 4 warmup frames
+            warmup_step = i - 4
+            warmup_angle = (warmup_step / self.max_steps) * (2.0 * math.pi)
 
             warmup_r_vector = [
                 radius * math.cos(warmup_angle),
                 radius * math.sin(warmup_angle),
-                radius * 0.5 * math.sin(warmup_angle * 0.5)
+                radius * 0.1 * math.sin(2.0 * warmup_angle)
             ]
             warmup_v_vector = [
-                -radius * 0.05 * math.sin(warmup_angle),
-                radius * 0.05 * math.cos(warmup_angle),
-                radius * 0.5 * 0.05 * 0.5 * math.cos(warmup_angle * 0.5)
+                -radius * orbital_rate * math.sin(warmup_angle),
+                radius * orbital_rate * math.cos(warmup_angle),
+                radius * 0.1 * 2.0 * orbital_rate * math.cos(2.0 * warmup_angle)
             ]
 
             nominal_tx = self._build_transaction(warmup_r_vector, warmup_v_vector, 2.366)
@@ -116,18 +127,23 @@ class PoISEAttackEnv(gym.Env):
     def step(self, action):
         self.current_step += 1
 
-        # Base orbital physics
-        angle = self.current_step * 0.05
-        radius = 7000.0
+        # Map current step linearly across a full 2pi orbital period
+        angle = (self.current_step / self.max_steps) * (2.0 * math.pi)
+
+        radius = 7000.0  # ~6371km Earth radius + ~629km altitude (Standard LEO)
+        orbital_rate = (2.0 * math.pi) / 5400.0  # LEO mean motion for a ~90 min orbit
+
         self.nominal_r_vector = [
             radius * math.cos(angle),
             radius * math.sin(angle),
-            radius * 0.5 * math.sin(angle * 0.5)
+            radius * 0.1 * math.sin(angle)  # Slight inclination wrapper
         ]
+
+        # True LEO tangential velocity components
         self.nominal_v_vector = [
-            -radius * 0.05 * math.sin(angle),
-            radius * 0.05 * math.cos(angle),
-            radius * 0.5 * 0.05 * 0.5 * math.cos(angle * 0.5)
+            -radius * orbital_rate * math.sin(angle),
+            radius * orbital_rate * math.cos(angle),
+            radius * 0.1 * 2.0 * orbital_rate * math.cos(angle)
         ]
 
         # Force a baseline movement vector so the agent cannot just output zeros
@@ -192,7 +208,7 @@ if __name__ == "__main__":
 
     print("--- Running Test Episode ---")
     obs, info = env.reset()
-    for i in range(1000):
+    for i in range(360):
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, _ = env.step(action)
         if truncated:
