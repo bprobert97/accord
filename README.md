@@ -40,6 +40,9 @@ To run the single-run ACCORD demo, execute the script in your terminal. By defau
 To run the demo using the Unscented Kalman Filter (UKF), pass the --filter-type argument:
 * `python accord_demo.py --filter-type ukf`
 
+To run the demo with a Walker-Delta topology instead of a random topology, pass the --walker-delta argument:
+* `python accord_demo.py --walker-delta True`
+
 *(Note: You can also run these directly in VSCode by right-clicking the file and selecting `Run Python File in Terminal`, appending any arguments as needed.)*
 
 ### Monte Carlo Simulation
@@ -53,6 +56,7 @@ You can customise the simulation and KPI extraction using the following argument
 * `--fpr-offset`: False Positive Rate offset percent to ignore the initialisation effects of the filter (default: 0.2).
 * `--start-step`: The simulation step to start plotting from, useful for viewing steady-state convergence (default: 0).
 * `--recalculate`: Recalculate KPIs from previously saved data without regenerating the entire simulation.
+* `--disable-logging`: Disable logging for the Monte Carlo runs. This helps improve performance for simulations with large amounts of data, such as high ISL ranges or Walker-Delta topologies. Empty log files will still be created for each run to help you track progress.
 
 *Example:* `python mc_demo.py --num-runs 10 --threshold 0.3 --filter-type ukf`
 
