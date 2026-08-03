@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.2] - 2026-08
+
+### Summary
+Adds functionality for a Cubature Kalman Filter and implements a bug fix to reputation code.
+
+### Added
+- Cubature Kalman Filter implementation.
+- New unit tests.
+- New args for running the demos (diable-logging and walker-delta).
+- Better plots with larger text.
+- Bug fix for reputation snowballing up or down due to broadcasting.
+- Correction to DOF score calculation to allow for 6 DOF max in a [0,1] bound.
+---
+
 ## [4.1] - 2026-07
 
 ### Summary
