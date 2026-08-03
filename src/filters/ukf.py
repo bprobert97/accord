@@ -188,7 +188,7 @@ class JointUKF:
         M = config.N * (config.N - 1)
         dim_z = 2 * M
 
-        # Generate standard scaling parameters for orbital regimes, passing our custom robust solver
+        # Generate standard scaling parameters for orbital regimes, passing the cholesky solver
         points = MerweScaledSigmaPoints(n=dim_x, alpha=1e-3, beta=2., kappa=0., sqrt_method=robust_cholesky) # type: ignore
 
         self.ukf = UnscentedKalmanFilter(dim_x=dim_x, dim_z=dim_z, dt=config.dt,

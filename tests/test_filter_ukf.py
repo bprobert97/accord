@@ -115,6 +115,9 @@ def test_joint_ukf_update(ukf, filter_config):
     """
     Test the update step of the JointUKF and the correct logging of NIS records.
     """
+
+    ukf.predict()  # Ensure we have a predicted state before updating
+
     x_prior = ukf.ukf.x.copy()
 
     # 1. Force the filter to trust measurements more by lowering R

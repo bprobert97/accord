@@ -38,7 +38,7 @@ class ConsensusMechanism():
     The Proof of Inter-Satellite Evaluation (PoISE) consensus mechanism.
     """
     def __init__(self) -> None:
-        self.consensus_threshold: float = 0.5
+        self.consensus_threshold: float = 0.3
         self.ema_alpha: float = 0.1  # Smoothing factor for EMA
         # Define a simple mapping: normalise by a maximum useful DOF
         # Theoretically, this could be up to 6 (full 3D position+velocity), but
@@ -146,7 +146,8 @@ class ConsensusMechanism():
 
         Returns:
         - A float representing the normalised dot product, which indicates
-          the change in direction of the vector.
+          the change in direction of the vector. This value is absolute and
+          so is always in [0,1].
         """
         dot_prod = sum(c * p for c, p in zip(curr, prev))
         v1_sq_norm = sum(c * c for c in curr)
@@ -172,18 +173,18 @@ class ConsensusMechanism():
         - previous_data: A dictionary containing the previous r_vector, v_vector, and
                          timestamp for the same observer-target pair.
         - decay_rate: Rate at which the DOF score decays if the measurement
-          direction changes significantly.
+          direction changes significantly. Must be positive.
         - velocity_weight: Weighting factor for the velocity vector in the blended
           persistence of excitation calculation. Should be in [0,1].
 
         Returns:
         - DOF score 0 = low DOF/ highly redundant, 1+ = high DOF/novelty.
-        - Note: assumed to be bounded in [0,1] where max k is assumed to be 3.
+        - Note: assumed to be bounded in [0,1] where max k is assumed to be 6.
         """
 
-        # Calculate base score of (k-1)/2
-        # dof = 1 returns 0, dof = 2 returns 0.5 and dof = 3 returns 1.
-        base_score = (obs_record.dof - 1) / 2
+        # Calculate base score of (k-1)/5
+        # dof = 1 returns 0.0, dof = 2 returns 0.2, dof = 6 returns 1.0.
+        base_score = (obs_record.dof - 1) / 5.0
 
         if previous_data is None:
             return base_score
@@ -284,7 +285,7 @@ class ConsensusMechanism():
 
         self._update_local_consensus_state(dag, transaction.hash, obs_record,
                                            (consensus_score, correctness_score))
-        self._update_satellite_reputation(sat_node, obs_record)
+        self._update_satellite_reputation(sat_node, obs_record, transaction.hash)
 
         if consensus_score >= self.consensus_threshold:
             dag.local_consensus_states[transaction.hash]["is_confirmed"] = True
@@ -307,11 +308,14 @@ class ConsensusMechanism():
         Returns:
         - A boolean indicating whether the transaction is valid.
         """
+
         if not transaction.tx_data:
-            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
-                sat_node.rep_manager.apply_negative(sat_node.reputation,
-                                                    sat_node.exp_pos,
-                                                    sat_node.performance_ema)
+            if transaction.hash not in sat_node.evaluated_txs:
+                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                    sat_node.rep_manager.apply_negative(sat_node.reputation,
+                                                        sat_node.exp_pos,
+                                                        sat_node.performance_ema)
+                sat_node.evaluated_txs.add(transaction.hash)
             return False
         return True
 
@@ -334,11 +338,18 @@ class ConsensusMechanism():
         - A boolean indicating whether the DOF is valid.
         """
         if obs_record.dof > 6 or obs_record.dof < 1:
-            logger.info("Invalid DOF of %d in transaction. Penalising reputation.", obs_record.dof)
-            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
-                sat_node.rep_manager.apply_negative(sat_node.reputation,
-                                                    sat_node.exp_pos,
-                                                    sat_node.performance_ema)
+            logger.info("Invalid DOF of %d in transaction. Penalising peer trust score.",
+                        obs_record.dof)
+
+            if not hasattr(sat_node, 'evaluated_txs'):
+                sat_node.evaluated_txs = set()
+
+            if transaction.hash not in sat_node.evaluated_txs:
+                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                    sat_node.rep_manager.apply_negative(sat_node.reputation,
+                                                        sat_node.exp_pos,
+                                                        sat_node.performance_ema)
+                sat_node.evaluated_txs.add(transaction.hash)
 
             # Record early rejection locally
             dag.local_consensus_states[transaction.hash] = {
@@ -427,7 +438,8 @@ class ConsensusMechanism():
         }
 
     def _update_satellite_reputation(self, sat_node: SatelliteNode,
-                                     obs_record: ObservationRecord) -> None:
+                                     obs_record: ObservationRecord,
+                                     tx_hash: str) -> None:
         """
         Updates the satellite's reputation based on the NIS value of the observation
         and its historical performance.
@@ -438,10 +450,20 @@ class ConsensusMechanism():
         Args:
         - sat_node: The SatelliteNode whose reputation is to be updated.
         - obs_record: The ObservationRecord containing the NIS and DOF values.
+        - tx_hash: The hash of the transaction being evaluated, used to prevent double-counting.
 
         Returns:
         None. Updates the satellite's reputation in place.
         """
+        if not hasattr(sat_node, 'evaluated_txs'):
+            sat_node.evaluated_txs = set()
+
+        # Stop compounding: if this transaction already updated the global score, exit.
+        if tx_hash in sat_node.evaluated_txs:
+            return
+
+        sat_node.evaluated_txs.add(tx_hash)
+
         lower_bound = chi2.ppf(0.025, obs_record.dof)
         upper_bound = chi2.ppf(0.975, obs_record.dof)
 

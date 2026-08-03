@@ -55,13 +55,15 @@ For context when navigating the codebase, here is the structure of the ACCORD re
 │
 ├── 📁 src/                          # Main source code
 │   └── 📁 filters/                  # Implementation files for different Kalman Filters
+│       └── ckf.py                   # Implementation of a Cubature Kalman Filter
 │       └── ekf.py                   # Implementation of an Extended Kalman Filter
+│       └── ukf.py                   # Implementation of an Unscented Kalman Filter
 │       └── filter_interface.py      # Reusable code for implementing different Kalman Filters and interfacing with PoISE
 │       └── ukf.py                   # Implementation of an Unscented Kalman Filter
 │   └── 📁 legacy/                   # Legacy code maintained for easy plot generation
 │   └── 📁 plotting/                 # Code for generating plots
-│       └── filter_mc_comparison.py  # Code for generating comparison plots for Monte Carlo data sets wih varying estimation filters
-│       └── isl_mc_comparison.py     # Code for generating comparison plots for Monte Carlo data sets wih varying ISLs
+│       └── filter_mc_comparison.py  # Code for generating comparison plots for Monte Carlo data sets with varying estimation filters
+│       └── isl_mc_comparison.py     # Code for generating comparison plots for Monte Carlo data sets with varying ISLs
 │       └── mc_plotting.py           # Code for plotting aggregated Monte Carlo simulation results
 |       └── plotting.py              # Code for plotting individual simulation results
 │   └── __init__.py                  # Empty file, for module creation
