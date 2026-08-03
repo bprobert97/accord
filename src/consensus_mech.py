@@ -308,8 +308,6 @@ class ConsensusMechanism():
         Returns:
         - A boolean indicating whether the transaction is valid.
         """
-        if not hasattr(sat_node, 'evaluated_txs'):
-            sat_node.evaluated_txs = set()
 
         if not transaction.tx_data:
             if transaction.hash not in sat_node.evaluated_txs:
@@ -340,7 +338,8 @@ class ConsensusMechanism():
         - A boolean indicating whether the DOF is valid.
         """
         if obs_record.dof > 6 or obs_record.dof < 1:
-            logger.info("Invalid DOF of %d in transaction. Penalising peer trust score.", obs_record.dof)
+            logger.info("Invalid DOF of %d in transaction. Penalising peer trust score.",
+                        obs_record.dof)
 
             if not hasattr(sat_node, 'evaluated_txs'):
                 sat_node.evaluated_txs = set()

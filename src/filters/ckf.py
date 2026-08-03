@@ -123,5 +123,3 @@ class JointCKF:
         """
         self.ckf.update(z_k, N=self.config.N)
         return _log_nis_ukf(self.ckf.y, self.ckf.S, self.ckf.x, k, self.config)
-
-# TODO- needs unit testing, check non-gaussian noise assumptions, check if this is any better than UKF time-wise

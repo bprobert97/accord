@@ -69,6 +69,7 @@ class SatelliteNode():
         self.local_queue: asyncio.Queue = asyncio.Queue()
         self.dag = DAG(consensus_mech=consensus_mech,
                        queue=self.local_queue)
+        self.evaluated_txs: set[str] = set()
         # P2P routing table
         self.peers: list[SatelliteNode] = []
 
@@ -175,7 +176,7 @@ class SatelliteNode():
         # and DAG parent tip extensions do not corrupt other satellites' states.
         local_tx_copy = copy.deepcopy(transaction)
 
-        # Run POISE consensus locally against our own historical evaluations TODO
+        # Run POISE consensus locally against our own historical evaluations
         _, _ = self.dag.consensus_mech.proof_of_inter_satellite_evaluation(
             dag=self.dag,
             sat_node=sender,

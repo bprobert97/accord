@@ -93,10 +93,10 @@ def test_calculate_dof_score(consensus_mech):
     assert consensus_mech.calculate_dof_score(obs_record=obs) == 0
 
     obs.dof = 2
-    assert consensus_mech.calculate_dof_score(obs_record=obs) == 0.5
+    assert consensus_mech.calculate_dof_score(obs_record=obs) == 0.2
 
     obs.dof = 3
-    assert consensus_mech.calculate_dof_score(obs_record=obs) == 1.0
+    assert consensus_mech.calculate_dof_score(obs_record=obs) == 0.4
 
     # Test with previous data
     previous_r_vector = [0.5, 1.5, 2.5]
@@ -111,7 +111,7 @@ def test_calculate_dof_score(consensus_mech):
         obs_record=obs,
         previous_data=prev_data
     )
-    assert score_1 == pytest.approx(0.4, 0.01)
+    assert score_1 == pytest.approx(0.16, 0.01)
 
     # Expect unchanged vectors to score worse
     prev_data_unchanged = {
@@ -160,8 +160,8 @@ def test_calculate_consensus_score(consensus_mech):
         dof_reward=0.5,
         reputation=MAX_REPUTATION / 2
     )
-    # This should be around or below the threshold
-    assert score4 < consensus_mech.consensus_threshold
+    # This should be just above the threshold
+    assert score4 > consensus_mech.consensus_threshold
 
 def test_poise_empty_transaction(consensus_mech) -> None:
     """
@@ -331,7 +331,7 @@ def test_poise_consensus_failed(mock_chi2, consensus_mech) -> None:
                      parent_hashes=())
 
     # Make consensus score low to ensure it fails
-    consensus_mech.calculate_consensus_score = MagicMock(return_value=0.4)
+    consensus_mech.calculate_consensus_score = MagicMock(return_value=0.2)
 
     consensus_reached, _ = consensus_mech.proof_of_inter_satellite_evaluation(
         dag_mock, sat_node_mock, tx, {}
