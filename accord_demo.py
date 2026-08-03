@@ -153,6 +153,7 @@ class DemoFilePaths:
 
 async def run_consensus_demo(config: FilterConfig,
                              toggles: DemoToggles,
+                             walker_delta: bool,
                              file_paths: DemoFilePaths
                              ) -> tuple[Optional[dict[int, DAG]],
                                         Optional[dict[str, list[float]]],
@@ -166,6 +167,8 @@ async def run_consensus_demo(config: FilterConfig,
     - config: FilterConfig object with simulation parameters.
     - toggles: An instance of DemoToggles containing the toggled values for running
                the consensus demo.
+    - walker_delta: A boolean indicating whether or not to generate a Walker
+                    Delta constellation.
     - file_paths: An instance of DemoFilePaths containing the desired file paths
                   for running the consensus demo.
 
@@ -186,6 +189,7 @@ async def run_consensus_demo(config: FilterConfig,
         file_paths,
         toggles.load_filter_results,
         toggles.save_filter_results,
+        walker_delta,
         logger
     )
 
@@ -210,6 +214,7 @@ def _resolve_filter_phase(config: FilterConfig,
                           path_toggles: DemoFilePaths,
                           load_filter_results: bool,
                           save_filter_results: bool,
+                          walker_delta: bool,
                           logger: logging.Logger) -> \
         tuple[Optional[np.ndarray], Optional[np.ndarray],
               Optional[list[ObservationRecord]], Optional[np.ndarray]]:
@@ -223,6 +228,7 @@ def _resolve_filter_phase(config: FilterConfig,
     - load_filter_results: If True, attempts to load filter results from filter_results_path.
     - save_filter_results: If True, saves filter results to filter_results_path after
     running simulation.
+    - walker_delta: Boolean indicating whether to generate a Walker Delta constellation.
     - logger: Logger object for logging messages.
 
     Returns:
@@ -244,7 +250,8 @@ def _resolve_filter_phase(config: FilterConfig,
     # If filter results were not loaded or loading failed, run the filter simulation
     if truth is None or z_hist is None or all_obs_records is None or x_hist is None:
         truth, z_hist, all_obs_records, x_hist = _simulate_filter(path_toggles.filter_type,
-                                                                  config, logger)
+                                                                  config, walker_delta,
+                                                                  logger)
 
         # Save filter results if requested
         if save_filter_results:
@@ -365,6 +372,7 @@ def _cluster_by_orbital_physics(truth_0: np.ndarray,
 
 def _simulate_filter(filter_type: FilterType,
                      config: FilterConfig,
+                     walker_delta: bool,
                      logger: logging.Logger
                      ) -> tuple[np.ndarray,
                                 np.ndarray,
@@ -377,6 +385,8 @@ def _simulate_filter(filter_type: FilterType,
     Args:
     - filter_type: The type of filter to run.
     - config: FilterConfig object with simulation parameters.
+    - walker_delta: Boolean indicating whether to generate a
+                    Walker Delta constellation.
     - logger: Logger object for logging messages.
 
     Returns:
@@ -387,7 +397,7 @@ def _simulate_filter(filter_type: FilterType,
         - x_hist: The filter state estimate history.
     """
     logger.info("Simulating satellite constellation to get truth")
-    truth, z_hist = simulate_truth_and_meas(config)
+    truth, z_hist = simulate_truth_and_meas(config, walker_delta)
 
     # --- Start of Clustered filter Implementation ---
     logger.info("Initialising Clustered filter with cluster size %s", CLUSTER_SIZE)
@@ -789,7 +799,7 @@ async def _process_satellite_interactions(sid: int,
 
         # When an ISL link is active, ask our peer for historical
         # data transactions we missed
-        await sat.request_sync_from_peer(other_sat)
+        #await sat.request_sync_from_peer(other_sat)
 
         # Find the corresponding observation record
         obs_to_submit = next(
@@ -878,6 +888,14 @@ if __name__ == "__main__":
         default="ekf",
         help="Which filter to use (ukf or ekf or ckf)"
     )
+    parser.add_argument(
+            "--walker-delta",
+            type=bool,
+            choices=[True, False],
+            default=False,
+            help="Would you like to generate a Walker Delta constellation \
+                instead of a random topology?"
+        )
     args = parser.parse_args()
 
     accord_logger = get_logger()
@@ -943,7 +961,9 @@ if __name__ == "__main__":
         )
 
         FINAL_DAG, REP_HIST, TRUTH, FAULTY_IDS = asyncio.run(
-            run_consensus_demo(DEFAULT_CONFIG, toggles=toggle, file_paths=paths))
+            run_consensus_demo(DEFAULT_CONFIG, toggles=toggle,
+                               walker_delta=args.walker_delta,
+                               file_paths=paths))
 
         # Copy the log file to the sim_data directory
         if os.path.exists("app.log"):

@@ -322,10 +322,14 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
         new_results.append(new_kpis)
     return new_results
 
-def run_single_filter(run_idx: int, filter_type: FilterType, filter_dir: str) -> bool:
+def run_single_filter(run_idx: int, filter_type: FilterType, filter_dir: str,
+                      disable_logging: bool = False) -> bool:
     """
     Run the filter phase for a single Monte Carlo iteration.
     """
+    if disable_logging:
+        logging.disable(logging.CRITICAL)
+
     filter_path = os.path.join(filter_dir, f"{filter_type.value}_run_{run_idx}.npz")
     log_file = os.path.join(filter_dir, f"{filter_type.value}_run_{run_idx}.log")
 
@@ -363,7 +367,8 @@ def run_single_filter(run_idx: int, filter_type: FilterType, filter_dir: str) ->
 def run_single_consensus(run_idx: int,
                          context: RunContext,
                          threshold: float = 0.5,
-                         fpr_offset: float = 0.2) -> Optional[Dict[str, Any]]:
+                         fpr_offset: float = 0.2,
+                         disable_logging: bool = False) -> Optional[Dict[str, Any]]:
     """
     Run the Consensus phase for a single Monte Carlo iteration.
 
@@ -373,10 +378,13 @@ def run_single_consensus(run_idx: int,
     - threshold: The reputation threshold below which a satellite is considered
                  detected as faulty.
     - fpr_offset: The percentage of initial steps to ignore when calculating false positives.
-
+    - disable_logging: If True, disables logging output for this run.
     Returns:
     - KPIs for the consensus run, if successful. Else None.
     """
+    if disable_logging:
+        logging.disable(logging.CRITICAL)
+
     # Use the dynamic variables passed in
     filter_path = os.path.join(context.filter_dir, f"{context.filter_type.value}_run_{run_idx}.npz")
     log_file = os.path.join(context.sim_dir, f"sim_run_{run_idx}.log")
@@ -452,6 +460,8 @@ if __name__ == "__main__":
                         help="Recalculate KPIs from saved data")
     parser.add_argument("--filter-type", type=str, choices=["ukf", "ekf", "ckf"],
                         default="ekf", help="Which filter to use (ukf or ekf or ckf)")
+    parser.add_argument("--disable-logging", action="store_true",
+                        help="Disable all logging output to speed up execution")
     args = parser.parse_args()
 
     # Convert string to Enum
@@ -514,7 +524,8 @@ if __name__ == "__main__":
             # Bind the filter arguments just like we do in Phase 2
             filter_func = functools.partial(run_single_filter,
                                             filter_type=selected_filter,
-                                            filter_dir=FILTER_DIR)
+                                            filter_dir=FILTER_DIR,
+                                            disable_logging=args.disable_logging)
             with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
                 list(executor.map(filter_func, runs_to_gen))
             print(f"{selected_filter.value.upper()} generation completed for \
@@ -532,7 +543,8 @@ if __name__ == "__main__":
             sim_func = functools.partial(run_single_consensus,
                                          context=run_context,
                                          threshold=args.threshold,
-                                         fpr_offset=args.fpr_offset)
+                                         fpr_offset=args.fpr_offset,
+                                         disable_logging=args.disable_logging)
             RESULTS = list(executor.map(sim_func, range(args.num_runs)))
 
         end_time = time.time()
