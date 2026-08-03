@@ -27,8 +27,8 @@ import matplotlib.pyplot as plt
 from src.plotting.mc_plotting import get_aggregated_reps
 
 # Paths
-PATH_A = "sim_data/mc_results/sim_1000km/mc_results_1000.0km.npz"
-PATH_B = "sim_data/mc_results/sim_2000km/mc_results_2000.0km.npz"
+PATH_A = "sim_data/mc_results/sim_ekf/mc_results_1000.0km.npz"
+PATH_B = "sim_data/mc_results/sim_ekf/mc_results_2000.0km.npz"
 OUTPUT_DIR = "sim_data/comparison"
 
 def load_results(path: str) -> List[Dict[str, Any]]:
@@ -89,10 +89,10 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
             _plot_single_dataset(res, start_step, color, label)
 
     plt.axhline(0.5, color="gray", linestyle=":", label="Neutral Reputation")
-    plt.xlabel("Timestep [-]", fontsize=18)
-    plt.ylabel("Reputation [-]", fontsize=18)
-    plt.tick_params(axis='both', which='major', labelsize=14)
-    plt.legend(loc='upper left', fontsize=16)
+    plt.xlabel("Timestep [-]", fontsize=20)
+    plt.ylabel("Reputation [-]", fontsize=20)
+    plt.tick_params(axis='both', which='major', labelsize=18)
+    plt.legend(loc='lower right', fontsize=16)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "reputation_comparison.png"))

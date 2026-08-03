@@ -413,7 +413,7 @@ def calculate_median_percentiles(dof: int = 2) -> None:
     Returns:
     - None: Outputs statistical calculations directly to stdout.
     """
-    median_values: list[float] = [1.386, 1.703, 1.836, 1.447, 1.330]
+    median_values: list[float] = [1.386, 1.474, 1.303, 1.180, 1.459]
     print(f"--- Chi-Squared CDF Percentiles (DOF={dof}) ---")
     print(f"{'Median Value':<15} | {'Percentile (CDF)':<20} | {'Distance from 0.5':<20}")
     print("-" * 60)
@@ -661,8 +661,8 @@ def plot_aggregated_reputation(
 
     plt.xlabel("Chronological Transaction Index [-]", fontsize=20)
     plt.ylabel("Reputation [-]", fontsize=20)
-    plt.tick_params(axis='both', labelsize=16)
-    plt.legend(loc="lower right", fontsize=14)
+    plt.tick_params(axis='both', labelsize=18)
+    plt.legend(loc="lower right", fontsize=16)
     plt.grid(True, linestyle=":", alpha=0.7)
     plt.tight_layout()
     plt.show()
@@ -918,12 +918,16 @@ def plot_integrated_walker_delta(truth: np.ndarray,
                markerfacecolor='black', markersize=8),
         Line2D([0], [0], color='black', lw=1.5, label='Simulated Orbit')
     ]
-    ax1.legend(handles=legend_elements_3d, loc='upper right')
+    ax1.legend(handles=legend_elements_3d, loc='upper right', fontsize=18)
 
-    ax1.set_xlabel("X (m)")
-    ax1.set_ylabel("Y (m)")
-    ax1.set_zlabel("Z (m)")
-    ax1.set_title("a)", y=-0.15, fontsize=16)
+    ax1.set_xlabel("X (m)", fontsize=18, labelpad=20)
+    ax1.set_ylabel("Y (m)", fontsize=18, labelpad=20)
+    ax1.set_zlabel("Z (m)", fontsize=18, labelpad=20)
+    ax1.tick_params(axis='both', labelsize=18)
+    ax1.xaxis.get_offset_text().set_fontsize(18)
+    ax1.yaxis.get_offset_text().set_fontsize(18)
+    ax1.zaxis.get_offset_text().set_fontsize(18)
+    ax1.set_title("a)", y=-0.15, fontsize=20)
 
     _set_axes_equal(ax1)
 
@@ -941,16 +945,16 @@ def plot_integrated_walker_delta(truth: np.ndarray,
         Line2D([0], [0], color='black', lw=2, label='Simulated Orbit')
     ]
     leg = ax2.legend(handles=legend_elements_2d, loc='upper right', framealpha=0.7,
-                     facecolor='white', fontsize=14)
+                     facecolor='white', fontsize=18)
     leg.set_zorder(10)
 
-    ax2.set_xlabel("Longitude [Degrees]", fontsize=16)
-    ax2.set_ylabel("Latitude [Degrees]", fontsize=16)
-    ax2.tick_params(axis='both', labelsize=14)
+    ax2.set_xlabel("Longitude [Degrees]", fontsize=18)
+    ax2.set_ylabel("Latitude [Degrees]", fontsize=18)
+    ax2.tick_params(axis='both', labelsize=18)
     ax2.grid(True, linestyle=":", alpha=0.4, color='white')
-    ax2.set_title("b)", y=-0.18, fontsize=16)
+    ax2.set_title("b)", y=-0.18, fontsize=20)
 
-    plt.tight_layout()
+    plt.tight_layout(w_pad=4.0)
 
     # Ensure the output directory exists
     os.makedirs(data_dir, exist_ok=True)
@@ -970,6 +974,7 @@ def main() -> None:
     Returns:
     - None.
     """
+    calculate_median_percentiles()
     pattern = re.compile(
         r"NIS=([0-9.]+), DOF=([0-9]+), correctness=([0-9.]+), "
         r"consensus_score=([0-9.]+),\s*reputation=([0-9.]+)"

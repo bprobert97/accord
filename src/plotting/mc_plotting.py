@@ -318,7 +318,7 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     ax.set_ylabel("Median NIS per run [-]", fontsize=20)
     ax.set_yscale("log")
     ax.set_xticklabels(labels, fontsize=18)
-    ax.tick_params(axis='y', labelsize=16)
+    ax.tick_params(axis='y', which='both', labelsize=16)
     ax.grid(True, linestyle=":", alpha=0.7)
     ax.legend(fontsize=14)
 

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from src.plotting.mc_plotting import get_aggregated_reps
 
 # Paths
-PATH_EKF = "sim_data/mc_results/sim_1000km/mc_results_1000.0km.npz"
+PATH_EKF = "sim_data/mc_results/sim_ekf/mc_results_1000.0km.npz"
 PATH_UKF = "sim_data/mc_results/sim_ukf/mc_results_1000.0km.npz"
 PATH_CKF = "sim_data/mc_results/sim_ckf/mc_results_1000.0km.npz"
 OUTPUT_DIR = "sim_data/comparison_filters"
@@ -87,9 +87,9 @@ def plot_reputation_comparison(results_ekf: List[Dict[str, Any]],
             _plot_single_dataset(res, start_step, color, label)
 
     plt.axhline(0.5, color="gray", linestyle=":", label="Neutral Reputation")
-    plt.xlabel("Timestep [-]", fontsize=18)
-    plt.ylabel("Reputation [-]", fontsize=18)
-    plt.tick_params(axis='both', which='major', labelsize=14)
+    plt.xlabel("Timestep [-]", fontsize=20)
+    plt.ylabel("Reputation [-]", fontsize=20)
+    plt.tick_params(axis='both', which='major', labelsize=16)
     plt.legend(loc='upper left', fontsize=16)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
