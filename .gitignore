@@ -18,3 +18,4 @@ coverage.json
 /sim_data
 src/filters/__pycache__
 src/plotting/__pycache__
+machine_learning/__pycache__
