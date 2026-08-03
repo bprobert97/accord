@@ -24,7 +24,7 @@ class PoISEAttackEnv(gym.Env):
         )
 
         self.consensus_engine = ConsensusMechanism()
-        self.max_steps = 360  # Expanded to 360 steps for a full 360-degree LEO orbit loop
+        self.max_steps = 360  # Full 360-degree LEO orbit loop
         self.current_step = 0
         self.sim_clock = 1600000000.0
 
@@ -52,7 +52,6 @@ class PoISEAttackEnv(gym.Env):
         radius = 7000.0
         orbital_rate = (2.0 * math.pi) / 5400.0
 
-        # Set initial step 0 vectors matching the LEO equations
         initial_angle = 0.0
         self.nominal_r_vector = [
             radius * math.cos(initial_angle),
@@ -67,7 +66,6 @@ class PoISEAttackEnv(gym.Env):
 
         # Warm up the DAG instantly using continuous orbital timing
         for i in range(4):
-            # Step backward relative to step 0 for the 4 warmup frames
             warmup_step = i - 4
             warmup_angle = (warmup_step / self.max_steps) * (2.0 * math.pi)
 
@@ -127,27 +125,23 @@ class PoISEAttackEnv(gym.Env):
     def step(self, action):
         self.current_step += 1
 
-        # Map current step linearly across a full 2pi orbital period
         angle = (self.current_step / self.max_steps) * (2.0 * math.pi)
-
-        radius = 7000.0  # ~6371km Earth radius + ~629km altitude (Standard LEO)
-        orbital_rate = (2.0 * math.pi) / 5400.0  # LEO mean motion for a ~90 min orbit
+        radius = 7000.0
+        orbital_rate = (2.0 * math.pi) / 5400.0
 
         self.nominal_r_vector = [
             radius * math.cos(angle),
             radius * math.sin(angle),
-            radius * 0.1 * math.sin(angle)  # Slight inclination wrapper
+            radius * 0.1 * math.sin(angle)
         ]
 
-        # True LEO tangential velocity components
         self.nominal_v_vector = [
             -radius * orbital_rate * math.sin(angle),
             radius * orbital_rate * math.cos(angle),
-            radius * 0.1 * 2.0 * orbital_rate * math.cos(angle)
+            radius * 0.1 * orbital_rate * math.cos(angle)
         ]
 
-        # Force a baseline movement vector so the agent cannot just output zeros
-        scaled_action = action * 5.0  # Allow up to 5.0 km per step
+        scaled_action = action * 5.0
         self.cumulative_r_offset += scaled_action
 
         malicious_r_vector = [
@@ -174,13 +168,11 @@ class PoISEAttackEnv(gym.Env):
 
         drift_distance = float(np.linalg.norm(self.cumulative_r_offset))
 
-        # Softer penalty + aggressive distance scaling to force outward exploration
         if not consensus_reached:
-            reward = -2.0  # Mild nudge back, not a brick wall
+            reward = -2.0
         else:
-            reward = drift_distance * 10.0  # Massive payoff for cumulative separation
+            reward = drift_distance * 10.0
 
-        # Log history
         self.episode_history["nominal_x"].append(self.nominal_r_vector[0])
         self.episode_history["nominal_y"].append(self.nominal_r_vector[1])
         self.episode_history["nominal_z"].append(self.nominal_r_vector[2])
@@ -191,31 +183,72 @@ class PoISEAttackEnv(gym.Env):
 
         self.current_state = np.concatenate([malicious_r_vector, self.cumulative_r_offset], dtype=np.float32)
 
-        terminated = False  # Let the episode run its full course!
+        terminated = False
         truncated = self.current_step >= self.max_steps
 
         return self.current_state, reward, terminated, truncated, {}
 
 if __name__ == "__main__":
-    logging.getLogger().setLevel(logging.WARNING)
+    # Configure file logging alongside console filtering
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler("attack_run.log", mode="w", encoding="utf-8"),
+            logging.StreamHandler()
+        ]
+    )
+    # Mute noisy inner framework logs from cluttering the file, keeping only warnings/errors
+    logging.getLogger("src").setLevel(logging.WARNING)
+
+    logger = logging.getLogger("PoISELogger")
+    logger.info("Starting PoISE Cumulative Drift Simulation Training...")
 
     env = PoISEAttackEnv()
     print("Training cumulative drift PPO model...")
 
     model = PPO("MlpPolicy", env, verbose=1, learning_rate=0.001)
     model.learn(total_timesteps=50000)
+    logger.info("PPO Model training complete.")
     print("Training complete!\n")
 
+    model.save("cumulative_drift_fault_injector")
+    print("Model saved as 'cumulative_drift_fault_injector.zip'")
+
     print("--- Running Test Episode ---")
+    logger.info("Executing test episode rollout.")
     obs, info = env.reset()
+
     for i in range(360):
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, _ = env.step(action)
+
+        # Log every step of the test run to file
+        logger.info(f"Step {i+1} | Action: {action} | Reward: {reward:.4f} | Cumulative Drift: {np.linalg.norm(env.cumulative_r_offset):.2f} km")
+
         if truncated:
+            logger.info("Test episode truncated at max steps.")
             break
 
-    # Plotting results
+    print(f"Step {i+1}: Action Injected={action[0]:.4f} | "
+          f"Current State={obs[0]:.4f} | "
+          f"Reward={reward:.4f} | Caught={terminated}")
+
+    if terminated or truncated:
+        print("Simulation ended.")
+
+    # Save tracking data
     history = env.episode_history
+    np.savez_compressed(
+        "attack_simulation_log.npz",
+        nominal_track=np.array([history["nominal_x"], history["nominal_y"], history["nominal_z"]]),
+        attack_track=np.array([history["attack_x"], history["attack_y"], history["attack_z"]]),
+        rewards=np.array(history["rewards"])
+    )
+    logger.info("Simulation log matrices saved to attack_simulation_log.npz and attack_run.log")
+    print("Attack log saved to 'attack_simulation_log.npz' and 'attack_run.log'")
+
+    # Plotting results
     fig = plt.figure(figsize=(10, 7))
     ax = fig.add_subplot(111, projection='3d')
 
