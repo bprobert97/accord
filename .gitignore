@@ -19,3 +19,6 @@ coverage.json
 src/filters/__pycache__
 src/plotting/__pycache__
 machine_learning/__pycache__
+machine_learning/*.npz
+machine_learning/*.log
+machine_learning/*.zip

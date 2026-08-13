@@ -205,7 +205,7 @@ if __name__ == "__main__":
 
     history = env.episode_history
     np.savez_compressed(
-        "attack_simulation_log.npz",
+        "machine_learning/attack_simulation_log.npz",
         nominal_track=np.array([history["nominal_x"], history["nominal_y"], history["nominal_z"]]),
         attack_track=np.array([history["attack_x"], history["attack_y"], history["attack_z"]]),
         rewards=np.array(history["rewards"])

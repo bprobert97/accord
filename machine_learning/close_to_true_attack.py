@@ -7,6 +7,7 @@ import time
 import math
 import json
 import dataclasses
+import matplotlib.pyplot as plt
 
 # Import your real ACCORD classes
 from src.consensus_mech import ConsensusMechanism
@@ -253,13 +254,11 @@ if __name__ == "__main__":
     # ==========================================
     # 7. LOG AND VISUALIZE THE ATTACK
     # ==========================================
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
 
     # 1. Save the log data to a file (matching your framework's style)
     history = env.episode_history
     np.savez_compressed(
-        "attack_simulation_log.npz",
+        "machine_learning/attack_simulation_log.npz",
         nominal_track=np.array([history["nominal_x"], history["nominal_y"], history["nominal_z"]]),
         attack_track=np.array([history["attack_x"], history["attack_y"], history["attack_z"]]),
         reputation=np.array(history["reputation"]),

@@ -157,7 +157,7 @@ if __name__ == "__main__":
         if truncated: break
 
     history = env.episode_history
-    np.savez_compressed("kinematic_attack_log.npz",
+    np.savez_compressed("machine_learning/kinematic_attack_log.npz",
                         nominal_track=np.array([history["nominal_x"], history["nominal_y"], history["nominal_z"]]),
                         attack_track=np.array([history["attack_x"], history["attack_y"], history["attack_z"]]),
                         rewards=np.array(history["rewards"]))
