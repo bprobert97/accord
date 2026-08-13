@@ -122,8 +122,8 @@ class FullNetworkSybilEnv(gym.Env):
         self.all_nodes = self.honest_nodes + self.compromised_nodes
 
         # Set the baseline expected normal distribution behaviour for the network.
-        # The value 2.366 represents the ideal median for a 3 Degree-of-Freedom chi-squared test.
-        self.network_nis_dict = {node.id: 2.366 for node in self.all_nodes}
+        # The value 1.386 represents the ideal median for a 2 Degree-of-Freedom chi-squared test.
+        self.network_nis_dict = {node.id: 1.386 for node in self.all_nodes}
         self.cumulative_r_offset = np.zeros(3, dtype=np.float32)
 
         self.episode_history = {
@@ -168,7 +168,7 @@ class FullNetworkSybilEnv(gym.Env):
                     radius * 0.1 * orbital_rate * math.cos(warmup_angle)
                 ]
 
-                nominal_tx = self._build_transaction(node, warmup_r_vector, warmup_v_vector, 2.366)
+                nominal_tx = self._build_transaction(node, warmup_r_vector, warmup_v_vector, 1.386)
                 self.consensus_engine.proof_of_inter_satellite_evaluation(
                     dag=node.dag,
                     sat_node=node,
@@ -203,6 +203,7 @@ class FullNetworkSybilEnv(gym.Env):
         # for each node, ensuring their cryptographic hashes do not identically collide.
         self.sim_clock += 0.01
 
+        # Explicitly set dof to 2 to align with range and range-rate mathematics
         obs_record = ObservationRecord(
             step=self.current_step,
             observer=node.id,
@@ -211,7 +212,7 @@ class FullNetworkSybilEnv(gym.Env):
             r_vector=r_vector,
             v_vector=v_vector,
             nis=step_nis,
-            dof=3
+            dof=2
         )
         tx_data_json = json.dumps(dataclasses.asdict(obs_record))
 
