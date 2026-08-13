@@ -114,8 +114,8 @@ def plot_nis_boxplot_wd(dag: Any, compromised_ids: set[int],
     expected_median = 1.386
 
     # Compute chi-square 95% confidence bounds
-    chi2_lower = chi2.ppf((1 - 0.95) / 2, df=2)
-    chi2_upper = chi2.ppf((1 + 0.95) / 2, df=2)
+    chi2_lower = float(chi2.ppf((1 - 0.95) / 2, df=2))
+    chi2_upper = float(chi2.ppf((1 + 0.95) / 2, df=2))
 
     cmap = plt.get_cmap('viridis')
     color_bound = cmap(0.1) # Dark Purple for bounds

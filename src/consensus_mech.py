@@ -74,7 +74,7 @@ class ConsensusMechanism():
             cdf_val = chi2.cdf(current_nis, current_dof)
             # The score is 1.0 at the median (cdf=0.5) and drops towards 0.0 at the extremes.
             # Median is about 1.386 for dof=2.
-            return 1.0 - abs(cdf_val - 0.5) * 2
+            return 1.0 - abs(float(cdf_val) - 0.5) * 2
 
         if historical_ema_nis is None:
             # First observation. Score is based on how close the first NIS is to dof.

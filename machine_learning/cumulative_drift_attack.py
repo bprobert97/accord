@@ -218,7 +218,7 @@ if __name__ == "__main__":
     ax.set_title('AI-Driven Cumulative Drift Boundary Optimisation')
     ax.set_xlabel('X Position (km)')
     ax.set_ylabel('Y Position (km)')
-    ax.set_zlabel('Z Position (km)')
+    ax.set_zlabel('Z Position (km)')  # type: ignore[attr-defined]
     ax.legend()
     plt.tight_layout()
     plt.show()

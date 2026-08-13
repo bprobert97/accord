@@ -379,7 +379,7 @@ if __name__ == "__main__":
     obs_state, info_dict = test_env.reset()
     for run_step in range(360):
         predicted_action, _ = trained_model.predict(obs_state, deterministic=True)
-        obs_state, current_reward, is_terminated, is_truncated, _ = test_env.step(predicted_action)
+        obs_state, current_reward, is_terminated, is_truncated, _ = test_env.step(predicted_action)  # type: ignore[assignment]
 
         logger.info(
             f"Step {run_step+1} | Action: {np.round(predicted_action, 4)} | "
@@ -410,7 +410,7 @@ if __name__ == "__main__":
     plot_ax.set_title('AI-Driven Sybil Attack against Honest BFT Majority')
     plot_ax.set_xlabel('X Position (km)')
     plot_ax.set_ylabel('Y Position (km)')
-    plot_ax.set_zlabel('Z Position (km)')
+    plot_ax.set_zlabel('Z Position (km)')  # type: ignore[attr-defined]
     plot_ax.legend()
     plt.tight_layout()
     plt.show()
