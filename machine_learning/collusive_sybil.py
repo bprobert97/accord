@@ -1,18 +1,21 @@
 """
-Model 4: Collusive Sybil Drift (Full Network Simulation)
+Model 4: Collusive Sybil Drift
 
 Description:
-This environment models a decentralised consensus network undergoing a Sybil attack.
-The Reinforcement Learning agent commands a quorum of three compromised nodes operating
-within a wider constellation of seven honest satellites.
+This environment models a decentralised consensus network undergoing an evasive,
+reputation-aware Sybil attack. The Reinforcement Learning agent commands a quorum
+of three compromised nodes operating within a wider constellation of seven honest
+satellites.
 
 The honest nodes generate stochastically noisy observations reflecting standard
 hardware tolerances. The agent's objective is to successfully bypass the network's
-Byzantine Fault Tolerance (BFT) threshold. It achieves this by outputting coordinated,
-falsified kinematics across all compromised nodes, artificially inflating geometric
-novelty (Persistence of Excitation) to overpower the honest majority via cross-validation.
-The reward function uses logarithmic scaling to safely maximise the physical drift
-distance without destabilising the neural network's gradient predictions.
+Byzantine Fault Tolerance (BFT) threshold AND maintain long-term node reputation.
+It achieves this by outputting coordinated, falsified kinematics across all
+compromised nodes, artificially inflating geometric novelty (Persistence of
+Excitation) to overpower the honest majority via cross-validation.
+The reward function uses a dual-boundary constraint and logarithmic scaling to safely
+maximise the physical drift distance without triggering a network quarantine or
+destabilising the neural network's gradient predictions.
 """
 
 import json
@@ -34,8 +37,8 @@ from src.transaction import Transaction, TransactionAddresses, TransactionMetada
 
 class FullNetworkSybilEnv(gym.Env):
     """
-    A custom Gymnasium environment simulating a Byzantine Fault Tolerance
-    network under a collusive Sybil attack.
+    A custom Gymnasium environment simulating a Byzantine Fault Tolerant
+    network under a collusive, reputation-aware Sybil attack.
     """
 
     def __init__(self) -> None:
@@ -51,12 +54,24 @@ class FullNetworkSybilEnv(gym.Env):
         # These are scaled into kilometres during the step() function.
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
 
-        # OBSERVATION SPACE:
-        # Represents the state array fed back into the agent to make future decisions.
-        # Contains 6 elements: [True X, True Y, True Z, Offset X, Offset Y, Offset Z].
-        # Bounded at 20,000 km to encompass the entire physical radius of a Low Earth Orbit.
-        self.observation_space = spaces.Box(low=-20000.0, high=20000.0, shape=(6,), dtype=np.float32)
+        # OBSERVATION SPACE (Expanded to 7D):
+        # Contains 7 elements: [True X, True Y, True Z, Offset X, Offset Y, Offset Z, Avg Reputation].
+        # Positions and offsets are bounded at +/- 20,000 km.
+        # Reputation is strictly bounded between 0.0 and 1.0.
 
+        low_bounds = np.array([
+            -20000.0, -20000.0, -20000.0,  # True Position
+            -20000.0, -20000.0, -20000.0,  # Cumulative Offset
+            0.0                            # Avg Reputation
+        ], dtype=np.float32)
+
+        high_bounds = np.array([
+            20000.0, 20000.0, 20000.0,     # True Position
+            20000.0, 20000.0, 20000.0,     # Cumulative Offset
+            1.0                            # Avg Reputation
+        ], dtype=np.float32)
+
+        self.observation_space = spaces.Box(low=low_bounds, high=high_bounds, dtype=np.float32)
         self.consensus_engine = ConsensusMechanism()
 
         # Define the temporal limits of an episode, mapped to represent a full orbital period.
@@ -105,7 +120,7 @@ class FullNetworkSybilEnv(gym.Env):
                      (Note: unused but needed for Gymnasium compliance.)
 
         Returns:
-            A tuple containing the initial 6D observation array and an info dictionary.
+            A tuple containing the initial 7D observation array and an info dictionary.
         """
         super().reset(seed=seed)
         self.current_step = 0
@@ -129,7 +144,7 @@ class FullNetworkSybilEnv(gym.Env):
         self.episode_history = {
             "nominal_x": [], "nominal_y": [], "nominal_z": [],
             "attack_x": [], "attack_y": [], "attack_z": [],
-            "rewards": []
+            "rewards": [], "reputations": []
         }
 
         # Define the Keplerian orbital constants for a standard Low Earth Orbit altitude.
@@ -176,8 +191,12 @@ class FullNetworkSybilEnv(gym.Env):
                     mean_nis_per_satellite=self.network_nis_dict
                 )
 
-        # The initial state is the true position concatenated with the zeroed-out drift vector.
-        current_state = np.concatenate([self.nominal_r_vector, self.cumulative_r_offset], dtype=np.float32)
+        # Extract the initial reputation of the quorum to feed into the 7D observation array
+        initial_reputations = [node.reputation for node in self.compromised_nodes]
+        avg_initial_rep = sum(initial_reputations) / len(initial_reputations) if initial_reputations else 0.5
+
+        # The initial state is the true position concatenated with the zeroed-out drift vector and average reputation.
+        current_state = np.concatenate([self.nominal_r_vector, self.cumulative_r_offset, [avg_initial_rep]], dtype=np.float32)
         return current_state, {}
 
     def _build_transaction(
@@ -322,20 +341,24 @@ class FullNetworkSybilEnv(gym.Env):
             attacker_scores.append(consensus_state.get("consensus_score", 0.0))
 
         # Phase 3: Evaluate Attacker Success
-        # We determine success by calculating the average acceptance rate across the Sybil quorum.
+        # We determine success by calculating the average acceptance rate across the Sybil quorum,
+        # and the average long-term reputation to avoid quarantine.
         avg_score = sum(attacker_scores) / len(attacker_scores)
+
+        attacker_reputations = [node.reputation for node in self.compromised_nodes]
+        avg_reputation = sum(attacker_reputations) / len(attacker_reputations)
+
         drift_distance = float(np.linalg.norm(self.cumulative_r_offset))
 
-        # Logarithmic Reward Optimisation
-        # If the average score drops below 0.3, the honest majority successfully detected the anomaly,
-        # resulting in a strict linear penalty gradient teaching the agent to retreat.
-        if avg_score < 0.3:
-            reward = -10.0 * (0.3 - avg_score)
-        # If the attack evades detection, the reward logarithmically compresses the vast physical
-        # drift distances. This safely rewards the agent for expanding the deviation without
-        # creating massive variance spikes that destroy the neural network's predictive capabilities.
+        # Dual-Boundary Constraint: The agent fails if the transaction is rejected OR if quarantined
+        if avg_score < 0.3 or avg_reputation < 0.5:
+            # Scale the severity of the penalty based on which boundary was violated most aggressively
+            score_penalty = max(0.0, 0.3 - avg_score)
+            rep_penalty = max(0.0, 0.5 - avg_reputation)
+            reward = -10.0 * max(score_penalty, rep_penalty)
         else:
-            reward = math.log1p(drift_distance) * 5.0 + (avg_score * 2.0)
+            # Reward physical drift while incentivising the agent to maintain high reputation buffers
+            reward = math.log1p(drift_distance) * 5.0 + (avg_score * 2.0) + (avg_reputation * 2.0)
 
         # Record internal episodic states for analysis and plotting algorithms
         self.episode_history["nominal_x"].append(self.nominal_r_vector[0])
@@ -345,8 +368,9 @@ class FullNetworkSybilEnv(gym.Env):
         self.episode_history["attack_y"].append(malicious_r_vector[1])
         self.episode_history["attack_z"].append(malicious_r_vector[2])
         self.episode_history["rewards"].append(reward)
+        self.episode_history["reputations"].append(avg_reputation)
 
-        current_state = np.concatenate([malicious_r_vector, self.cumulative_r_offset], dtype=np.float32)
+        current_state = np.concatenate([malicious_r_vector, self.cumulative_r_offset, [avg_reputation]], dtype=np.float32)
 
         # The episode is never terminated early, ensuring the agent learns to maintain
         # stability across the entirety of the complete 360-degree orbital loop.
@@ -372,7 +396,7 @@ if __name__ == "__main__":
     test_env = FullNetworkSybilEnv()
     trained_model = PPO("MlpPolicy", test_env, verbose=1, learning_rate=0.001)
 
-    logger.info("Training Full Network Sybil Drift Model...")
+    logger.info("Training Reputation-Aware Full Network Sybil Drift Model...")
     trained_model.learn(total_timesteps=500000)
     trained_model.save("machine_learning/full_network_sybil_injector")
 
@@ -384,7 +408,8 @@ if __name__ == "__main__":
         logger.info(
             f"Step {run_step+1} | Action: {np.round(predicted_action, 4)} | "
             f"Reward: {current_reward:.4f} | "
-            f"Cumulative Drift: {np.linalg.norm(test_env.cumulative_r_offset):.2f} km"
+            f"Cumulative Drift: {np.linalg.norm(test_env.cumulative_r_offset):.2f} km | "
+            f"Avg Rep: {obs_state[6]:.2f}"
         )
         if is_truncated:
             break
@@ -394,7 +419,8 @@ if __name__ == "__main__":
         "machine_learning/full_network_sybil_log.npz",
         nominal_track=np.array([run_history["nominal_x"], run_history["nominal_y"], run_history["nominal_z"]]),
         attack_track=np.array([run_history["attack_x"], run_history["attack_y"], run_history["attack_z"]]),
-        rewards=np.array(run_history["rewards"])
+        rewards=np.array(run_history["rewards"]),
+        reputations=np.array(run_history["reputations"])
     )
 
     result_fig = plt.figure(figsize=(10, 7))
