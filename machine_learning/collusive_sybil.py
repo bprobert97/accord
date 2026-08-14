@@ -183,13 +183,27 @@ class FullNetworkSybilEnv(gym.Env):
                     radius * 0.1 * orbital_rate * math.cos(warmup_angle)
                 ]
 
-                nominal_tx = self._build_transaction(node, warmup_r_vector, warmup_v_vector, 1.386)
-                self.consensus_engine.proof_of_inter_satellite_evaluation(
+                # Pass both observer and target states to correctly map the Line-of-Sight vectors
+                nominal_tx = self._build_transaction(
+                    node,
+                    observer_r_vector=warmup_r_vector,
+                    observer_v_vector=warmup_v_vector,
+                    target_r_vector=warmup_r_vector,
+                    target_v_vector=warmup_v_vector,
+                    step_nis=1.386
+                )
+
+                _, new_ema_nis = self.consensus_engine.proof_of_inter_satellite_evaluation(
                     dag=node.dag,
                     sat_node=node,
                     transaction=nominal_tx,
                     mean_nis_per_satellite=self.network_nis_dict
                 )
+
+                # Update the network's Exponential Moving Average (EMA) NIS tracker
+                # to close the historical performance loophole.
+                if new_ema_nis is not None:
+                    self.network_nis_dict[node.id] = new_ema_nis
 
         # Extract the initial reputation of the quorum to feed into the 7D observation array
         initial_reputations = [node.reputation for node in self.compromised_nodes]
@@ -202,17 +216,22 @@ class FullNetworkSybilEnv(gym.Env):
     def _build_transaction(
         self,
         node: SatelliteNode,
-        r_vector: List[float],
-        v_vector: List[float],
+        observer_r_vector: List[float],
+        observer_v_vector: List[float],
+        target_r_vector: List[float],
+        target_v_vector: List[float],
         step_nis: float
     ) -> Transaction:
         """
         Constructs a cryptographically formatted transaction block containing an observation record.
+        This calculates the relative Line-of-Sight (LOS) vectors needed for the persistence of excitation mechanism.
 
         Args:
             node: The SatelliteNode instance generating the data.
-            r_vector: A list representing the 3D position vector in kilometres.
-            v_vector: A list representing the 3D velocity vector in kilometres per second.
+            observer_r_vector: The 3D position vector of the observing node.
+            observer_v_vector: The 3D velocity vector of the observing node.
+            target_r_vector: The 3D position vector of the target node.
+            target_v_vector: The 3D velocity vector of the target node.
             step_nis: The calculated Normalised Innovation Squared metric.
 
         Returns:
@@ -222,14 +241,28 @@ class FullNetworkSybilEnv(gym.Env):
         # for each node, ensuring their cryptographic hashes do not identically collide.
         self.sim_clock += 0.01
 
+        # Calculate relative distance (rho) and velocity vectors
+        rho = [tr - or_ for tr, or_ in zip(target_r_vector, observer_r_vector)]
+        v_rel = [tv - ov for tv, ov in zip(target_v_vector, observer_v_vector)]
+
+        # Extract magnitude norms, clamped to a tiny epsilon (1e-8) to prevent zero-division
+        r_norm = max(float(np.linalg.norm(rho)), 1e-8)
+        v_norm = max(float(np.linalg.norm(v_rel)), 1e-8)
+
+        # Convert to relative unit vectors representing the Line-of-Sight (LOS)
+        # These vectors dictate geometric novelty. By using accurate LOS vectors,
+        # the RL agent is now forced to adapt its attack trajectory to preserve BFT scores.
+        r_unit = [c / r_norm for c in rho]
+        v_unit = [c / v_norm for c in v_rel]
+
         # Explicitly set dof to 2 to align with range and range-rate mathematics
         obs_record = ObservationRecord(
             step=self.current_step,
             observer=node.id,
             target=self.target_node_id,
             time=self.sim_clock,
-            r_vector=r_vector,
-            v_vector=v_vector,
+            r_vector=r_unit,
+            v_vector=v_unit,
             nis=step_nis,
             dof=2
         )
@@ -302,13 +335,25 @@ class FullNetworkSybilEnv(gym.Env):
             noise_distance = float(np.linalg.norm(pos_noise))
             honest_dynamic_nis = max(0.1, (noise_distance / self.pos_std_dev)**2)
 
-            honest_tx = self._build_transaction(node, noisy_r_vector, noisy_v_vector, honest_dynamic_nis)
-            self.consensus_engine.proof_of_inter_satellite_evaluation(
+            honest_tx = self._build_transaction(
+                node,
+                observer_r_vector=noisy_r_vector,
+                observer_v_vector=noisy_v_vector,
+                target_r_vector=self.nominal_r_vector,
+                target_v_vector=self.nominal_v_vector,
+                step_nis=honest_dynamic_nis
+            )
+
+            _, new_ema_nis = self.consensus_engine.proof_of_inter_satellite_evaluation(
                 dag=node.dag,
                 sat_node=node,
                 transaction=honest_tx,
                 mean_nis_per_satellite=self.network_nis_dict
             )
+
+            # Dynamically update the historical NIS EMA for the honest node
+            if new_ema_nis is not None:
+                self.network_nis_dict[node.id] = new_ema_nis
 
         # Phase 2: Sybil Quorum Attack Broadcast
         # Multiply the agent's normalised unitless output into a maximum translation of 15.0 km per step.
@@ -327,14 +372,27 @@ class FullNetworkSybilEnv(gym.Env):
         # same falsified data. This coordinated submission is designed to instantly cross-validate
         # and artificially inflate the geometric novelty parameters within the BFT ledger.
         for node in self.compromised_nodes:
-            mock_transaction = self._build_transaction(node, malicious_r_vector, self.nominal_v_vector, dynamic_nis)
+            # We assume the Sybil nodes spoof their own position but leave the target's position nominal
+            mock_transaction = self._build_transaction(
+                node,
+                observer_r_vector=malicious_r_vector,
+                observer_v_vector=self.nominal_v_vector,
+                target_r_vector=self.nominal_r_vector,
+                target_v_vector=self.nominal_v_vector,
+                step_nis=dynamic_nis
+            )
 
-            self.consensus_engine.proof_of_inter_satellite_evaluation(
+            _, new_ema_nis = self.consensus_engine.proof_of_inter_satellite_evaluation(
                 dag=node.dag,
                 sat_node=node,
                 transaction=mock_transaction,
                 mean_nis_per_satellite=self.network_nis_dict
             )
+
+            # Update the historical NIS EMA for the malicious node, forcing the RL agent
+            # to continuously manage the long-term degradation of its own trust metrics.
+            if new_ema_nis is not None:
+                self.network_nis_dict[node.id] = new_ema_nis
 
             # Extract the raw acceptance score granted by the PoISE algorithm to track success
             consensus_state = node.dag.local_consensus_states.get(mock_transaction.hash, {})
