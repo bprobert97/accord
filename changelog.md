@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [5.0] - 2026-08
+
+### Summary
+Adds machine learning models for training to deploy offensive attacks on PoISE.
+
+### Added
+- 3 new machine learning models: Online PPO, Offline CQL and Offline DT
+- Updated README with information on how to use the models
+---
+
 ## [4.2] - 2026-08
 
 ### Summary
