@@ -1,5 +1,5 @@
 """
-Model 5B: Decision Transformer for Consensus Exploitation
+Decision Transformer for Consensus Exploitation
 
 Description:
 Models ledger trajectory sequences as an autoregressive token stream.

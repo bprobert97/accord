@@ -1,5 +1,5 @@
 """
-Model 5A: Offline Reinforcement Learning (Conservative Q-Learning)
+Offline Reinforcement Learning (Conservative Q-Learning)
 
 Description:
 Trains a continuous control policy strictly from the scraped, immutable DAG dataset.

@@ -1,5 +1,8 @@
 """
-Model 4: Collusive Sybil Drift
+PPO Online Training Script
+This script implements a Proximal Policy Optimization (PPO) agent to learn an evasive,
+reputation-aware Sybil attack strategy against a Byzantine Fault Tolerant (BFT) network
+of satellites.
 
 Description:
 This environment models a decentralised consensus network undergoing an evasive,
