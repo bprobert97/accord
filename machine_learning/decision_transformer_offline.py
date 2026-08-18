@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("DecisionTransformer")
@@ -151,34 +151,49 @@ class DecisionTransformer(nn.Module):
         return self.action_head(state_outs)
 
 
-def train_decision_transformer(epochs: int = 50, batch_size: int = 16, lr: float = 1e-4) -> None:
+def train_decision_transformer(num_updates: int = 4000, batch_size: int = 32, lr: float = 1e-4) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = TrajectoryDataset()
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     model = DecisionTransformer().to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     loss_fn = nn.MSELoss()
 
-    logger.info("Training Decision Transformer on device: %s", device)
+    logger.info("Training Decision Transformer for %d updates on device: %s", num_updates, device)
 
-    for epoch in range(epochs):
-        total_loss = 0.0
-        for s, a, r, t in dataloader:
-            s, a, r, t = s.to(device), a.to(device), r.to(device), t.to(device)
-            pred_a = model(s, a, r, t)
-            loss = loss_fn(pred_a, a)
+    model.train()
+    running_loss = 0.0
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
+    # Sample directly from the dataset with replacement to guarantee enough optimization steps
+    for step in range(1, num_updates + 1):
+        batch_indices = np.random.choice(len(dataset), size=batch_size, replace=True)
+        batch = [dataset[i] for i in batch_indices]
 
-        if (epoch + 1) % 10 == 0 or epoch == 0:
-            logger.info("Epoch %d/%d | DT Sequence Loss: %.6f", epoch + 1, epochs, total_loss / len(dataloader))
+        s = torch.stack([item[0] for item in batch]).to(device)
+        a = torch.stack([item[1] for item in batch]).to(device)
+        r = torch.stack([item[2] for item in batch]).to(device)
+        t = torch.stack([item[3] for item in batch]).to(device)
 
-    torch.save(model.state_dict(), "machine_learning/decision_transformer_sybil.pt")
-    logger.info("Decision Transformer saved: machine_learning/decision_transformer_sybil.pt")
+        pred_a = model(s, a, r, t)
+        loss = loss_fn(pred_a, a)
+
+        optimizer.zero_grad()
+        loss.backward()
+        # Gradient clipping prevents the transformer from suffering attention spikes
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
+        optimizer.step()
+
+        running_loss += loss.item()
+
+        if step % 500 == 0 or step == 1:
+            logger.info(
+                "Step %d/%d | DT Sequence Loss (MSE): %.6f",
+                step, num_updates, running_loss / (500 if step > 1 else 1)
+            )
+            running_loss = 0.0
+
+    torch.save(model.state_dict(), "machine_learning/decision_transformer_offline.pt")
+    logger.info("Decision Transformer saved: machine_learning/decision_transformer_offline.pt")
 
 
 if __name__ == "__main__":

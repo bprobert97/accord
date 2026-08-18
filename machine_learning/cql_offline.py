@@ -158,8 +158,8 @@ class CQLTrainer:
                     total_a_loss / len(self.dataloader),
                 )
 
-        torch.save(self.actor.state_dict(), "machine_learning/cql_sybil_actor.pt")
-        logger.info("Model saved successfully: machine_learning/cql_sybil_actor.pt")
+        torch.save(self.actor.state_dict(), "machine_learning/cql_offline.pt")
+        logger.info("Model saved successfully: machine_learning/cql_offline.pt")
 
 
 if __name__ == "__main__":

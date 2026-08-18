@@ -444,7 +444,7 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
-            logging.FileHandler("machine_learning/full_network_sybil.log", mode="w", encoding="utf-8"),
+            logging.FileHandler("machine_learning/ppo_online.log", mode="w", encoding="utf-8"),
             logging.StreamHandler()
         ]
     )
@@ -455,8 +455,8 @@ if __name__ == "__main__":
     trained_model = PPO("MlpPolicy", test_env, verbose=1, learning_rate=0.001)
 
     logger.info("Training Reputation-Aware Full Network Sybil Drift Model...")
-    trained_model.learn(total_timesteps=500000)
-    trained_model.save("machine_learning/full_network_sybil_injector")
+    trained_model.learn(total_timesteps=700000)
+    trained_model.save("machine_learning/ppo_online_injector")
 
     obs_state, info_dict = test_env.reset()
     for run_step in range(360):
@@ -474,7 +474,7 @@ if __name__ == "__main__":
 
     run_history = test_env.episode_history
     np.savez_compressed(
-        "machine_learning/full_network_sybil_log.npz",
+        "machine_learning/ppo_online_log.npz",
         nominal_track=np.array([run_history["nominal_x"], run_history["nominal_y"], run_history["nominal_z"]]),
         attack_track=np.array([run_history["attack_x"], run_history["attack_y"], run_history["attack_z"]]),
         rewards=np.array(run_history["rewards"]),
