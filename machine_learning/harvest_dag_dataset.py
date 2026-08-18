@@ -4,8 +4,14 @@ Dataset Harvester: Transparent DAG Data Scraping
 Description:
 Simulates multiple orbital periods across a 10-satellite constellation to populate
 the Directed Acyclic Graph (DAG) with both nominal and exploratory transactions.
-The ledger is then frozen, extracted, and structured into transition buffers for
-Offline Reinforcement Learning and Decision Transformer training.
+
+RESEARCH ABSTRACTION NOTE:
+In a real-world scenario, an adversary would download a raw, historical DAG from
+the network and subsequently reverse-engineer the state-action-reward tuples.
+To optimise computational efficiency, this script abstracts that two-step process.
+It simultaneously simulates the orbital environment (generating the ledger history)
+and acts as the attacker extracting the data, structuring it directly into transition
+buffers for Offline Reinforcement Learning and Decision Transformer training.
 """
 
 import dataclasses
@@ -105,6 +111,8 @@ def harvest_ledger_dataset(
         cum_offset = np.zeros(3, dtype=np.float32)
 
         # Warmup the DAG to establish baseline PoE
+        # This provides the network with initial historical behaviour so the EMA
+        # reputation system is populated prior to the attack simulation.
         for node in all_nodes:
             for i in range(4):
                 w_step = i - 4
@@ -128,6 +136,8 @@ def harvest_ledger_dataset(
             nom_v = [-radius * orbital_rate * math.sin(ang), radius * orbital_rate * math.cos(ang), radius * 0.1 * orbital_rate * math.cos(ang)]
 
             # 1. Honest Broadcast
+            # Simulate legitimate nodes transmitting baseline telemetry with standard
+            # hardware noise. This creates the baseline data that the attacker must hide within.
             for node in honest_nodes:
                 p_noise = np.random.normal(0, 0.01, 3)
                 v_noise = np.random.normal(0, 0.0001, 3)
@@ -141,7 +151,9 @@ def harvest_ledger_dataset(
                     network_nis_dict[node.id] = new_ema
 
             # 2. Exploratory Malicious Actions (Mixed Strategy for Diverse Dataset)
-            # 50% coordinated drift, 30% small stealth probing, 20% random noisy errors
+            # Instead of scraping an existing external ledger, we simulate the historical
+            # behaviour of compromised nodes trying different data injection strategies.
+            # 50% coordinated drift, 30% small stealth probing, 20% random noisy errors.
             rand_mode = np.random.rand()
             if rand_mode < 0.5:
                 raw_action = np.random.uniform(-1.0, 1.0, 3).astype(np.float32)
@@ -169,6 +181,10 @@ def harvest_ledger_dataset(
             avg_rep = sum(n.reputation for n in compromised_nodes) / len(compromised_nodes)
             drift_dist = float(np.linalg.norm(cum_offset))
 
+            # 3. Dynamic Reward Calculation
+            # Evaluate the attacker's success against the dual-boundary stealth constraints.
+            # In reality, the attacker infers this after analysing the scraped DAG.
+            # Here, we calculate it concurrently to bypass secondary parsing scripts.
             if avg_score < 0.3 or avg_rep < 0.5:
                 reward = -10.0 * max(0.3 - avg_score, 0.5 - avg_rep)
             else:
@@ -177,6 +193,9 @@ def harvest_ledger_dataset(
             next_state = np.concatenate([mal_r, cum_offset, [avg_rep]], dtype=np.float32)
             is_done = step == steps_per_episode
 
+            # 4. Markov Decision Process (MDP) Tuple Extraction
+            # Store the state, action, and reward directly into the buffer, representing
+            # the final extracted dataset the adversary uses for offline training.
             all_states.append(current_state)
             all_actions.append(raw_action)
             all_rewards.append(reward)
@@ -188,6 +207,8 @@ def harvest_ledger_dataset(
 
         episode_lengths.append(ep_step_count)
 
+    # 5. Export for Offline AI Architectures
+    # Compress the extracted tuples into the required format for PyTorch / Stable Baselines3.
     np.savez_compressed(
         output_path,
         states=np.array(all_states, dtype=np.float32),
