@@ -340,14 +340,14 @@ def plot_nis_boxplot(dag: Any,
             parts[partname].set_linewidth(1.5)
 
     ax.axhline(
-        chi2.ppf((1 - 0.95) / 2, df=2),
+        float(chi2.ppf((1 - 0.95) / 2, df=2)),
         color=plt.get_cmap('viridis')(0.1),
         linestyle='--',
         alpha=0.7,
         label='95% Confidence Interval Bounds'
     )
     ax.axhline(
-        chi2.ppf((1 + 0.95) / 2, df=2),
+        float(chi2.ppf((1 + 0.95) / 2, df=2)),
         color=plt.get_cmap('viridis')(0.1),
         linestyle='--',
         alpha=0.7

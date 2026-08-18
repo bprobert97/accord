@@ -72,6 +72,18 @@ The maximum Inter-Satellite Link (ISL) distance is the core constraint that dict
 2. Update the ISL_range_m parameter to reflect your desired communication threshold (e.g., 1000e3 or 2000e3).
 3. Ensure your Monte Carlo random seeds are set within this config to guarantee deterministic and reproducible runs.
 
+## Machine Learning Models
+In the `machine_learning` directory, there are three different offensive machine learning models, used for red-team testing of PoISE.
+* `ppo_online` runs a reinforcement learning model with a Proximal Policy Optimisation algorithm. This trains on a live PoISE network.
+* `cql_offline` runs a reinforcement learning model with a Conservative Q-Learning algortith. This trains on a static dataset harvested from the distributed ledger.
+* `decision_transformer_offline` runs a decision transformer model. This trains on a static dataset harvested from the distributed ledger.
+
+To train and save the models, you can run each of the files using `python -m`, e.g.:
+* `python -m machine_learning.ppo_online`
+
+Once you have trained and saved all of your models, you can generate comparative metrics for their performance using `compare_models.py`. This will output 3 sub-plots tracking the falsified drift the machine learning agents successfully injected, the reputation of the agents, and the reward of the agents.
+* `python -m machine_learning.compare_models`
+
 ## Contributing
 
 If you wish to contribute to the ACCORD framework, please note that external contributors must fork the repository to submit changes, rather than requesting direct branch access. Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for more details.

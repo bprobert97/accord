@@ -311,7 +311,7 @@ def plot_mc_nis_boxplot(all_kpis: List[Dict[str, Any]]) -> None:
     # 2. Plot the raw scatter points underneath using helper (zorder=2)
     _draw_scatter_underneath(ax, plot_data)
 
-    expected_median = chi2.ppf(0.5, df=2)
+    expected_median = float(chi2.ppf(0.5, df=2))
     ax.axhline(expected_median, color='black', linestyle=':',
                label=f'Expected Median ({expected_median:.3f})', zorder=1)
 
