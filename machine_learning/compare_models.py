@@ -67,9 +67,15 @@ def run_benchmark():
 
     # Dynamically extract the maximum historical return from the dataset
     data = np.load("machine_learning/dag_harvested_dataset.npz")
-    # Assuming 40 episodes of 360 steps:
-    ep_rewards = data["rewards"].reshape(-1, 360)
-    target_rtg = np.sum(ep_rewards, axis=1).max()
+
+    ep_lengths = data["episode_lengths"]
+    rewards_flat = data["rewards"]
+    episode_returns = []
+    start = 0
+    for length in ep_lengths:
+        episode_returns.append(rewards_flat[start:start+length].sum())
+        start += length
+    target_rtg = max(episode_returns)
 
     logger.info(f"Dynamically set DT target return to: {target_rtg:.2f}")
 
