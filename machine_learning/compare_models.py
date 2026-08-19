@@ -81,11 +81,21 @@ def run_benchmark():
     for step in range(360):
         s_t = torch.tensor(np.array(context_s[-20:]), dtype=torch.float32).unsqueeze(0).to(device)
         a_t = torch.tensor(np.array(context_a[-20:]), dtype=torch.float32).unsqueeze(0).to(device)
-        r_t = torch.tensor(np.array(context_r[-20:]), dtype=torch.float32).unsqueeze(-1).unsqueeze(0).to(device)
+
+        # Scale the RTG by 3000.0 just like we did in the TrajectoryDataset
+        r_t = torch.tensor(np.array(context_r[-20:]) / 3000.0,
+                           dtype=torch.float32).unsqueeze(-1).unsqueeze(0).to(device)
+
         t_t = torch.tensor(np.array(context_t[-20:]), dtype=torch.long).unsqueeze(0).to(device)
 
+        # Generate an attention mask. Since this is a live rollout, we never feed it
+        # zero-padded "ghost" data, so the mask is simply an array of 1s matching the context length.
+        seq_len = min(step + 1, 20)
+        mask = torch.tensor(np.ones(seq_len), dtype=torch.bool).unsqueeze(0).to(device)
+
         with torch.no_grad():
-            pred_actions = dt_model(s_t, a_t, r_t, t_t)
+            # Pass the mask into the dt_model
+            pred_actions = dt_model(s_t, a_t, r_t, t_t, mask)
             action = pred_actions[0, -1].cpu().numpy()
 
         obs, r, _, trunc, _ = env_dt.step(action)
