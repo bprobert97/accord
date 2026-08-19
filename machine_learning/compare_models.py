@@ -12,6 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from machine_learning.ppo_online import FullNetworkSybilEnv
 from machine_learning.cql_offline import Actor
@@ -22,7 +23,6 @@ logger = logging.getLogger("CompareModels")
 
 def run_benchmark():
     # The FullNetworkSybilEnv is what created the malicious 3 node collusion (see init)
-    env_ppo = FullNetworkSybilEnv()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 1. Load Offline RL Actor (Conservative Q-Learning)
@@ -38,7 +38,12 @@ def run_benchmark():
     # 3. Load Live RL Model (Proximal Policy Optimization)
     # stable_baselines3 handles the architecture mapping and device placement automatically+
     logger.info("Loading PPO model...")
-    ppo_model = PPO.load("machine_learning/ppo_online_injector", env=env_ppo, device=device)
+    base_env_ppo = DummyVecEnv([lambda: FullNetworkSybilEnv()])
+    vec_env_ppo = VecNormalize.load("machine_learning/ppo_vecnormalize.pkl", base_env_ppo)
+    vec_env_ppo.training = False   # freeze running stats, don't keep updating them
+    vec_env_ppo.norm_reward = False
+    env_ppo = base_env_ppo.envs[0]  # keep a handle to the raw env for cumulative_r_offset etc.
+    ppo_model = PPO.load("machine_learning/ppo_online_injector", env=vec_env_ppo, device=device)
 
     # --- Run Model 1: CQL Rollout ---
     logger.info("Executing CQL Rollout...")
@@ -126,7 +131,8 @@ def run_benchmark():
     np.random.seed(42) # Ensure the global numpy generator is also locked for the env's noise
     for _ in range(360):
         # deterministic=True ensures the model exploits its learned policy rather than exploring
-        action, _ = ppo_model.predict(obs, deterministic=True)
+        obs_norm = vec_env_ppo.normalize_obs(obs)
+        action, _ = ppo_model.predict(obs_norm, deterministic=True)
         obs, r, _, trunc, _ = env_ppo.step(action)
 
         ppo_drift.append(np.linalg.norm(env_ppo.cumulative_r_offset))

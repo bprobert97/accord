@@ -468,6 +468,7 @@ if __name__ == "__main__":
     logger.info("Training Reputation-Aware Full Network Sybil Drift Model...")
     trained_model.learn(total_timesteps=700000)
     trained_model.save("machine_learning/ppo_online_injector")
+    test_env.save("machine_learning/ppo_vecnormalize.pkl")
 
     # Evaluate on the raw env directly to avoid VecEnv's auto-reset wiping
     # episode_history/cumulative_r_offset on the final truncated step.
