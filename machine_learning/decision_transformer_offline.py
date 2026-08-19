@@ -152,7 +152,8 @@ class DecisionTransformer(nn.Module):
         tokens = self.embed_norm(tokens)
 
         # Autoregressive Causal Mask (prevents looking into the future)
-        causal_mask = nn.Transformer.generate_square_subsequent_mask(3 * seq_len).to(states.device)
+        # We explicitly cast to boolean to match the key_padding_mask type and avoid PyTorch warnings
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(3 * seq_len, device=states.device).bool()
 
         # Sequence Padding Mask (prevents attending to zeros at the end of short trajectories)
         # PyTorch requires True for positions to ignore. We invert our mask (1=valid -> False, 0=pad -> True)

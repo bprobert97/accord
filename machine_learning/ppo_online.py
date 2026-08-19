@@ -469,35 +469,33 @@ if __name__ == "__main__":
     trained_model.learn(total_timesteps=700000)
     trained_model.save("machine_learning/ppo_online_injector")
 
-    # 1. VecEnv reset() returns only the observation array (no info dict)
-    obs_state = test_env.reset()
+    # Evaluate on the raw env directly to avoid VecEnv's auto-reset wiping
+    # episode_history/cumulative_r_offset on the final truncated step.
+    eval_env = FullNetworkSybilEnv()
+    obs_raw, _info_reset = eval_env.reset()
 
     for run_step in range(360):
-        predicted_action, _ = trained_model.predict(obs_state, deterministic=True)
+        # Manually apply VecNormalize's learned observation stats, since the
+        # policy was trained on normalized inputs.
+        obs_norm = test_env.normalize_obs(obs_raw)
 
-        # 2. VecEnv step() returns exactly 4 values.
-        # Note: actions, rewards, and dones are now batched arrays (e.g., shape (1,))
-        step_result = test_env.step(predicted_action)
-        obs_state = cast(np.ndarray, step_result[0])
-        current_reward, is_done, info_dicts = step_result[1], step_result[2], step_result[3]
+        # 2. Use _state so mypy knows this is a tuple (the hidden states)
+        predicted_action, _state = trained_model.predict(obs_norm, deterministic=True)
 
-        # We extract our custom variables from the raw underlying environment
-        # because test_env is now a wrapper that normalises the data.
-        underlying_env = base_env.envs[0]
+        # 3. Use _info_step so mypy knows this is the step dictionary
+        obs_raw, current_reward, terminated, truncated, _info_step = eval_env.step(predicted_action)
 
         logger.info(
-            f"Step {run_step+1} | Action: {np.round(predicted_action[0], 4)} | "
-            f"Reward: {current_reward[0]:.4f} | "
-            f"Cumulative Drift: {np.linalg.norm(underlying_env.cumulative_r_offset):.2f} km | "  # type: ignore[attr-defined]
-            f"Avg Rep: {underlying_env.episode_history['reputations'][-1]:.2f}"  # type: ignore[attr-defined]
+            f"Step {run_step+1} | Action: {np.round(predicted_action, 4)} | "
+            f"Reward: {current_reward:.4f} | "
+            f"Cumulative Drift: {np.linalg.norm(eval_env.cumulative_r_offset):.2f} km | "
+            f"Avg Rep: {eval_env.episode_history['reputations'][-1]:.2f}"
         )
 
-        # VecEnv consolidates 'terminated' and 'truncated' into a single 'done' boolean array
-        if is_done[0]:
+        if truncated:
             break
 
-    # Extract the history from the raw underlying environment for plotting
-    run_history = base_env.envs[0].episode_history  # type: ignore[attr-defined]
+    run_history = eval_env.episode_history
 
     np.savez_compressed(
         "machine_learning/ppo_online_log.npz",
