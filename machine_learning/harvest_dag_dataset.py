@@ -18,7 +18,7 @@ import dataclasses
 import json
 import logging
 import math
-from typing import Any, Dict, List, Tuple
+from typing import List
 
 import numpy as np
 
@@ -119,6 +119,7 @@ def harvest_ledger_dataset(
                 w_ang = (w_step / steps_per_episode) * (2.0 * math.pi)
                 w_r = [radius * math.cos(w_ang), radius * math.sin(w_ang), radius * 0.1 * math.sin(w_ang)]
                 w_v = [-radius * orbital_rate * math.sin(w_ang), radius * orbital_rate * math.cos(w_ang), radius * 0.1 * orbital_rate * math.cos(w_ang)]
+                sim_clock += 0.01
                 tx = build_los_transaction(node, target_id, 0, sim_clock, w_r, w_v, w_r, w_v, 1.386)
                 _, new_ema = consensus_engine.proof_of_inter_satellite_evaluation(node.dag, node, tx, network_nis_dict)
                 if new_ema:
@@ -163,7 +164,7 @@ def harvest_ledger_dataset(
                 raw_action = np.random.uniform(-1.0, 1.0, 3).astype(np.float32) * np.random.choice([0.0, 1.0], 3)
 
             scaled_action = raw_action * 15.0
-            cum_offset += scaled_action
+            cum_offset = np.clip(cum_offset + scaled_action, -20000.0, 20000.0)
             mal_r = [nom_r[i] + float(cum_offset[i]) for i in range(3)]
             d_nis = (float(np.linalg.norm(scaled_action)) / 15.0) ** 2
 

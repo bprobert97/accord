@@ -24,7 +24,7 @@ destabilising the neural network's gradient predictions.
 import json
 import logging
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 import dataclasses
 
 import gymnasium as gym
@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from gymnasium import spaces
 from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from src.consensus_mech import ConsensusMechanism
 from src.filters.filter_interface import ObservationRecord
@@ -164,7 +165,7 @@ class FullNetworkSybilEnv(gym.Env):
         self.nominal_v_vector = [
             -radius * orbital_rate * math.sin(initial_angle),
             radius * orbital_rate * math.cos(initial_angle),
-            radius * 0.1 * 2.0 * orbital_rate * math.cos(initial_angle)
+            radius * 0.1 * orbital_rate * math.cos(initial_angle)
         ]
 
         # Warm up phase: Pre-populate the Directed Acyclic Graphs with historical transactions.
@@ -361,7 +362,13 @@ class FullNetworkSybilEnv(gym.Env):
         # Phase 2: Sybil Quorum Attack Broadcast
         # Multiply the agent's normalised unitless output into a maximum translation of 15.0 km per step.
         scaled_action = action * 15.0
-        self.cumulative_r_offset += scaled_action
+
+        # Add the offset but explicitly clip it to the environment bounds to prevent silent overflow
+        self.cumulative_r_offset = np.clip(
+            self.cumulative_r_offset + scaled_action,
+            -20000.0,
+            20000.0
+        )
 
         # Apply the cumulative malicious drift directly onto the true trajectory
         malicious_r_vector = [self.nominal_r_vector[i] + float(self.cumulative_r_offset[i]) for i in range(3)]
@@ -454,28 +461,43 @@ if __name__ == "__main__":
     logging.getLogger("src").setLevel(logging.WARNING)
     logger = logging.getLogger("PoISELogger")
 
-    test_env = FullNetworkSybilEnv()
+    base_env = DummyVecEnv([lambda: FullNetworkSybilEnv()])
+    test_env = VecNormalize(base_env, norm_obs=True, norm_reward=False, clip_obs=10.0)
     trained_model = PPO("MlpPolicy", test_env, verbose=1, learning_rate=0.001)
 
     logger.info("Training Reputation-Aware Full Network Sybil Drift Model...")
     trained_model.learn(total_timesteps=700000)
     trained_model.save("machine_learning/ppo_online_injector")
+    test_env.save("machine_learning/ppo_vecnormalize.pkl")
 
-    obs_state, info_dict = test_env.reset()
+    # Evaluate on the raw env directly to avoid VecEnv's auto-reset wiping
+    # episode_history/cumulative_r_offset on the final truncated step.
+    eval_env = FullNetworkSybilEnv()
+    obs_raw, _info_reset = eval_env.reset()
+
     for run_step in range(360):
-        predicted_action, _ = trained_model.predict(obs_state, deterministic=True)
-        obs_state, current_reward, is_terminated, is_truncated, _ = test_env.step(predicted_action)  # type: ignore[assignment]
+        # Manually apply VecNormalize's learned observation stats, since the
+        # policy was trained on normalized inputs.
+        obs_norm = test_env.normalize_obs(obs_raw)
+
+        # 2. Use _state so mypy knows this is a tuple (the hidden states)
+        predicted_action, _state = trained_model.predict(obs_norm, deterministic=True)
+
+        # 3. Use _info_step so mypy knows this is the step dictionary
+        obs_raw, current_reward, terminated, truncated, _info_step = eval_env.step(predicted_action)
 
         logger.info(
             f"Step {run_step+1} | Action: {np.round(predicted_action, 4)} | "
             f"Reward: {current_reward:.4f} | "
-            f"Cumulative Drift: {np.linalg.norm(test_env.cumulative_r_offset):.2f} km | "
-            f"Avg Rep: {obs_state[6]:.2f}"
+            f"Cumulative Drift: {np.linalg.norm(eval_env.cumulative_r_offset):.2f} km | "
+            f"Avg Rep: {eval_env.episode_history['reputations'][-1]:.2f}"
         )
-        if is_truncated:
+
+        if truncated:
             break
 
-    run_history = test_env.episode_history
+    run_history = eval_env.episode_history
+
     np.savez_compressed(
         "machine_learning/ppo_online_log.npz",
         nominal_track=np.array([run_history["nominal_x"], run_history["nominal_y"], run_history["nominal_z"]]),
