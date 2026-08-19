@@ -59,28 +59,36 @@ class TrajectoryDataset(Dataset):
     def __len__(self) -> int:
         return len(self.trajectories)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         traj = self.trajectories[idx]
         tlen = len(traj["states"])
+
+        # We scale the RTG by 3000.0 to normalise it between 0 and ~1.0 for the Transformer embeddings
+        rtg_scale = 3000.0
 
         if tlen >= self.context_len:
             si = np.random.randint(0, tlen - self.context_len + 1)
             s = traj["states"][si : si + self.context_len]
             a = traj["actions"][si : si + self.context_len]
-            r = traj["rtg"][si : si + self.context_len]
+            r = traj["rtg"][si : si + self.context_len] / rtg_scale
             timesteps = traj["timesteps"][si : si + self.context_len]
+            # No padding needed, all tokens are valid (mask = 1)
+            attention_mask = np.ones(self.context_len, dtype=np.float32)
         else:
             pad = self.context_len - tlen
             s = np.pad(traj["states"], ((0, pad), (0, 0)))
             a = np.pad(traj["actions"], ((0, pad), (0, 0)))
-            r = np.pad(traj["rtg"], (0, pad))
+            r = np.pad(traj["rtg"], (0, pad)) / rtg_scale
             timesteps = np.pad(traj["timesteps"], (0, pad))
+            # 1 for real data, 0 for zero-padded ghost data
+            attention_mask = np.concatenate([np.ones(tlen), np.zeros(pad)])
 
         return (
             torch.tensor(s, dtype=torch.float32),
             torch.tensor(a, dtype=torch.float32),
             torch.tensor(r, dtype=torch.float32).unsqueeze(-1),
             torch.tensor(timesteps, dtype=torch.long),
+            torch.tensor(attention_mask, dtype=torch.bool) # Return the mask
         )
 
 
@@ -126,6 +134,7 @@ class DecisionTransformer(nn.Module):
         actions: torch.Tensor,
         rtgs: torch.Tensor,
         timesteps: torch.Tensor,
+        attention_mask: torch.Tensor,
     ) -> torch.Tensor:
         batch_size, seq_len, _ = states.shape
 
@@ -142,9 +151,21 @@ class DecisionTransformer(nn.Module):
 
         tokens = self.embed_norm(tokens)
 
-        # Autoregressive Causal Mask
-        mask = nn.Transformer.generate_square_subsequent_mask(3 * seq_len).to(states.device)
-        out = self.transformer(tokens, mask=mask)
+        # Autoregressive Causal Mask (prevents looking into the future)
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(3 * seq_len).to(states.device)
+
+        # Sequence Padding Mask (prevents attending to zeros at the end of short trajectories)
+        # PyTorch requires True for positions to ignore. We invert our mask (1=valid -> False, 0=pad -> True)
+        key_padding_mask = ~attention_mask
+        # Repeat the mask 3 times to match the interleaved [R, s, a] token structure
+        key_padding_mask = key_padding_mask.repeat_interleave(3, dim=1)
+
+        # Pass both masks into the transformer
+        out = self.transformer(
+            tokens,
+            mask=causal_mask,
+            src_key_padding_mask=key_padding_mask
+        )
 
         # Extract outputs corresponding to state tokens to predict subsequent action tokens
         state_outs = out[:, 1::3, :]
@@ -169,12 +190,16 @@ def train_decision_transformer(num_updates: int = 4000, batch_size: int = 32, lr
         batch_indices = np.random.choice(len(dataset), size=batch_size, replace=True)
         batch = [dataset[i] for i in batch_indices]
 
+        # Unpack all 5 variables returned by __getitem__
         s = torch.stack([item[0] for item in batch]).to(device)
         a = torch.stack([item[1] for item in batch]).to(device)
         r = torch.stack([item[2] for item in batch]).to(device)
         t = torch.stack([item[3] for item in batch]).to(device)
+        mask = torch.stack([item[4] for item in batch]).to(device)
 
-        pred_a = model(s, a, r, t)
+        # Pass the mask into the model's forward pass
+        pred_a = model(s, a, r, t, mask)
+
         loss = loss_fn(pred_a, a)
 
         optimizer.zero_grad()

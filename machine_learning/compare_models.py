@@ -22,34 +22,36 @@ logger = logging.getLogger("CompareModels")
 
 def run_benchmark():
     # The FullNetworkSybilEnv is what created the malicious 3 node collusion (see init)
-    env = FullNetworkSybilEnv()
+    env_ppo = FullNetworkSybilEnv()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 1. Load Offline RL Actor (Conservative Q-Learning)
     cql_actor = Actor().to(device)
-    cql_actor.load_state_dict(torch.load("machine_learning/cql_sybil_actor.pt", map_location=device))
+    cql_actor.load_state_dict(torch.load("machine_learning/cql_offline.pt", map_location=device))
     cql_actor.eval()
 
     # 2. Load Decision Transformer
     dt_model = DecisionTransformer().to(device)
-    dt_model.load_state_dict(torch.load("machine_learning/decision_transformer_sybil.pt", map_location=device))
+    dt_model.load_state_dict(torch.load("machine_learning/decision_transformer_offline.pt", map_location=device))
     dt_model.eval()
 
     # 3. Load Live RL Model (Proximal Policy Optimization)
-    # stable_baselines3 handles the architecture mapping and device placement automatically
+    # stable_baselines3 handles the architecture mapping and device placement automatically+
     logger.info("Loading PPO model...")
-    ppo_model = PPO.load("machine_learning/ppo_online_injector", env=env, device=device)
+    ppo_model = PPO.load("machine_learning/ppo_online_injector", env=env_ppo, device=device)
 
     # --- Run Model 1: CQL Rollout ---
     logger.info("Executing CQL Rollout...")
     cql_drift, cql_rep, cql_rewards = [], [], []
-    obs, _ = env.reset()
+    env_cql = FullNetworkSybilEnv()
+    obs, _ = env_cql.reset(seed=42)
+    np.random.seed(42) # Ensure the global numpy generator is also locked for the env's noise
     for _ in range(360):
         with torch.no_grad():
             s_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(device)
             action = cql_actor(s_tensor).cpu().numpy().flatten()
-        obs, r, _, trunc, _ = env.step(action)
-        cql_drift.append(np.linalg.norm(env.cumulative_r_offset))
+        obs, r, _, trunc, _ = env_cql.step(action)
+        cql_drift.append(np.linalg.norm(env_cql.cumulative_r_offset))
         cql_rep.append(obs[6])
         cql_rewards.append(r)
         if trunc:
@@ -59,15 +61,17 @@ def run_benchmark():
     # Prompt the model with an elevated target return
     logger.info("Executing Decision Transformer Rollout...")
     dt_drift, dt_rep, dt_rewards = [], [], []
-    obs, _ = env.reset()
+    env_dt = FullNetworkSybilEnv()
+    obs, _ = env_dt.reset(seed=42)
+    np.random.seed(42) # Ensure the global numpy generator is also locked for the env's noise
 
-    # Run this code to find target reward:
-    # import numpy as np
-    # data = np.load("machine_learning/dag_harvested_dataset.npz")
-    # # Reshape the flat rewards array into (40 episodes, 360 steps) and sum them
-    # max_historical_return = np.sum(data["rewards"].reshape(40, 360), axis=1).max()
+    # Dynamically extract the maximum historical return from the dataset
+    data = np.load("machine_learning/dag_harvested_dataset.npz")
+    # Assuming 40 episodes of 360 steps:
+    ep_rewards = data["rewards"].reshape(-1, 360)
+    target_rtg = np.sum(ep_rewards, axis=1).max()
 
-    target_rtg = 2765.25
+    logger.info(f"Dynamically set DT target return to: {target_rtg:.2f}")
 
     context_s = [obs]
     context_a = [np.zeros(3, dtype=np.float32)]
@@ -84,8 +88,8 @@ def run_benchmark():
             pred_actions = dt_model(s_t, a_t, r_t, t_t)
             action = pred_actions[0, -1].cpu().numpy()
 
-        obs, r, _, trunc, _ = env.step(action)
-        dt_drift.append(np.linalg.norm(env.cumulative_r_offset))
+        obs, r, _, trunc, _ = env_dt.step(action)
+        dt_drift.append(np.linalg.norm(env_dt.cumulative_r_offset))
         dt_rep.append(obs[6])
         dt_rewards.append(r)
 
@@ -102,13 +106,14 @@ def run_benchmark():
     # We use the built-in predict method from stable_baselines3 for inference
     logger.info("Executing PPO Rollout...")
     ppo_drift, ppo_rep, ppo_rewards = [], [], []
-    obs, _ = env.reset()
+    obs, _ = env_ppo.reset(seed=42)
+    np.random.seed(42) # Ensure the global numpy generator is also locked for the env's noise
     for _ in range(360):
         # deterministic=True ensures the model exploits its learned policy rather than exploring
         action, _ = ppo_model.predict(obs, deterministic=True)
-        obs, r, _, trunc, _ = env.step(action)
+        obs, r, _, trunc, _ = env_ppo.step(action)
 
-        ppo_drift.append(np.linalg.norm(env.cumulative_r_offset))
+        ppo_drift.append(np.linalg.norm(env_ppo.cumulative_r_offset))
         ppo_rep.append(obs[6])
         ppo_rewards.append(r)
 

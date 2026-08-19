@@ -131,6 +131,8 @@ class CQLTrainer:
 
                 self.critic_opt.zero_grad()
                 critic_loss.backward()
+                # Gradient clipping to prevent extreme conservative penalties from breaking the critic
+                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
                 self.critic_opt.step()
 
                 # --- 2. Actor Update ---
@@ -140,6 +142,8 @@ class CQLTrainer:
 
                 self.actor_opt.zero_grad()
                 actor_loss.backward()
+                # Gradient clipping for the actor
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
                 self.actor_opt.step()
 
                 # --- 3. Soft Target Updates ---
