@@ -29,6 +29,7 @@ from .dag import DAG
 from .filters.filter_interface import ObservationRecord
 from .logger import get_logger
 from .satellite_node import SatelliteNode
+from .simulation import RE, LEO_MAX_ALT, LEO_MIN_ALT
 from .transaction import Transaction
 
 logger = get_logger()
@@ -273,6 +274,9 @@ class ConsensusMechanism():
         if not self._is_dof_valid(obs_record, transaction, sat_node, dag):
             return False, new_ema_nis
 
+        if not self._is_physically_valid(obs_record, transaction, sat_node, dag):
+            return False, new_ema_nis
+
         dag.add_tx(transaction)
         if not dag.has_bft_quorum():
             logger.info("Not enough transactions for BFT quorum. Satellite \
@@ -317,6 +321,55 @@ class ConsensusMechanism():
                                                         sat_node.performance_ema)
                 sat_node.evaluated_txs.add(transaction.hash)
             return False
+        return True
+
+    def _is_physically_valid(self, obs_record: ObservationRecord,
+                          transaction: Transaction,
+                          sat_node: SatelliteNode,
+                          dag: DAG) -> bool:
+        """
+        Checks whether the reported observer position and the inferred target
+        position are physically consistent with a LEO orbit.
+        """
+        r_obs = np.array(obs_record.observer_r_eci, dtype=float)
+        if r_obs.shape != (3,) or not np.isfinite(r_obs).all():
+            logger.info("Observer position invalid or missing.")
+            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                                sat_node.rep_manager.apply_negative(sat_node.reputation,
+                                                                    sat_node.exp_pos,
+                                                                    sat_node.performance_ema)
+            return False
+
+        if not np.isfinite(obs_record.range_m) or obs_record.range_m <= 0:
+            logger.info("Invalid range: %.1f m", obs_record.range_m)
+            sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                                sat_node.rep_manager.apply_negative(sat_node.reputation,
+                                                                    sat_node.exp_pos,
+                                                                    sat_node.performance_ema)
+            return False
+
+        # Reconstruct target's absolute position: observer + range * unit LOS vector
+        r_vec = np.array(obs_record.r_vector, dtype=float)
+        target_pos = r_obs + obs_record.range_m * r_vec
+
+        for label, pos in (("observer", r_obs), ("target", target_pos)):
+            alt = np.linalg.norm(pos) - RE
+            if not LEO_MIN_ALT <= alt <= LEO_MAX_ALT:
+                logger.info("Inferred %s altitude out of LEO bounds: %.1f m", label, alt)
+                sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \
+                                    sat_node.rep_manager.apply_negative(sat_node.reputation,
+                                                                        sat_node.exp_pos,
+                                                                        sat_node.performance_ema)
+                dag.local_consensus_states[transaction.hash] = {
+                    "consensus_score": 0.0,
+                    "correctness_score": 0.0,
+                    "is_confirmed": False,
+                    "is_rejected": True,
+                    "nis": obs_record.nis,
+                    "dof": obs_record.dof
+                }
+                return False
+
         return True
 
     def _is_dof_valid(self,

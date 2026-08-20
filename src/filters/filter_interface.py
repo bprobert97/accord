@@ -95,6 +95,8 @@ class ObservationRecord:
     dof: int
     r_vector: List[float]
     v_vector: List[float]
+    range_m: float
+    observer_r_eci: List[float]
 
 @dataclass
 class ObservationPair:

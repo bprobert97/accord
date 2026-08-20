@@ -57,6 +57,8 @@ def build_los_transaction(
         v_vector=[c / v_norm for c in v_rel],
         nis=step_nis,
         dof=2,
+        range_m=r_norm * 1000.0,
+        observer_r_eci=[c * 1000.0 for c in obs_r]
     )
     tx_data_json = json.dumps(dataclasses.asdict(obs_record))
     metadata = TransactionMetadata()
@@ -109,6 +111,9 @@ def harvest_ledger_dataset(
         radius = 7000.0
         orbital_rate = (2.0 * math.pi) / 5400.0
         cum_offset = np.zeros(3, dtype=np.float32)
+        # Expand state coverage by seeding a fraction of episodes with extreme initial drift
+        if ep % 4 == 0:
+            cum_offset = np.random.uniform(-6000, 6000, 3).astype(np.float32)
 
         # Warmup the DAG to establish baseline PoE
         # This provides the network with initial historical behaviour so the EMA
@@ -192,7 +197,8 @@ def harvest_ledger_dataset(
                 reward = math.log1p(drift_dist) * 5.0 + (avg_score * 2.0) + (avg_rep * 2.0)
 
             next_state = np.concatenate([mal_r, cum_offset, [avg_rep]], dtype=np.float32)
-            is_done = step == steps_per_episode
+
+            is_done = (step == steps_per_episode)
 
             # 4. Markov Decision Process (MDP) Tuple Extraction
             # Store the state, action, and reward directly into the buffer, representing
