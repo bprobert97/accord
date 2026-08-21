@@ -22,6 +22,7 @@ logger = logging.getLogger("OfflineRL")
 
 class Actor(nn.Module):
     """Deterministic Actor mapping 7D state to continuous 3D fractional offset."""
+    scale: torch.Tensor
 
     def __init__(self, state_dim: int = 7, action_dim: int = 3, hidden_dim: int = 256) -> None:
         super().__init__()
@@ -45,6 +46,7 @@ class Actor(nn.Module):
 
 class Critic(nn.Module):
     """Double-Q Critic evaluating (state, action) pairs with conservative penalisation."""
+    scale: torch.Tensor
 
     def __init__(self, state_dim: int = 7, action_dim: int = 3, hidden_dim: int = 256) -> None:
         super().__init__()

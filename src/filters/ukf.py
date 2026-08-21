@@ -132,7 +132,9 @@ def _log_nis_ukf(y: np.ndarray, S: np.ndarray, x: np.ndarray,
                     step=k, observer=i, target=j,
                     nis=nis, dof=2, time=k*config.dt,
                     r_vector=(rho / np.maximum(r, 1e-8)).tolist(),
-                    v_vector=(vrel / np.maximum(np.linalg.norm(vrel), 1e-8)).tolist()
+                    v_vector=(vrel / np.maximum(np.linalg.norm(vrel), 1e-8)).tolist(),
+                    range_m=float(r),
+                    observer_r_eci=x[STATE_DIM*i : STATE_DIM*i+3].tolist()
                 ))
 
             idx += 2

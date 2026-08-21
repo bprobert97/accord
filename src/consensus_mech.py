@@ -324,9 +324,9 @@ class ConsensusMechanism():
         return True
 
     def _is_physically_valid(self, obs_record: ObservationRecord,
-                          transaction: Transaction,
-                          sat_node: SatelliteNode,
-                          dag: DAG) -> bool:
+                             transaction: Transaction,
+                             sat_node: SatelliteNode,
+                             dag: DAG) -> bool:
         """
         Checks whether the reported observer position and the inferred target
         position are physically consistent with a LEO orbit.

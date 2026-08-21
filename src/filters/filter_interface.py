@@ -86,6 +86,8 @@ class ObservationRecord:
       Note: This vector is relative from observer to target but the coordinates
       are expressed in the absolute reference frame of the simulation.
     - v_vector: A LOS velocity vector used for looking at persistence of excitation.
+    - range_m: The measured range between the observer and target in metres.
+    - observer_r_eci: The ECI position of the observer satellite at the time of observation.
     """
     step: int
     time: float
