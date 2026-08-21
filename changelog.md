@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [5.2] - 2026-08
+
+### Summary
+Adds in a check for submitted data being physically valid before consensus is performed on it.
+
+### Added
+- Added physical validity check.
+- Updated tests.
+- Made font sizes on machine learning plots larger.
+
 ## [5.1] - 2026-08
 
 ### Summary
