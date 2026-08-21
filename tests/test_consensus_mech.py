@@ -86,7 +86,9 @@ def test_calculate_dof_score(consensus_mech):
                             nis=2.0,
                             dof=1,
                             r_vector=current_r_vector,
-                            v_vector=current_v_vector)
+                            v_vector=current_v_vector,
+                            range_m=1500.0,
+                            observer_r_eci=[7000.0, 0.0, 0.0])
 
     # Test base score - no previous vector or delta_t
     # DOF = 1 initially
@@ -207,9 +209,11 @@ def test_poise_no_bft_quorum(consensus_mech) -> None:
     sat_node_mock = MagicMock()
     sat_node_mock.id = 1
     sat_node_mock.reputation = 0.5
+    sat_node_mock.rep_manager.apply_negative.return_value = (0.4, 0, 0.5)
 
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
-                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
+                                   r_vector=[1.0, 0.0, 0.0], v_vector=[0.1, 0.2, 0.3],
+                                   range_m=10.0, observer_r_eci=[7000000.0, 0.0, 0.0])
     tx_data = json.dumps(obs_record.__dict__)
     addresses = TransactionAddresses(sender_address=1,
                                      recipient_address=2,
@@ -262,7 +266,8 @@ def test_poise_consensus_reached(mock_chi2, consensus_mech) -> None:
     sat_node_mock.rep_manager.apply_positive.return_value = (0.6, 0, 0.5)
 
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
-                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
+                                   r_vector=[1.0, 0.0, 0.0], v_vector=[0.1, 0.2, 0.3],
+                                   range_m=10.0, observer_r_eci=[7000000.0, 0.0, 0.0])
     tx_data = json.dumps(obs_record.__dict__)
     addresses = TransactionAddresses(sender_address=1,
                                      recipient_address=2,
@@ -318,7 +323,8 @@ def test_poise_consensus_failed(mock_chi2, consensus_mech) -> None:
     sat_node_mock.rep_manager.apply_negative.return_value = (0.4, 0, 0.5)
 
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=10.0, dof=2,
-                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
+                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3],
+                                   range_m=1500.0, observer_r_eci=[7000.0, 0.0, 0.0])
     tx_data = json.dumps(obs_record.__dict__)
     addresses = TransactionAddresses(sender_address=1,
                                      recipient_address=2,

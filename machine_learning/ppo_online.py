@@ -268,7 +268,9 @@ class FullNetworkSybilEnv(gym.Env):
             r_vector=r_unit,
             v_vector=v_unit,
             nis=step_nis,
-            dof=2
+            dof=2,
+            range_m=r_norm * 1000.0,
+            observer_r_eci=[c * 1000.0 for c in observer_r_vector]
         )
         tx_data_json = json.dumps(dataclasses.asdict(obs_record))
 

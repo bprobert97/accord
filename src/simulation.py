@@ -28,6 +28,8 @@ logger = get_logger()
 # ----------------------- Constants -----------------------
 MU_EARTH = 3.986004418e14  # m^3/s^2
 RE = 6378e3
+LEO_MIN_ALT = 180e3   # 180 km
+LEO_MAX_ALT = 2000e3  # 2000 km
 # ---------------------------------------------------------
 
 @dataclass
@@ -54,7 +56,7 @@ def generate_random_keplerian_elements(seed: int) -> KeplerianElements:
     # Use a seed for reproducibility in tests and demos
     rng = np.random.default_rng(seed)
 
-    altitude = rng.uniform(180e3, 2000e3)
+    altitude = rng.uniform(LEO_MIN_ALT, LEO_MAX_ALT)
     a = RE + altitude
 
     e = rng.uniform(0, 0.05)

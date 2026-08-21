@@ -184,7 +184,8 @@ def test_apply_network_faults():
     """
     obs = ObservationRecord(
         step=10, time=100.0, observer=1, target=2,
-        nis=1.0, dof=2, r_vector=[1,0,0], v_vector=[0,1,0]
+        nis=1.0, dof=2, r_vector=[1,0,0], v_vector=[0,1,0],
+        range_m=1500.0, observer_r_eci=[7000.0, 0.0, 0.0]
     )
     faulty_ids = set()
 

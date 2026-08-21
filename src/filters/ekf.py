@@ -369,7 +369,9 @@ def _process_observation_pair(obs_pair: ObservationPair,
         nis=float(obs_pair.yij.T @ np.linalg.inv(S_ij) @ obs_pair.yij),
         dof=obs_pair.yij.shape[0], time=k*config.dt,
         r_vector=(rho / np.maximum(r, 1e-8)).tolist(),
-        v_vector=(vrel / np.maximum(np.linalg.norm(vrel), 1e-8)).tolist()
+        v_vector=(vrel / np.maximum(np.linalg.norm(vrel), 1e-8)).tolist(),
+        range_m=float(r),
+        observer_r_eci=ekf.x[STATE_DIM*obs_pair.i : STATE_DIM*obs_pair.i+3].tolist()
     )
 
 class JointEKF:

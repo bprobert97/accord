@@ -22,9 +22,13 @@ logger = logging.getLogger("OfflineRL")
 
 class Actor(nn.Module):
     """Deterministic Actor mapping 7D state to continuous 3D fractional offset."""
+    scale: torch.Tensor
 
     def __init__(self, state_dim: int = 7, action_dim: int = 3, hidden_dim: int = 256) -> None:
         super().__init__()
+        # Scale orbital positions/offsets by 10,000, leave reputation (index 6) at 1.0
+        self.register_buffer("scale", torch.tensor([1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1.0]))
+
         self.net = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -37,14 +41,17 @@ class Actor(nn.Module):
         )
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
-        return self.net(state)
+        return self.net(state / self.scale)
 
 
 class Critic(nn.Module):
     """Double-Q Critic evaluating (state, action) pairs with conservative penalisation."""
+    scale: torch.Tensor
 
     def __init__(self, state_dim: int = 7, action_dim: int = 3, hidden_dim: int = 256) -> None:
         super().__init__()
+        self.register_buffer("scale", torch.tensor([1e4, 1e4, 1e4, 1e4, 1e4, 1e4, 1.0]))
+
         self.q1 = nn.Sequential(
             nn.Linear(state_dim + action_dim, hidden_dim),
             nn.ReLU(),
@@ -61,7 +68,8 @@ class Critic(nn.Module):
         )
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        sa = torch.cat([state, action], dim=-1)
+        norm_state = state / self.scale
+        sa = torch.cat([norm_state, action], dim=-1)
         return self.q1(sa), self.q2(sa)
 
 
@@ -71,7 +79,7 @@ class CQLTrainer:
     def __init__(
         self,
         dataset_path: str = "machine_learning/dag_harvested_dataset.npz",
-        cql_alpha: float = 1.0,
+        cql_alpha: float = 0.01,
         gamma: float = 0.99,
         tau: float = 0.005,
         lr: float = 3e-4,
@@ -88,7 +96,14 @@ class CQLTrainer:
         data = np.load(dataset_path)
         states = torch.tensor(data["states"], dtype=torch.float32)
         actions = torch.tensor(data["actions"], dtype=torch.float32)
-        rewards = torch.tensor(data["rewards"], dtype=torch.float32).unsqueeze(-1)
+
+        # --- Reward Scaling ---
+        # Scale rewards down to stabilise the Q-value gradients.
+        # A raw reward of +40 creates unmanageable Q-values of ~4000.
+        # Scaling by 0.01 keeps Q-values in a stable, learnable range.
+        raw_rewards = torch.tensor(data["rewards"], dtype=torch.float32).unsqueeze(-1)
+        rewards = raw_rewards * 0.01
+
         next_states = torch.tensor(data["next_states"], dtype=torch.float32)
         dones = torch.tensor(data["dones"], dtype=torch.float32).unsqueeze(-1)
 
@@ -124,14 +139,28 @@ class CQLTrainer:
 
                 # Conservative Penalty: Minimise Q on random actions, maximise on dataset actions
                 rand_a = torch.FloatTensor(s.size(0), 3).uniform_(-1.0, 1.0).to(self.device)
-                q1_rand, q2_rand = self.critic(s, rand_a)
-                cql_loss = (torch.mean(q1_rand) - torch.mean(current_q1)) + (torch.mean(q2_rand) - torch.mean(current_q2))
+                with torch.no_grad():
+                    curr_a = self.actor(s)
+                    next_a_cql = self.actor(ns)
 
-                critic_loss = td_loss + self.cql_alpha * cql_loss
+                q1_rand, q2_rand = self.critic(s, rand_a)
+                q1_curr, q2_curr = self.critic(s, curr_a)
+                q1_next, q2_next = self.critic(s, next_a_cql)
+
+                # Concatenate out-of-distribution Q-values; Shape: (batch_size, 3)
+                cat_q1 = torch.cat([q1_rand, q1_curr, q1_next], dim=1)
+                cat_q2 = torch.cat([q2_rand, q2_curr, q2_next], dim=1)
+
+                # LogSumExp strictly bounds the highest adversarial Q-value peaks
+                cql_loss_q1 = torch.mean(torch.logsumexp(cat_q1, dim=1, keepdim=True) - current_q1)
+                cql_loss_q2 = torch.mean(torch.logsumexp(cat_q2, dim=1, keepdim=True) - current_q2)
+
+                cql_loss = self.cql_alpha * (cql_loss_q1 + cql_loss_q2)
+
+                critic_loss = td_loss + cql_loss
 
                 self.critic_opt.zero_grad()
                 critic_loss.backward()
-                # Gradient clipping to prevent extreme conservative penalties from breaking the critic
                 torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
                 self.critic_opt.step()
 
@@ -169,4 +198,3 @@ class CQLTrainer:
 if __name__ == "__main__":
     trainer = CQLTrainer()
     trainer.train(epochs=60)
-    
