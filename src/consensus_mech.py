@@ -354,6 +354,7 @@ class ConsensusMechanism():
 
         for label, pos in (("observer", r_obs), ("target", target_pos)):
             alt = np.linalg.norm(pos) - RE
+            print(alt, flush=True)
             if not LEO_MIN_ALT <= alt <= LEO_MAX_ALT:
                 logger.info("Inferred %s altitude out of LEO bounds: %.1f m", label, alt)
                 sat_node.reputation, sat_node.exp_pos, sat_node.performance_ema = \

@@ -28,7 +28,8 @@ def test_load_sensor_data():
     """
     node = SatelliteNode(node_id=1, consensus_mech=ConsensusMechanism())
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
-                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
+                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3],
+                                   range_m=1500.0, observer_r_eci=[7000.0, 0.0, 0.0])
 
     assert node.sensor_data is None
     node.load_sensor_data(obs_record)
@@ -50,7 +51,8 @@ async def test_submit_transaction_success():
     node1.peers = [node2]
 
     obs_record = ObservationRecord(step=1, time=1, observer=1, target=2, nis=2.0, dof=2,
-                                   r_vector=[1.0, 2.0, 3.0], v_vector=[0.1, 0.2, 0.3])
+                                   r_vector=[1.0, 0.0, 0.0], v_vector=[0.1, 0.2, 0.3],
+                                   range_m=10.0, observer_r_eci=[7000000.0, 0.0, 0.0])
     node1.load_sensor_data(obs_record)
 
     # Act: Broadcast from node1 over our decentralised network link
