@@ -189,9 +189,10 @@ def run_benchmark():
 
     # Plot 3: Reward Optimisation
     axes[2].set_title("(c)", loc="left", fontsize=22)
-    axes[2].plot(cql_rewards, label="CQL", color=cql_colour, alpha=0.8, lw=2)
-    axes[2].plot(dt_rewards, label="DT", color=dt_colour, alpha=0.8, lw=2)
-    axes[2].plot(ppo_rewards, label="PPO", color=ppo_colour, alpha=0.8, lw=2)
+    axes[2].plot(cql_rewards, label="CQL", color=cql_colour, lw=2.5)
+    axes[2].plot(dt_rewards, label="DT", color=dt_colour, linestyle="--", lw=2.5)
+    axes[2].plot(ppo_rewards, label="PPO", color=ppo_colour, linestyle="-.", lw=2.5)
+    axes[2].set_ylim(-6, 50)
     axes[2].set_xlabel("Orbit Step [-]", fontsize=18)
     axes[2].set_ylabel("Reward [-]", fontsize=18)
     axes[2].tick_params(axis='both', which='major', labelsize=16)
