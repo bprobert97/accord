@@ -153,7 +153,8 @@ def run_benchmark():
         'axes.labelsize': 16,      # X and Y axis labels
         'xtick.labelsize': 14,     # X axis numbers
         'ytick.labelsize': 14,     # Y axis numbers
-        'legend.fontsize': 14      # Legend text
+        'legend.fontsize': 14,      # Legend text
+        'savefig.transparent': True # Makes GUI save button use transparency
     })
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -201,7 +202,7 @@ def run_benchmark():
 
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.3)
-    plt.savefig("machine_learning/model_comparison_benchmark_with_ppo.png", dpi=300, bbox_inches='tight')
+    plt.savefig("machine_learning/model_comparison_benchmark_with_ppo.png", dpi=300, bbox_inches='tight',transparent=True)
     plt.show()
 
 if __name__ == "__main__":
