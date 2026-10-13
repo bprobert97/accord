@@ -658,7 +658,7 @@ def plot_aggregated_reputation(
     if convergence_index is not None and not start_at_full_constellation:
         plt.axvline(x=convergence_index, color="black", linestyle="--",
                     linewidth=1, label="Filter Convergence")
-
+    plt.ylim(-0.2, 1)
     plt.xlabel("Chronological Transaction Index [-]", fontsize=20)
     plt.ylabel("Reputation [-]", fontsize=20)
     plt.tick_params(axis='both', labelsize=18)
