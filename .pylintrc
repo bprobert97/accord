@@ -3,7 +3,9 @@ load-plugins=pylint_pytest
 
 [DESIGN]
 max-attributes=11
-max-locals=16
+max-locals=17
+max-positional-arguments=6
+max-args=6
 
 [BASIC]
 # Allow standard snake_case AND scientific/maths notation (e.g., F, H, P0, Phi, H1_t, F_jacobian_6)

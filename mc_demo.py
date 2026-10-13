@@ -30,6 +30,7 @@ from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Any
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
+from src.filters.filter_interface import FilterConfig
 from src.logger import get_logger
 from src.plotting.mc_plotting import plot_mc_results, DATA_DIR
 from src.plotting.plotting import generate_corner_plot, extract_nis_data
@@ -322,7 +323,10 @@ def recalculate_all_kpis(all_results: List[Optional[Dict[str, Any]]],
         new_results.append(new_kpis)
     return new_results
 
-def run_single_filter(run_idx: int, filter_type: FilterType, filter_dir: str,
+def run_single_filter(run_idx: int,
+                      filter_type: FilterType,
+                      filter_dir: str,
+                      base_config: FilterConfig = DEFAULT_CONFIG,
                       disable_logging: bool = False) -> bool:
     """
     Run the filter phase for a single Monte Carlo iteration.
@@ -340,7 +344,7 @@ def run_single_filter(run_idx: int, filter_type: FilterType, filter_dir: str,
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    config = replace(DEFAULT_CONFIG, seed=DEFAULT_CONFIG.seed + run_idx)
+    config = replace(base_config, seed=base_config.seed + run_idx)
     toggle = DemoToggles(save_sim_results=False, run_consensus=False)
     fpath = DemoFilePaths(
         filter_type=filter_type,
@@ -368,6 +372,7 @@ def run_single_consensus(run_idx: int,
                          context: RunContext,
                          threshold: float = 0.5,
                          fpr_offset: float = 0.2,
+                         base_config: FilterConfig = DEFAULT_CONFIG,
                          disable_logging: bool = False) -> Optional[Dict[str, Any]]:
     """
     Run the Consensus phase for a single Monte Carlo iteration.
@@ -378,6 +383,7 @@ def run_single_consensus(run_idx: int,
     - threshold: The reputation threshold below which a satellite is considered
                  detected as faulty.
     - fpr_offset: The percentage of initial steps to ignore when calculating false positives.
+    - base_config: The base filter configuration to use for this run.
     - disable_logging: If True, disables logging output for this run.
     Returns:
     - KPIs for the consensus run, if successful. Else None.
@@ -397,7 +403,7 @@ def run_single_consensus(run_idx: int,
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    config = replace(DEFAULT_CONFIG, seed=DEFAULT_CONFIG.seed + run_idx)
+    config = replace(base_config, seed=base_config.seed + run_idx)
 
     logger.info("Starting Consensus Simulation for Run %d", run_idx)
 
@@ -447,7 +453,7 @@ def run_single_consensus(run_idx: int,
 
 if __name__ == "__main__":
     # e.g. python mc_demo.py --recalculate --threshold 0.3 --fpr-offset 0.1
-    parser = argparse.ArgumentParser(description="ACCORD Monte Carlo Simulation")
+    parser = argparse.ArgumentParser(description="PoISE Monte Carlo Simulation")
     parser.add_argument("--num-runs", type=int,
                         default=NUM_RUNS, help="Number of MC runs")
     parser.add_argument("--threshold", type=float,
@@ -462,14 +468,27 @@ if __name__ == "__main__":
                         default="ekf", help="Which filter to use (ukf or ekf or ckf)")
     parser.add_argument("--disable-logging", action="store_true",
                         help="Disable all logging output to speed up execution")
+    parser.add_argument("--isl-range-km", type=float, default=None,
+                        help="Override ISL range in km (default: DEFAULT_CONFIG).")
+    parser.add_argument("--no-plots", action="store_true",
+                        help="Skip plot_mc_results and the corner plot.")
     args = parser.parse_args()
+
+    RUN_CONFIG = replace(
+    DEFAULT_CONFIG,
+    ISL_range_m=(args.isl_range_km * 1000.0 if args.isl_range_km is not None
+                    else DEFAULT_CONFIG.ISL_range_m),
+    walker_delta=False,   # Monte Carlo runs use a random topology
+    )
+    # stays a float, so filenames still read "1000.0km"
+    ISL_RANGE_KM = RUN_CONFIG.ISL_range_m // 1000
 
     # Convert string to Enum
     selected_filter = FilterType(args.filter_type)
     print(f"Selected filter type: {selected_filter.value.upper()}")
 
     # Dynamic directories
-    FILTER_DIR = os.path.join(DATA_DIR, selected_filter.value)
+    FILTER_DIR = os.path.join(DATA_DIR, f"{selected_filter.value}_{ISL_RANGE_KM}km")
     SIM_DIR = os.path.join(DATA_DIR, f"sim_{selected_filter.value}")
     MC_RESULTS_PATH = os.path.join(SIM_DIR, f"mc_results_{ISL_RANGE_KM}km.npz")
 
@@ -525,6 +544,7 @@ if __name__ == "__main__":
             filter_func = functools.partial(run_single_filter,
                                             filter_type=selected_filter,
                                             filter_dir=FILTER_DIR,
+                                            base_config=RUN_CONFIG,
                                             disable_logging=args.disable_logging)
             with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
                 list(executor.map(filter_func, runs_to_gen))
@@ -544,6 +564,7 @@ if __name__ == "__main__":
                                          context=run_context,
                                          threshold=args.threshold,
                                          fpr_offset=args.fpr_offset,
+                                         base_config=RUN_CONFIG,
                                          disable_logging=args.disable_logging)
             RESULTS = list(executor.map(sim_func, range(args.num_runs)))
 
@@ -554,5 +575,6 @@ if __name__ == "__main__":
         print(f"Saving Monte Carlo results to {MC_RESULTS_PATH}")
         np.savez_compressed(MC_RESULTS_PATH, results=np.array(RESULTS, dtype=object))
 
-    plot_mc_results(RESULTS, start_step=args.start_step)
-    generate_corner_plot()
+    if not args.no_plots:
+        plot_mc_results(RESULTS, start_step=args.start_step)
+        generate_corner_plot()

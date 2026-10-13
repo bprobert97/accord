@@ -886,9 +886,15 @@ if __name__ == "__main__":
             help="Would you like to generate a Walker Delta constellation \
                 instead of a random topology?"
         )
+    parser.add_argument("--isl-range-km",
+                        type=float, default=None,
+                        help="Override ISL range in km (default: use DEFAULT_CONFIG).")
     args = parser.parse_args()
 
     DEFAULT_CONFIG.walker_delta = args.walker_delta
+
+    if args.isl_range_km is not None:
+        DEFAULT_CONFIG.ISL_range_m = args.isl_range_km * 1000.0
 
     accord_logger = get_logger()
 
@@ -897,8 +903,11 @@ if __name__ == "__main__":
     accord_logger.info("Selected filter type: %s", SELECTED_FILTER.value)
 
     # Dynamically build the paths based on the selected filter
-    FILTER_RESULTS_PATH = os.path.join(DATA_DIR, f"{SELECTED_FILTER.value}_simulation_results.npz")
-    SIM_RESULTS_PATH = os.path.join(DATA_DIR, f"sim_results_{SELECTED_FILTER.value}.npz")
+    RUN_TAG = (f"{'walker' if DEFAULT_CONFIG.walker_delta else 'random'}"
+               f"_{DEFAULT_CONFIG.ISL_range_m // 1000:.0f}km")
+    FILTER_RESULTS_PATH = os.path.join(DATA_DIR,
+                                       f"{SELECTED_FILTER.value}_simulation_results_{RUN_TAG}.npz")
+    SIM_RESULTS_PATH = os.path.join(DATA_DIR, f"sim_results_{SELECTED_FILTER.value}_{RUN_TAG}.npz")
 
     FINAL_DAG: dict[int, DAG] | MockDAG | None = None
     REP_HIST: Optional[dict] = None

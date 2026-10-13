@@ -153,8 +153,13 @@ def _plot_kpi_bar_chart(results_ekf: List[Dict[str, Any]],
                         results_ukf: List[Dict[str, Any]],
                         results_ckf: List[Dict[str, Any]]) -> None:
     """
-    Plots a bar chart comparison of recall, precision, FPR, and TTD percentage
-    across all three filters, with error bars representing standard deviation.
+    Plots a grouped bar chart comparison of recall, precision, FPR, and
+    normalised TTD (percentage of runtime) across all three filters, with error
+    bars representing standard deviation.
+
+    Recall and precision (higher is better) use the left y-axis. FPR and
+    normalised TTD (lower is better) use a secondary right-hand y-axis so that
+    detail is not lost when their magnitudes differ.
 
     Args:
         results_ekf: A list of result dictionaries for the EKF simulation.
@@ -162,22 +167,13 @@ def _plot_kpi_bar_chart(results_ekf: List[Dict[str, Any]],
         results_ckf: A list of result dictionaries for the CKF simulation.
 
     Returns:
-        None. Saves a MatPlotLib figure in OUTPUT_DIR.
+        None. Saves a PDF (vector) and a 600 dpi PNG in OUTPUT_DIR.
     """
-    metrics = ["recall", "precision", "fpr"]
-    labels = ["Recall", "Precision", "False Positive Rate", "Normalised TTD"]
+    left_metrics = ["recall", "precision"]
+    right_metrics = ["fpr"]
+    labels = ["Recall", "Precision", "FPR", "Normalised TTD"]
+    n_left = len(left_metrics)
 
-    # 1. Calculate means
-    means_ekf = [np.mean([k[m] for k in results_ekf]) for m in metrics]
-    means_ukf = [np.mean([k[m] for k in results_ukf]) for m in metrics]
-    means_ckf = [np.mean([k[m] for k in results_ckf]) for m in metrics]
-
-    # 2. Calculate standard deviations for the error bars
-    stds_ekf = [np.std([k[m] for k in results_ekf]) for m in metrics]
-    stds_ukf = [np.std([k[m] for k in results_ukf]) for m in metrics]
-    stds_ckf = [np.std([k[m] for k in results_ckf]) for m in metrics]
-
-    # 3. Helper function updated to return both mean and std for TTD
     def get_ttd_stats(results):
         ttd_pcts = [
             (k["avg_ttd"] / k["honest_matrix"].shape[1]) * 100
@@ -187,42 +183,75 @@ def _plot_kpi_bar_chart(results_ekf: List[Dict[str, Any]],
             return 0.0, 0.0
         return np.mean(ttd_pcts), np.std(ttd_pcts)
 
-    # 4. Append TTD stats to the lists
-    ttd_mean_ekf, ttd_std_ekf = get_ttd_stats(results_ekf)
-    ttd_mean_ukf, ttd_std_ukf = get_ttd_stats(results_ukf)
-    ttd_mean_ckf, ttd_std_ckf = get_ttd_stats(results_ckf)
+    def get_stats(results):
+        metrics = left_metrics + right_metrics
+        means = [np.mean([k[m] for k in results]) for m in metrics]
+        stds = [np.std([k[m] for k in results]) for m in metrics]
+        ttd_mean, ttd_std = get_ttd_stats(results)
+        return means + [ttd_mean], stds + [ttd_std]
 
-    means_ekf.append(ttd_mean_ekf)
-    means_ukf.append(ttd_mean_ukf)
-    means_ckf.append(ttd_mean_ckf)
-
-    stds_ekf.append(ttd_std_ekf)
-    stds_ukf.append(ttd_std_ukf)
-    stds_ckf.append(ttd_std_ckf)
+    # (label, results, colour position, hatch, x offset multiplier)
+    cmap = plt.get_cmap('plasma')
+    width = 0.25  # three bars per group
+    filters = [
+        ("EKF", results_ekf, cmap(0.2), '//', -1),
+        ("CKF", results_ckf, cmap(0.5), '..', 0),
+        ("UKF", results_ukf, cmap(0.9), 'xx', 1),
+    ]
 
     x = np.arange(len(labels))
-    width = 0.25 # Adjusted width to fit three bars
-    _, ax = plt.subplots(figsize=(12, 6))
-    cmap = plt.get_cmap('plasma')
+    left_idx = slice(0, n_left)
+    right_idx = slice(n_left, len(labels))
+    bar_kwargs: Dict[str, Any] = dict(width=width, capsize=5,
+                                      edgecolor='black', linewidth=0.6)
 
-    # 5. Plot bars with yerr (error bars) and capsize (horizontal caps on error bars)
-    ax.bar(x - width, means_ekf, width, yerr=stds_ekf, capsize=5, label='EKF', color=cmap(0.2), alpha=0.85)
-    ax.bar(x, means_ckf, width, yerr=stds_ckf, capsize=5, label='CKF', color=cmap(0.5), alpha=0.85)
-    ax.bar(x + width, means_ukf, width, yerr=stds_ukf, capsize=5, label='UKF', color=cmap(0.9), alpha=0.85)
+    pdf_style = {
+        "pdf.fonttype": 42,   # embed TrueType fonts (IEEE PDF eXpress requirement)
+        "ps.fonttype": 42,
+    }
 
-    ax.set_ylabel('Percentage [%]', fontsize=18)
-    ax.tick_params(axis='y', which='major', labelsize=18)
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=18)
-    ax.legend(fontsize=18)
-    ax.grid(axis='y', alpha=0.1)
+    with plt.rc_context(pdf_style):
+        _, ax_left = plt.subplots(figsize=(12, 6))
+        ax_right = ax_left.twinx()
 
-    # Optional: You might want to adjust ylim if the error bars push past 105
-    ax.set_ylim(0, 105)
+        handles = []
+        right_tops = []
+        for name, res, colour, hatch, offset in filters:
+            means, stds = get_stats(res)
 
-    plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, "kpi_percentage_comparison.png"))
-    plt.show()
+            # Left axis: recall and precision
+            bars = ax_left.bar(x[left_idx] + offset * width, means[left_idx],
+                               yerr=stds[left_idx], color=colour, hatch=hatch,
+                               label=name, **bar_kwargs)
+            handles.append(bars)
+
+            # Right axis: FPR and normalised TTD
+            ax_right.bar(x[right_idx] + offset * width, means[right_idx],
+                         yerr=stds[right_idx], color=colour, hatch=hatch,
+                         **bar_kwargs)
+            right_tops += [m + s for m, s in zip(means[right_idx], stds[right_idx])]
+
+        # Limits: left fixed to percentage range, right scaled to its own data
+        ax_left.set_ylim(0, 105)
+        ax_right.set_ylim(0, max(max(right_tops) * 1.15, 1.0))
+
+        # Divider between the two metric groups
+        ax_left.axvline(n_left - 0.5, color='gray', linestyle=':', linewidth=0.8)
+
+        ax_left.set_ylabel('Recall / Precision [%]', fontsize=18)
+        ax_right.set_ylabel('FPR / Normalized TTD [%]', fontsize=18)
+        ax_left.tick_params(axis='y', which='major', labelsize=18)
+        ax_right.tick_params(axis='y', which='major', labelsize=18)
+        ax_left.set_xticks(x)
+        ax_left.set_xticklabels(labels, fontsize=18)
+        ax_left.grid(axis='y', alpha=0.1)
+        ax_left.legend(handles=handles, loc='upper center', ncol=3, fontsize=18,
+                       frameon=True, edgecolor='black', fancybox=False)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(OUTPUT_DIR, "kpi_percentage_comparison.pdf"))
+        plt.savefig(os.path.join(OUTPUT_DIR, "kpi_percentage_comparison.png"), dpi=600)
+        plt.show()
 
 def _plot_ttd_boxplot(results_ekf: List[Dict[str, Any]],
                       results_ukf: List[Dict[str, Any]],
