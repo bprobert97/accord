@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [5.3] - 2026-10
+
+### Summary
+Adds a script to replicate figures from an IEEE TAES paper
+
+### Added
+- Added reproduce_figure.py and a README.
+- Updated code and documentation.
+
 ## [5.2] - 2026-08
 
 ### Summary
