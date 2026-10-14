@@ -274,8 +274,8 @@ class ConsensusMechanism():
         if not self._is_dof_valid(obs_record, transaction, sat_node, dag):
             return False, new_ema_nis
 
-        if not self._is_physically_valid(obs_record, transaction, sat_node, dag):
-            return False, new_ema_nis
+        # if not self._is_physically_valid(obs_record, transaction, sat_node, dag):
+        #     return False, new_ema_nis
 
         dag.add_tx(transaction)
         if not dag.has_bft_quorum():
