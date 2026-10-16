@@ -645,7 +645,7 @@ def plot_aggregated_reputation(
         print("No data points to plot after filtering.")
         return
 
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(13, 8))
     cmap = plt.get_cmap('viridis')
 
     _plot_reputation_spread(steps, honest_arr[:, start_index:] \

@@ -24,6 +24,11 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+import numpy as np
+import matplotlib.pyplot as plt
+from src.plotting import isl_mc_comparison as isl
+from src.plotting.plotting import plot_aggregated_reputation, calculate_convergence_index
+from src.plotting import filter_mc_comparison as fc
 
 # Must be set before matplotlib is imported anywhere (also inherited by subprocesses),
 # so the script runs headless and never blocks on plt.show().
@@ -94,11 +99,9 @@ def publish(src_dir: str, src_name: str, dst_name: str) -> None:
 # --------------------------------------------------------------------------- #
 def make_figures_2_and_3(figs: set[int], keep_logging: bool,
                          start_a: int, start_b: int) -> None:
-    import matplotlib.pyplot as plt
     ensure_mc_data("ekf", 1000, keep_logging)
     ensure_mc_data("ekf", 2000, keep_logging)
 
-    from src.plotting import isl_mc_comparison as isl
     os.makedirs(isl.OUTPUT_DIR, exist_ok=True)
     res_a = isl.load_results(isl.PATH_A)
     res_b = isl.load_results(isl.PATH_B)
@@ -123,8 +126,6 @@ def make_figures_2_and_3(figs: set[int], keep_logging: bool,
 # Figure 4: Walker-Delta, 600 km ISL, single accord_demo run
 # --------------------------------------------------------------------------- #
 def make_figure_4() -> None:
-    import numpy as np
-    import matplotlib.pyplot as plt
 
     run([PYTHON, "accord_demo.py",
          "--filter-type", FIG4_FILTER,
@@ -139,8 +140,6 @@ def make_figure_4() -> None:
     with np.load(FIG4_SIM_RESULTS, allow_pickle=True) as data:
         rep_history = data["rep_history"].item()
         faulty_ids = {int(i) for i in data["faulty_ids"]}
-
-    from src.plotting.plotting import plot_aggregated_reputation, calculate_convergence_index
 
     # plot_aggregated_reputation() only calls plt.show(); neutralise it and save ourselves.
     plt.show = lambda *a, **k: None  # type: ignore[assignment]
@@ -165,11 +164,9 @@ def make_figure_4() -> None:
 # Figure 5: filter comparison (EKF vs CKF vs UKF, random topology, 1000 km)
 # --------------------------------------------------------------------------- #
 def make_figure_5(keep_logging: bool) -> None:
-    import matplotlib.pyplot as plt
     for filter_type in ("ekf", "ckf", "ukf"):
         ensure_mc_data(filter_type, 1000, keep_logging)  # EKF 1000 km is shared with Fig 2
 
-    from src.plotting import filter_mc_comparison as fc
     os.makedirs(fc.OUTPUT_DIR, exist_ok=True)
     res_ekf = fc.load_results(fc.PATH_EKF)
     res_ukf = fc.load_results(fc.PATH_UKF)

@@ -75,7 +75,7 @@ def plot_reputation_comparison(results_a: List[Dict[str, Any]],
     Returns:
         None. Saves MatPlotLib figures in OUTPUT_DIR.
     """
-    plt.figure(figsize=(12, 7))
+    plt.figure(figsize=(13, 8))
     cmap = plt.get_cmap('viridis')
 
     # Inline the color selection to save local variables
