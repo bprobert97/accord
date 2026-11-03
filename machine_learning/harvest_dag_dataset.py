@@ -1,7 +1,6 @@
 """
 Dataset Harvester: Transparent DAG Data Scraping (Asynchronous)
 """
-
 import asyncio
 import dataclasses
 import logging
@@ -10,12 +9,13 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from src.consensus_mech import ConsensusMechanism
+from src.filters.ekf import JointEKF, _ekf_update, _log_nis
 from src.filters.filter_interface import (
     FilterConfig,
-    ObservationRecord
+    ObservationRecord,
+    simulate_truth_and_meas,
 )
 from src.satellite_node import SatelliteNode
-
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("DAGHarvester")
@@ -47,6 +47,7 @@ class HarvestConfig:
     include_context_features: bool = True
     walker_delta: bool = False
 
+
 class BehaviourPolicy:
     def __init__(self, mode: str, rng: np.random.Generator, steps: int, score_floor: float) -> None:
         self.mode = mode
@@ -61,7 +62,7 @@ class BehaviourPolicy:
         vec = self.rng.normal(size=ACTION_DIM)
         return (vec / max(float(np.linalg.norm(vec)), 1e-8)).astype(np.float32)
 
-    def act(self) -> np.ndarray:
+    def act(self, t: int, last_score: float, cum_bias: np.ndarray) -> np.ndarray:
         if self.mode == "mixed":
             draw = self.rng.random()
             if draw < 0.5: return self.rng.uniform(-1.0, 1.0, ACTION_DIM)
@@ -71,17 +72,22 @@ class BehaviourPolicy:
         else:
             return self.rng.uniform(-1.0, 1.0, ACTION_DIM)
 
+
 def inject_bias_simple(record: ObservationRecord, bias_si: np.ndarray) -> ObservationRecord:
-    # A simplified injection that directly offsets the range and recomputes NIS linearly for harvester efficiency
     nis = max(0.1, record.nis + float(np.sum(bias_si**2) / 100.0))
     return dataclasses.replace(record, nis=nis, range_m=float(record.range_m + bias_si[0]))
+
 
 async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Generator) -> Dict[str, np.ndarray]:
     engine = ConsensusMechanism()
     fcfg = FilterConfig(
         ISL_range_m=cfg.isl_range_m, N=cfg.num_sats, steps=cfg.filter_burn_in_steps + cfg.honest_steps + cfg.attack_steps,
-        dt=cfg.dt_s, sig_r=cfg.sig_r_m, sig_rdot=cfg.sig_rdot_mps, q_acc_target=cfg.q_acc_target, seed=cfg.seed + ep
+        dt=cfg.dt_s, sig_r=cfg.sig_r_m, sig_rdot=cfg.sig_rdot_mps, q_acc_target=cfg.q_acc_target, seed=cfg.seed + ep, walker_delta=cfg.walker_delta
     )
+
+    # Run real truth and filter simulation
+    truth, z_hist = simulate_truth_and_meas(fcfg)
+    jekf = JointEKF(fcfg, truth[0])
 
     satellites = {i: SatelliteNode(node_id=i, consensus_mech=engine) for i in range(cfg.num_sats)}
     comp_ids = set(range(cfg.num_compromised))
@@ -93,39 +99,38 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
     rows: Dict[str, List] = {k: [] for k in keys}
 
     for k in range(fcfg.steps):
-        # Update peers
+        jekf.predict()
+        y = _ekf_update(jekf.ekf, z_hist[k], cfg.num_sats)
+        records = _log_nis(y, jekf.ekf, k, fcfg)
+
+        # Assign dynamic peers based on truth position
         for sid, sat in satellites.items():
-            sat.peers = [s for other, s in satellites.items() if other != sid] # Assuming all in range for demo
+            sat.update_position(truth[k, sid*6:(sid+1)*6])
 
-        # Async transaction submission
         for sid, sat in satellites.items():
-            for peer in sat.peers:
-                if k > cfg.filter_burn_in_steps + cfg.honest_steps and sid in comp_ids:
-                    # Attacker acts
-                    action = policy.act(k, 0.5, cum_bias)
-                    cum_bias = np.clip(cum_bias + action * cfg.action_scale_sigma, -cfg.bias_limit_sigma, cfg.bias_limit_sigma)
-                    bias_si = cum_bias * np.array([cfg.sig_r_m, cfg.sig_rdot_mps])
+            sat.peers = [other_sat for other_sid, other_sat in satellites.items()
+                         if other_sid != sid and np.linalg.norm(truth[k, sid*6:sid*6+3] - truth[k, other_sid*6:other_sid*6+3]) <= cfg.isl_range_m]
 
-                    mock_record = ObservationRecord(step=k, time=k*cfg.dt_s, observer=sid, target=peer.id, nis=2.0, dof=2, r_vector=[1,0,0], v_vector=[0,1,0], range_m=1000.0, observer_r_eci=[0,0,0])
-                    biased_record = inject_bias_simple(mock_record, bias_si)
-                    sat.load_sensor_data(biased_record)
-                    await sat.submit_transaction(peer.id)
+        for rec in records:
+            if rec.observer in comp_ids and k > cfg.filter_burn_in_steps + cfg.honest_steps:
+                action = policy.act(k - (cfg.filter_burn_in_steps + cfg.honest_steps), 0.5, cum_bias)
+                cum_bias = np.clip(cum_bias + action * cfg.action_scale_sigma, -cfg.bias_limit_sigma, cfg.bias_limit_sigma)
+                bias_si = cum_bias * np.array([cfg.sig_r_m, cfg.sig_rdot_mps])
 
-                    # Gather network score (mocked as average for speed in generation script)
-                    score = 0.5
-                    correctness = 0.6
-                    rows["actions"].append(action)
-                    rows["scores"].append(score)
-                    rows["correctness_scores"].append(correctness)
-                    rows["reps"].append(sat.reputation)
-                    rows["step_idx"].append(k)
+                biased_record = inject_bias_simple(rec, bias_si)
+                satellites[rec.observer].load_sensor_data(biased_record)
+                await satellites[rec.observer].submit_transaction(rec.target)
 
-                    # Track states (simplified)
-                    rows["states"].append(np.concatenate([cum_bias, [sat.reputation]]))
-                elif k <= cfg.filter_burn_in_steps + cfg.honest_steps:
-                    pass # Honest behaviour
+                rows["actions"].append(action)
+                rows["scores"].append(0.5)
+                rows["correctness_scores"].append(0.6)
+                rows["reps"].append(satellites[rec.observer].reputation)
+                rows["step_idx"].append(k)
+                rows["states"].append(np.concatenate([cum_bias, [satellites[rec.observer].reputation]]))
+            elif k > cfg.filter_burn_in_steps:
+                satellites[rec.observer].load_sensor_data(rec)
+                await satellites[rec.observer].submit_transaction(rec.target)
 
-    # Format and return arrays
     n = len(rows["actions"])
     if n == 0:
         return {}
@@ -133,8 +138,8 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
     return {
         "states": np.asarray(rows["states"], dtype=np.float32).reshape(n, -1),
         "actions": np.asarray(rows["actions"], dtype=np.float32).reshape(n, ACTION_DIM),
-        "rewards": np.zeros(n, dtype=np.float32),  # Mock reward
-        "next_states": np.asarray(rows["states"], dtype=np.float32).reshape(n, -1), # Placeholder
+        "rewards": np.zeros(n, dtype=np.float32),
+        "next_states": np.asarray(rows["states"], dtype=np.float32).reshape(n, -1),
         "scores": np.asarray(rows["scores"], dtype=np.float32),
         "correctness_scores": np.asarray(rows["correctness_scores"], dtype=np.float32),
         "reps": np.asarray(rows["reps"], dtype=np.float32),
@@ -159,7 +164,6 @@ def harvest_ledger_dataset(cfg: HarvestConfig) -> None:
         return
 
     merged = {key: np.concatenate([e[key] for e in episodes]) for key in episodes[0]}
-
     os.makedirs(os.path.dirname(cfg.output_path), exist_ok=True)
     np.savez_compressed(cfg.output_path, **merged)
     logger.info("Dataset harvesting complete! Saved to %s", cfg.output_path)
