@@ -65,7 +65,7 @@ class FilterConfig:
     dt: float = 60.0
     sig_r: float = 10.0
     sig_rdot: float = 0.02
-    q_acc_target: float = 1e-6
+    q_acc_target: float = 1e-5
     seed: int = 42
     walker_delta: bool = False
 

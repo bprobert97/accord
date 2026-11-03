@@ -25,4 +25,6 @@ machine_learning/*.zip
 machine_learning/*.pt
 machine_learning/*.png
 machine_learning/*.pkl
+machine_learning/figures/*
+machine_learning/*.csv
 paper_figures/
