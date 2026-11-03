@@ -5,12 +5,12 @@ Dataset Harvester: Transparent DAG Data Scraping (Asynchronous)
 import asyncio
 import dataclasses
 import logging
+import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from src.consensus_mech import ConsensusMechanism
 from src.filters.filter_interface import (
-    STATE_DIM,
     FilterConfig,
     ObservationRecord
 )
@@ -144,3 +144,25 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
 def run_episode(ep: int, cfg: HarvestConfig) -> Dict[str, np.ndarray]:
     rng = np.random.default_rng(cfg.seed + ep)
     return asyncio.run(_simulate_episode_async(ep, cfg, rng))
+
+def harvest_ledger_dataset(cfg: HarvestConfig) -> None:
+    logger.info("Generating transparent DAG dataset across %d episodes...", cfg.num_episodes)
+    episodes = []
+    for ep in range(cfg.num_episodes):
+        ep_data = run_episode(ep, cfg)
+        if ep_data:
+            episodes.append(ep_data)
+        logger.info("Completed %d/%d episodes", ep + 1, cfg.num_episodes)
+
+    if not episodes:
+        logger.error("No valid episodes harvested.")
+        return
+
+    merged = {key: np.concatenate([e[key] for e in episodes]) for key in episodes[0]}
+
+    os.makedirs(os.path.dirname(cfg.output_path), exist_ok=True)
+    np.savez_compressed(cfg.output_path, **merged)
+    logger.info("Dataset harvesting complete! Saved to %s", cfg.output_path)
+
+if __name__ == "__main__":
+    harvest_ledger_dataset(HarvestConfig())
