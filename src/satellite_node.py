@@ -138,7 +138,7 @@ class SatelliteNode():
 
         # 2. Add our own unvalidated copy to our local ledger
         self.dag.add_tx(transaction)
-        logger.info("Satellite %d added its own observation to local DAG.", self.id)
+        # logger.info("Satellite %d added its own observation to local DAG.", self.id)
 
         # 3. Await the broadcast directly so network validations happen
         # inside the current simulation time step
