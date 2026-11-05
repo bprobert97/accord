@@ -99,7 +99,7 @@ class SatelliteNode():
         """
         self.sensor_data = observation
 
-    async def submit_transaction(self, recipient_address: int) -> None:
+    async def submit_transaction(self, recipient_address: int) -> Transaction:
         """
         Builds a transaction from newly observed sensor data, commits it
         to its own local DAG, and broadcasts it to peers sequentially.
@@ -108,7 +108,13 @@ class SatelliteNode():
         - recipient_address: Cryptographic address of the target satellite node.
 
         Returns:
-        - None.
+        - The Transaction that was built and broadcast. Callers that need the
+          PoISE scores a peer assigned to it can look them up afterwards via
+          `peer.dag.local_consensus_states.get(transaction.hash)` for any peer
+          in `self.peers` at broadcast time (each peer evaluates and stores the
+          result in its own DAG; this method itself does not aggregate them).
+          Previously this returned None, so there was no way for a caller to
+          retrieve the score a transaction received at all.
         """
         if self.sensor_data is None:
             raise ValueError(f"Satellite {self.id} has no sensor data loaded.")
@@ -143,6 +149,8 @@ class SatelliteNode():
         # 3. Await the broadcast directly so network validations happen
         # inside the current simulation time step
         await self.broadcast_transaction(transaction)
+
+        return transaction
 
     async def broadcast_transaction(self, transaction: Transaction) -> None:
         """
