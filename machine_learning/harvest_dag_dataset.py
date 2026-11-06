@@ -24,6 +24,8 @@ from src.satellite_node import SatelliteNode  # use satellite_node_patched.py he
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("DAGHarvester")
 
+logging.getLogger("ACCORD").setLevel(logging.ERROR)
+
 ACTION_DIM: int = 2
 BEHAVIOUR_MODES: Tuple[str, ...] = ("mixed", "persistent", "ramp_hold", "backoff")
 
@@ -33,12 +35,12 @@ class HarvestConfig:
     num_episodes: int = 40
     output_path: str = "machine_learning/dag_harvested_dataset.npz"
     seed: int = 0
-    num_sats: int = 400
+    num_sats: int = 200
     dt_s: float = 60.0
     sig_r_m: float = 10.0
     sig_rdot_mps: float = 0.2
     q_acc_target: float = 1e-5
-    isl_range_m: float = 2000e3
+    isl_range_m: float = 3000e3
     num_compromised: int = 3
     filter_burn_in_steps: int = 30
     honest_steps: int = 60
