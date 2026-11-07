@@ -38,16 +38,27 @@ async def evaluate_live_cql(model_path: str = "machine_learning/cql_offline.pt",
             for sid, sat in satellites.items():
                 sat.peers = [s for other, s in satellites.items() if other != sid]
 
+            # BUG FIX: the action/cum_bias update used to run once per (sid, peer) pair,
+            # so a satellite with N peers took N actions within a single simulated step —
+            # at realistic connectivity (tens of peers) that blows cum_bias through
+            # bias_limit_sigma almost instantly (see: reputation underflowing to ~0 by
+            # the second attack step in the previous run). Compute one action per
+            # (satellite, step) instead, and reuse it across all of that satellite's
+            # peer broadcasts this step — matching the harvester's fixed behaviour.
+            step_action_cache: dict = {}
+
             for sid, sat in satellites.items():
                 for peer in sat.peers:
                     if k > cfg.filter_burn_in_steps + cfg.honest_steps and sid in comp_ids:
-                        state = np.concatenate([cum_bias, [sat.reputation]]).astype(np.float32)
-                        state_tensor = torch.as_tensor(state).unsqueeze(0)
-
-                        with torch.no_grad():
-                            action = actor(state_tensor).squeeze(0).numpy()
-
-                        cum_bias = np.clip(cum_bias + action * cfg.action_scale_sigma, -cfg.bias_limit_sigma, cfg.bias_limit_sigma)
+                        if sid not in step_action_cache:
+                            state = np.concatenate([cum_bias, [sat.reputation]]).astype(np.float32)
+                            state_tensor = torch.as_tensor(state).unsqueeze(0)
+                            with torch.no_grad():
+                                action = actor(state_tensor).squeeze(0).numpy()
+                            cum_bias = np.clip(cum_bias + action * cfg.action_scale_sigma, -cfg.bias_limit_sigma, cfg.bias_limit_sigma)
+                            step_action_cache[sid] = action
+                        else:
+                            action = step_action_cache[sid]
                         bias_si = cum_bias * np.array([cfg.sig_r_m, cfg.sig_rdot_mps])
 
                         mock_record = ObservationRecord(step=k, time=k * cfg.dt_s, observer=sid, target=peer.id,

@@ -73,7 +73,7 @@ class CQLConfig:
 
     # --- constrained-RL additions ---
     use_cost_critic: bool = True
-    beta_lr: float = 1e-3
+    beta_lr: float = 1e-4
     beta_max: float = 1e3
     cost_budget: float = 0.0        # target: expected cost <= this (0 == constraint satisfied)
 

@@ -151,6 +151,20 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
 
     last_score = 0.5
     last_correctness = 0.5
+
+    # BUG FIX: _process_cluster_step returns one ObservationRecord per
+    # (observer, target) pair tracked within a cluster that step — so a compromised
+    # satellite with multiple targets in its cluster previously took one action and
+    # one cum_bias update PER TARGET, not once per timestep. At low connectivity this
+    # rarely mattered (few targets/step), but at realistic connectivity it lets
+    # cum_bias blow through bias_limit_sigma within the first 1-2 simulated steps of
+    # the attack phase every single episode. This is almost certainly the dominant
+    # cause of the climbing violation fraction across every harvest so far, not a
+    # genuine property of the environment. Fix: select one action per (satellite,
+    # step) and reuse the resulting bias for every record that satellite generates
+    # in that same step.
+    step_action_cache: Dict[int, np.ndarray] = {}
+
     for k in range(fcfg.steps):
         records = []
         for cluster_ids, cluster_filter in zip(clusters, cluster_filters):
@@ -166,10 +180,16 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
                          if other_sid != sid and np.linalg.norm(truth[k, sid * 6:sid * 6 + 3] - truth[k, other_sid * 6:other_sid * 6 + 3]) <= cfg.isl_range_m]
             peer_counts.append(len(sat.peers))
 
+        step_action_cache.clear()  # one action per satellite is valid only within this step
+
         for rec in records:
             if rec.observer in comp_ids and k > cfg.filter_burn_in_steps + cfg.honest_steps:
-                action = policy.act(k - (cfg.filter_burn_in_steps + cfg.honest_steps), last_score, cum_bias)
-                cum_bias = np.clip(cum_bias + action * cfg.action_scale_sigma, -cfg.bias_limit_sigma, cfg.bias_limit_sigma)
+                if rec.observer not in step_action_cache:
+                    action = policy.act(k - (cfg.filter_burn_in_steps + cfg.honest_steps), last_score, cum_bias)
+                    cum_bias = np.clip(cum_bias + action * cfg.action_scale_sigma, -cfg.bias_limit_sigma, cfg.bias_limit_sigma)
+                    step_action_cache[rec.observer] = action
+                else:
+                    action = step_action_cache[rec.observer]
                 bias_si = cum_bias * np.array([cfg.sig_r_m, cfg.sig_rdot_mps])
 
                 biased_record = inject_bias_simple(rec, bias_si)
