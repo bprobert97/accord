@@ -221,13 +221,29 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
                 rows["reps"].append(reputation)
                 rows["step_idx"].append(k)
                 rows["states"].append(np.concatenate([cum_bias, [reputation]]))
-                rows["terminals"].append(not constraint_ok)
+                # BUG FIX: previously `not constraint_ok` — i.e. every violating
+                # transition was marked terminal. That zeroes the Bellman bootstrap
+                # (`nd` in _update_cost_critic/_update_critic) on exactly the
+                # transitions where the *future* cost of lingering in violation is
+                # the whole point — the critic could only ever see one step's
+                # isolated cost, never "and then it stayed in violation for 100 more
+                # steps." That's almost certainly why val_qc_policy has been stuck in
+                # the same ~0.37-0.39 band across every run so far regardless of what
+                # else changed. `terminals` should mark genuine episode boundaries
+                # only; it's set True on the final row of the episode after the loop
+                # below, not here.
+                rows["terminals"].append(False)
                 rows["score_unavailable"].append(unavailable)
             elif k > cfg.filter_burn_in_steps:
                 satellites[rec.observer].load_sensor_data(rec)
                 await satellites[rec.observer].submit_transaction(rec.target)
 
     n = len(rows["actions"])
+    if n > 0:
+        # Mark the true end of this episode's horizon — this is the only transition
+        # where it's actually correct to tell the critic "no future to bootstrap from."
+        rows["terminals"][-1] = True
+
     final_ledger_sizes = [len(sat.dag.ledger) - 2 for sat in satellites.values()]  # exclude genesis
 
     diagnostics = {
@@ -282,7 +298,10 @@ def harvest_ledger_dataset(cfg: HarvestConfig) -> None:
 
     merged = {key: np.concatenate([e[key] for e in episodes]) for key in episodes[0]}
 
-    frac_violating = float(merged["terminals"].mean())
+    # `terminals` no longer encodes violation (see bug-fix note above) — violation
+    # fraction is now read from the reward/cost signal directly instead.
+    frac_violating = float((merged["rewards"] < 0).mean())
+    frac_episode_end = float(merged["terminals"].mean())  # sanity check: should be ~1/episode_length
     frac_unscored = float(merged["score_unavailable"].mean())
     frac_identical = float(np.isclose(merged["scores"], merged["correctness_scores"]).mean())
     modes, counts = np.unique(merged["behaviour_mode"], return_counts=True)
@@ -296,6 +315,9 @@ def harvest_ledger_dataset(cfg: HarvestConfig) -> None:
     logger.info("Behaviour-mode mix across episodes: %s", dict(zip(modes.tolist(), counts.tolist())))
     logger.info("Fraction of transitions violating the constraint (rep<=%.2f or score<=%.2f): %.3f",
                 cfg.reputation_floor, cfg.score_floor, frac_violating)
+    logger.info("Fraction of rows flagged as true episode-end terminals: %.4f "
+                "(sanity check — should be roughly 1/(attack_steps) per episode, not large)",
+                frac_episode_end)
     logger.info("Fraction of rows with no BFT quorum yet (score carried forward): %.3f", frac_unscored)
     logger.info("Fraction of rows where consensus_score == correctness_score: %.3f", frac_identical)
     logger.info("[CONNECTIVITY] mean peers/sat/step: %.2f (min %.0f, max %.0f) at isl_range_m=%.0f",
