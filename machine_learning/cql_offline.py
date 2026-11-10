@@ -52,12 +52,12 @@ class CQLConfig:
     dataset_path: str = "machine_learning/dag_harvested_dataset.npz"
     output_path: str = "machine_learning/cql_offline.pt"
     hidden_dim: int = 256
-    gamma: float = 0.99
+    gamma: float = 0.95
     tau: float = 0.005
     actor_lr: float = 1e-4
     critic_lr: float = 3e-4
     batch_size: int = 256
-    total_steps: int = 30_000
+    total_steps: int = 50_000
     policy_delay: int = 2
     target_noise: float = 0.2
     noise_clip: float = 0.5
@@ -67,7 +67,7 @@ class CQLConfig:
     num_cql_samples: int = 10
     cql_temperature: float = 1.0
     cql_policy_noise: float = 0.3
-    bc_weight: float = 0.1
+    bc_weight: float = 0.03
     alpha_lr: float = 1e-3          # separate, larger LR for the dual variable than the critic
     alpha_max: float = 1e3
 
