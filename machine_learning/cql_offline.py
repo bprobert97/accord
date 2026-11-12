@@ -25,7 +25,7 @@ Batch = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tens
 
 class MetricsLogger:
     FIELDNAMES = [
-        "step", "critic_loss", "td_loss", "cost_td_loss", "cql_gap", "alpha", "beta",
+        "step", "critic_loss", "td_loss", "cost_td_loss", "cql_gap", "cost_cql_gap", "alpha", "beta",
         "q_data", "qc_data", "actor_loss",
         "val_step", "val_td_error", "val_q_policy", "val_q_data", "val_q_gap",
         "val_action_mse", "val_saturation", "val_qc_policy",
@@ -57,7 +57,7 @@ class CQLConfig:
     actor_lr: float = 1e-4
     critic_lr: float = 3e-4
     batch_size: int = 256
-    total_steps: int = 50_000
+    total_steps: int = 30_000
     policy_delay: int = 2
     target_noise: float = 0.2
     noise_clip: float = 0.5
@@ -67,8 +67,9 @@ class CQLConfig:
     num_cql_samples: int = 10
     cql_temperature: float = 1.0
     cql_policy_noise: float = 0.3
-    bc_weight: float = 0.03
+    bc_weight: float = 0.1
     alpha_lr: float = 1e-3          # separate, larger LR for the dual variable than the critic
+    alpha_min: float = 0.1          # floor: CQL conservatism must never fully switch off
     alpha_max: float = 1e3
 
     # --- constrained-RL additions ---
@@ -76,6 +77,10 @@ class CQLConfig:
     beta_lr: float = 1e-4
     beta_max: float = 1e3
     cost_budget: float = 0.0        # target: expected cost <= this (0 == constraint satisfied)
+    cost_cql_alpha: float = 0.0     # OFF by default: see module docstring — this term was unbounded
+                                     # and caused qc_data to explode (58 -> 7215 over 30k steps) in
+                                     # the run that regressed. Re-enable only with the clamp below in
+                                     # place, and start much smaller than 1.0 (e.g. 0.05-0.1) if you do.
 
     reward_scale: Optional[float] = None
     val_fraction: float = 0.1
@@ -286,6 +291,54 @@ class CQLTrainer:
         lse2 = temp * torch.logsumexp(cat2 / temp, dim=1)
         return (lse1 - q1_data.squeeze(-1)).mean(), (lse2 - q2_data.squeeze(-1)).mean()
 
+    def _cost_cql_penalty(self, s, qc1_data, qc2_data):
+        """Pessimism penalty for the cost critic, mirroring `_cql_gaps`.
+
+        The reward critic's CQL penalty pushes Q *down* on unfamiliar (OOD)
+        actions, so the actor can't exploit overestimated value where the data
+        doesn't support it. A cost critic needs the opposite bias to be
+        pessimistic the same way: cost should be pushed *up* on unfamiliar
+        actions, so an action is never implicitly assumed safer than the data
+        just because the critic hasn't seen much of it. Without this, the
+        cost critic is the one place in the whole setup with no protection
+        against exactly the kind of extrapolation error CQL exists to guard
+        against — which is the most likely explanation for the 50k-step run
+        finding and exploiting a "free," underestimated-cost region of action
+        space once the reward-side guardrails (bc_weight, alpha) loosened.
+        """
+        n = self.cfg.num_cql_samples
+        batch = s.size(0)
+        s_rep = s.unsqueeze(1).expand(batch, n, s.size(1)).reshape(batch * n, -1)
+
+        with torch.no_grad():
+            rand_a = torch.rand(batch * n, self.action_dim, device=s.device) * 2.0 - 1.0
+            cur_a, _ = self._sample_policy_actions(s_rep)
+
+        def head_values(actions):
+            q1, q2 = self.cost_critic(s_rep, actions)
+            # FIX: clamp OOD cost predictions to the same [0, target_q_clip] bound used
+            # for the TD target. Without this, minimizing the gap below can drive these
+            # predictions up with no ceiling (nothing else anchors them), which is exactly
+            # what blew qc_data up from 58 to 7215 over 30k steps in the prior run. This
+            # also stops the inflation from leaking into qc_pi via the actor's own
+            # actions (cur_a), since the actor reads the same clamped network.
+            q1 = q1.clamp(0.0, self.target_q_clip)
+            q2 = q2.clamp(0.0, self.target_q_clip)
+            return q1.view(batch, n), q2.view(batch, n)
+
+        q1_r, q2_r = head_values(rand_a)
+        q1_c, q2_c = head_values(cur_a)
+        ood1 = torch.cat([q1_r, q1_c], dim=1).mean(dim=1)
+        ood2 = torch.cat([q2_r, q2_c], dim=1).mean(dim=1)
+
+        # Penalize OOD cost estimates for being LOWER than the (detached) data cost —
+        # minimizing this pushes ood1/ood2 up, never pulls the data fit down. Now bounded
+        # above by target_q_clip via the clamp in head_values(), so this can no longer
+        # run away unboundedly even with cost_cql_alpha > 0.
+        gap1 = (qc1_data.detach().squeeze(-1) - ood1).mean()
+        gap2 = (qc2_data.detach().squeeze(-1) - ood2).mean()
+        return gap1, gap2
+
     def _update_critic(self, s, a, r, ns, nd):
         with torch.no_grad():
             noise = (torch.randn_like(a) * self.cfg.target_noise).clamp(-self.cfg.noise_clip, self.cfg.noise_clip)
@@ -294,7 +347,7 @@ class CQLTrainer:
             target_q = r + nd * self.cfg.gamma * torch.min(tq1, tq2)
             # Divergence guard: without this the logged run blew up to q_data=-75 /
             # val_td_error=636. Clip to a horizon-consistent bound instead of letting a
-            # single bad sample's bootstrap compound across 30k steps.
+            # single bad sample's bootstrap compound across many steps.
             target_q = target_q.clamp(-self.target_q_clip, self.target_q_clip)
 
         q1, q2 = self.critic(s, a)
@@ -305,7 +358,7 @@ class CQLTrainer:
             alpha = torch.tensor(self.cfg.cql_alpha, device=s.device)
             penalty = alpha * (gap1 + gap2)
         else:
-            alpha_for_penalty = self.log_alpha.exp().clamp(0.0, self.cfg.alpha_max).detach()
+            alpha_for_penalty = self.log_alpha.exp().clamp(self.cfg.alpha_min, self.cfg.alpha_max).detach()
             penalty = alpha_for_penalty * ((gap1 - self.cfg.cql_target_gap) + (gap2 - self.cfg.cql_target_gap))
 
         critic_loss = td_loss + penalty
@@ -320,13 +373,17 @@ class CQLTrainer:
             # fix for the frozen-alpha bug: don't reuse a tensor produced earlier in the
             # function for an unrelated (detached) use, compute exactly what you need to
             # backprop through, right before you backprop through it.
-            alpha = self.log_alpha.exp().clamp(0.0, self.cfg.alpha_max)
+            alpha = self.log_alpha.exp().clamp(self.cfg.alpha_min, self.cfg.alpha_max)
             gap_term = (gap1.detach() - self.cfg.cql_target_gap) + (gap2.detach() - self.cfg.cql_target_gap)
             alpha_loss = -alpha * gap_term
             self.alpha_opt.zero_grad(set_to_none=True)
             alpha_loss.backward()
             self.alpha_opt.step()
-            alpha_value = self.log_alpha.exp().clamp(0.0, self.cfg.alpha_max).detach()
+            # NOTE: log_alpha itself isn't hard-clamped (Adam needs room to move it in
+            # either direction); alpha_min/alpha_max are enforced every time alpha is
+            # read out via this same .clamp(...), which is all that matters since alpha
+            # the *value* is never used unclamped anywhere else.
+            alpha_value = self.log_alpha.exp().clamp(self.cfg.alpha_min, self.cfg.alpha_max).detach()
 
         return {
             "critic_loss": critic_loss.detach(),
@@ -348,12 +405,25 @@ class CQLTrainer:
         qc1, qc2 = self.cost_critic(s, a)
         cost_td_loss = F.smooth_l1_loss(qc1, target_qc) + F.smooth_l1_loss(qc2, target_qc)
 
+        cost_cql_gap = torch.tensor(0.0, device=s.device)
+        if self.cfg.cost_cql_alpha > 0.0:
+            gap1, gap2 = self._cost_cql_penalty(s, qc1, qc2)
+            cost_cql_gap = 0.5 * (gap1 + gap2)
+            cost_penalty = self.cfg.cost_cql_alpha * (gap1 + gap2)
+            cost_critic_loss = cost_td_loss + cost_penalty
+        else:
+            cost_critic_loss = cost_td_loss
+
         self.cost_critic_opt.zero_grad(set_to_none=True)
-        cost_td_loss.backward()
+        cost_critic_loss.backward()
         nn.utils.clip_grad_norm_(self.cost_critic.parameters(), max_norm=1.0)
         self.cost_critic_opt.step()
 
-        return {"cost_td_loss": cost_td_loss.detach(), "qc_data": qc1.mean().detach()}
+        return {
+            "cost_td_loss": cost_td_loss.detach(),
+            "cost_cql_gap": cost_cql_gap.detach() if torch.is_tensor(cost_cql_gap) else cost_cql_gap,
+            "qc_data": qc1.mean().detach(),
+        }
 
     def _update_actor(self, s, a):
         self.critic.requires_grad_(False)
@@ -431,7 +501,9 @@ class CQLTrainer:
         return out
 
     def train(self) -> None:
-        logger.info("Training constrained offline CQL on %s for %d steps", self.device, self.cfg.total_steps)
+        logger.info("Training constrained offline CQL on %s for %d steps (alpha_min=%.3f, bc_weight=%.3f, "
+                    "cost_cql_alpha=%.3f)", self.device, self.cfg.total_steps, self.cfg.alpha_min,
+                    self.cfg.bc_weight, self.cfg.cost_cql_alpha)
         self.metrics_logger = MetricsLogger("train_metrics.csv")
 
         for step in range(1, self.cfg.total_steps + 1):
@@ -484,7 +556,11 @@ def parse_args() -> CQLConfig:
     parser.add_argument("--steps", type=int, default=CQLConfig.total_steps)
     parser.add_argument("--alpha", type=float, default=CQLConfig.cql_alpha)
     parser.add_argument("--target-gap", type=float, default=2.0, help="Enable Lagrangian alpha.")
-    parser.add_argument("--bc-weight", type=float, default=0.1)
+    parser.add_argument("--alpha-min", type=float, default=CQLConfig.alpha_min,
+                         help="Floor on the CQL penalty weight so it never fully switches off.")
+    parser.add_argument("--bc-weight", type=float, default=CQLConfig.bc_weight)
+    parser.add_argument("--cost-cql-alpha", type=float, default=CQLConfig.cost_cql_alpha,
+                         help="Pessimism weight for the cost critic's own OOD penalty; 0 disables it.")
     parser.add_argument("--no-cost-critic", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -493,7 +569,9 @@ def parse_args() -> CQLConfig:
         total_steps=args.steps,
         cql_alpha=args.alpha,
         cql_target_gap=args.target_gap,
+        alpha_min=args.alpha_min,
         bc_weight=args.bc_weight,
+        cost_cql_alpha=args.cost_cql_alpha,
         use_cost_critic=not args.no_cost_critic,
         seed=args.seed,
     )
