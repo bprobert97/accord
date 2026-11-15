@@ -4,6 +4,7 @@ Live Evaluation of the Offline CQL Model
 
 import asyncio
 import csv
+import logging
 import numpy as np
 import torch
 
@@ -19,6 +20,14 @@ from machine_learning.cql_offline import load_actor
 from machine_learning.harvest_dag_dataset import HarvestConfig, inject_bias_simple, _lookup_poise_scores
 
 ACTION_DIM = 2
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("LiveEval")
+# Same reasoning as the harvester: the "ACCORD" logger fires a line per PoISE
+# evaluation, which is fine at small scale but can flood/crash a terminal at
+# 200 sats x hundreds of steps. Keep it quiet; this script's own `logger`
+# below (passed into _create_cluster_filters) stays untouched.
+logging.getLogger("ACCORD").setLevel(logging.ERROR)
 
 
 async def evaluate_live_cql(model_path: str = "machine_learning/cql_offline.pt",
@@ -40,7 +49,7 @@ async def evaluate_live_cql(model_path: str = "machine_learning/cql_offline.pt",
     truth, z_hist = simulate_truth_and_meas(fcfg, fcfg.walker_delta)
 
     clusters = _cluster_by_orbital_physics(truth[0], cfg.num_sats, CLUSTER_SIZE)
-    cluster_filters = _create_cluster_filters(FilterType.EKF, fcfg, truth, clusters, None)
+    cluster_filters = _create_cluster_filters(FilterType.EKF, fcfg, truth, clusters, logger)
     z_map = _create_z_map(cfg.num_sats)
     x_hist = np.zeros((fcfg.steps, cfg.num_sats * 6))
 
