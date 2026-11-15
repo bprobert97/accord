@@ -220,7 +220,10 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
                 rows["correctness_scores"].append(correctness_score)
                 rows["reps"].append(reputation)
                 rows["step_idx"].append(k)
-                rows["states"].append(np.concatenate([cum_bias, [reputation]]))
+                # FIX: include consensus_score as a 4th state dimension (see module
+                # docstring) — without it the policy cannot perceive that score is
+                # approaching its floor and has no way to learn a corrective action.
+                rows["states"].append(np.concatenate([cum_bias, [reputation, consensus_score]]))
                 # BUG FIX: previously `not constraint_ok` — i.e. every violating
                 # transition was marked terminal. That zeroes the Bellman bootstrap
                 # (`nd` in _update_cost_critic/_update_critic) on exactly the

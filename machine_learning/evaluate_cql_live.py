@@ -5,6 +5,7 @@ Live Evaluation of the Offline CQL Model
 import asyncio
 import csv
 import logging
+from typing import Dict
 import numpy as np
 import torch
 
@@ -59,6 +60,13 @@ async def evaluate_live_cql(model_path: str = "machine_learning/cql_offline.pt",
 
     reputations, scores, drifts = [], [], []
     last_score, last_correctness = 0.5, 0.5
+    # Per-satellite, not a single shared scalar: the old version of this script used one
+    # shared `last_score` across ALL compromised satellites, so with num_compromised > 1
+    # one satellite's most recent score could leak into another satellite's state/decision.
+    # `last_score` above is still used for the score-unavailable fallback (matches the
+    # harvester's convention there); `last_score_by_sat` is specifically what each
+    # satellite conditions its own next action on.
+    last_score_by_sat: Dict[int, float] = {}
 
     print("Evaluating CQL Model in live consensus network "
           f"(num_sats={cfg.num_sats}, isl_range_m={cfg.isl_range_m:.0f}, "
@@ -95,7 +103,15 @@ async def evaluate_live_cql(model_path: str = "machine_learning/cql_offline.pt",
             for rec in records:
                 if rec.observer in comp_ids and k > cfg.filter_burn_in_steps + cfg.honest_steps:
                     if rec.observer not in step_action_cache:
-                        state = np.concatenate([cum_bias, [float(satellites[rec.observer].reputation)]]).astype(np.float32)
+                        # 4-dim state, matching harvest_dag_dataset_v2.py: [cum_bias_x,
+                        # cum_bias_y, reputation, consensus_score]. The score used here is
+                        # this satellite's own most recently resolved score (defaulting to
+                        # 0.5, same as the harvester's initial last_score), not a shared
+                        # cross-satellite value.
+                        prior_score = last_score_by_sat.get(rec.observer, 0.5)
+                        state = np.concatenate([
+                            cum_bias, [float(satellites[rec.observer].reputation), prior_score]
+                        ]).astype(np.float32)
                         state_tensor = torch.as_tensor(state).unsqueeze(0)
                         with torch.no_grad():
                             action = actor(state_tensor).squeeze(0).numpy()
@@ -118,6 +134,10 @@ async def evaluate_live_cql(model_path: str = "machine_learning/cql_offline.pt",
                     if is_unavailable:
                         consensus_score, correctness_score = last_score, last_correctness
                     last_score, last_correctness = consensus_score, correctness_score
+                    # Carry this satellite's own resolved score forward so its NEXT
+                    # decision conditions on it — matching the harvester's convention
+                    # (post-action score becomes the input to the next action).
+                    last_score_by_sat[rec.observer] = consensus_score
                     drift = float(np.linalg.norm(cum_bias))
 
                     reputations.append(reputation)
