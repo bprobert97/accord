@@ -117,6 +117,8 @@ async def evaluate_live_cql(  # pylint: disable=too-many-locals,too-many-stateme
 
         step_action_cache: Dict[int, np.ndarray] = {}
 
+        # Replay the harvester's simulation structure step by step, substituting the
+        # trained policy for the scripted attacker so the two environments match.
         for k in range(fcfg.steps):
             records = []
             for cluster_ids, cluster_filter in zip(clusters, cluster_filters):
@@ -161,6 +163,8 @@ async def evaluate_live_cql(  # pylint: disable=too-many-locals,too-many-stateme
                         step_action_cache[rec.observer] = action
                     else:
                         action = step_action_cache[rec.observer]
+                    # Convert the bias from units of the noise standard deviation into the
+                    # physical range and range-rate units the observation record expects.
                     bias_si = cum_bias * np.array([cfg.sig_r_m, cfg.sig_rdot_mps])
 
                     biased_record = inject_bias_simple(rec, bias_si)
@@ -247,6 +251,8 @@ def _summarise(
         f"final={drifts[-1]:.3f}"
     )
 
+    # The policy passes only if it stays above both floors on more than ninety per
+    # cent of attack transactions; anything less is reported as a failure.
     verdict = "PASS" if (frac_rep_ok > 0.9 and frac_score_ok > 0.9) else "FAIL"
     print(f"\nConstraint verdict: {verdict} (threshold: >90% of steps above both floors)")
 

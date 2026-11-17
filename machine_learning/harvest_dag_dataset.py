@@ -164,6 +164,8 @@ class BehaviourPolicy:  # pylint: disable=too-few-public-methods
         Returns:
             An action-dimensional increment to the cumulative bias.
         """
+        # Mixed mode alternates between large exploratory steps, small steps, and
+        # axis-masked steps, so the dataset covers a broad spread of attack behaviour.
         if self.mode == "mixed":
             draw = self.rng.random()
             if draw < 0.5:
@@ -173,14 +175,19 @@ class BehaviourPolicy:  # pylint: disable=too-few-public-methods
             mask = self.rng.choice([0.0, 1.0], ACTION_DIM)
             return self.rng.uniform(-1.0, 1.0, ACTION_DIM) * mask
 
+        # Persistent mode pushes steadily in one fixed direction with small jitter.
         if self.mode == "persistent":
             jitter = self.rng.normal(scale=0.05, size=ACTION_DIM).astype(np.float32)
             return np.clip(self._direction * self._magnitude + jitter, -1.0, 1.0)
 
+        # Ramp-hold mode raises the step size linearly over the first third of the
+        # attack and then holds it, modelling a slow, deliberate build-up of bias.
         if self.mode == "ramp_hold":
             ramp_frac = min(1.0, (t + 1) / max(1, self.steps // 3))
             return (self._direction * self._ramp_target * ramp_frac).astype(np.float32)
 
+        # Back-off mode retreats along the current bias whenever the score falls near
+        # its floor, and otherwise explores randomly; a crude reactive evader.
         if self.mode == "backoff":
             if last_score < self.retreat_threshold:
                 return (
@@ -292,6 +299,8 @@ async def _simulate_episode_async(
     # record.
     step_action_cache: Dict[int, np.ndarray] = {}
 
+    # Advance the simulation one step at a time: process each cluster's observations,
+    # move the satellites, rebuild the peer graph, then act on every observation.
     for k in range(fcfg.steps):
         records = []
         for cluster_ids, cluster_filter in zip(clusters, cluster_filters):
@@ -302,6 +311,8 @@ async def _simulate_episode_async(
         for sid, sat in satellites.items():
             sat.update_position(truth[k, sid * 6:(sid + 1) * 6])
 
+        # Peers are the satellites currently within link range; the ledger quorum can
+        # only form among these, so connectivity directly limits what gets scored.
         for sid, sat in satellites.items():
             sat.peers = [
                 other_sat for other_sid, other_sat in satellites.items()
@@ -314,6 +325,8 @@ async def _simulate_episode_async(
 
         step_action_cache.clear()
 
+        # Each record is one (observer, target) observation. During the attack phase a
+        # compromised observer injects bias; every other observer reports honestly.
         for rec in records:
             if rec.observer in comp_ids and k > cfg.filter_burn_in_steps + cfg.honest_steps:
                 if rec.observer not in step_action_cache:
@@ -350,6 +363,8 @@ async def _simulate_episode_async(
                 score_ok = consensus_score > cfg.score_floor
                 constraint_ok = reputation_ok and score_ok
 
+                # Cost measures how far each trust factor sits below its floor (zero when
+                # compliant); reward pays out the achieved drift only while both hold.
                 drift = float(np.linalg.norm(cum_bias))
                 cost = (
                     max(0.0, cfg.reputation_floor - reputation)
@@ -455,6 +470,7 @@ def harvest_ledger_dataset(cfg: HarvestConfig) -> None:  # pylint: disable=too-m
         logger.error("No valid episodes harvested.")
         return
 
+    # Concatenate every episode's transitions into the single training archive.
     merged = {key: np.concatenate([e[key] for e in episodes]) for key in episodes[0]}
 
     # The violation fraction is read from the reward sign; the terminal flag now
@@ -497,6 +513,8 @@ def harvest_ledger_dataset(cfg: HarvestConfig) -> None:  # pylint: disable=too-m
         mean_ledger, min_ledger,
     )
 
+    # Connectivity sanity checks: a starved peer graph, rather than a logic fault, is
+    # the usual reason transactions never reach quorum and scores are carried forward.
     if mean_peers < 2.0:
         logger.warning(
             "Mean peer count per satellite per step is %.2f at isl_range_m=%.0f; this "

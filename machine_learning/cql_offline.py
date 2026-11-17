@@ -367,9 +367,14 @@ class Transitions:
             idx = torch.randint(0, len(self), (batch_size,), device=self.states.device)
             return self._gather(idx)
 
+        # Separate the highest-drift bins (sampled at their natural rate) from the rest
+        # (equalised). Boosting the saturated-drift bins once caused the policy to drift
+        # straight to the clip limit, so those bins are deliberately left un-boosted.
         capped = set(range(self.num_drift_bins - self.num_capped_top_bins, self.num_drift_bins))
         boosted_bins = [b for b in range(self.num_drift_bins) if b not in capped]
 
+        # Reserve a share of the batch for the capped bins equal to their real share of
+        # the dataset, so saturated-drift transitions are neither inflated nor erased.
         capped_total_rows = sum(len(self._bin_row_cache.get(b, [])) for b in capped)
         capped_budget = round(batch_size * capped_total_rows / max(1, len(self))) if capped else 0
         idx_parts = []
@@ -383,6 +388,8 @@ class Transitions:
                     bin_rows[torch.randint(0, len(bin_rows), (share,), device=self.states.device)]
                 )
 
+        # Fill the remainder of the batch with an equal number drawn from each of the
+        # other bins, which lifts the sparsely populated mid-drift bins up to parity.
         remaining = batch_size - sum(len(part) for part in idx_parts)
         if boosted_bins and remaining > 0:
             per_bin = max(1, remaining // len(boosted_bins))
@@ -398,6 +405,7 @@ class Transitions:
             torch.cat(idx_parts)[:batch_size] if idx_parts
             else torch.randint(0, len(self), (batch_size,), device=self.states.device)
         )
+        # Rounding can leave the batch a few rows short; top it up with a uniform draw.
         if len(idx) < batch_size:
             extra = torch.randint(0, len(self), (batch_size - len(idx),), device=self.states.device)
             idx = torch.cat([idx, extra])
@@ -426,6 +434,8 @@ def bin_by_drift_magnitude(states: np.ndarray, num_bins: int = 8) -> np.ndarray:
     Returns:
         A per-state integer bin index.
     """
+    # The first two state dimensions are the components of the cumulative injected
+    # bias, so their norm is the injected-drift magnitude the bins are built on.
     mag = np.linalg.norm(states[:, :2], axis=1)
     max_mag = max(float(mag.max()), 1e-6)
     edges = np.linspace(0.0, max_mag, num_bins + 1)
@@ -519,6 +529,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
                 np.arange(len(data["episode_lengths"])), data["episode_lengths"]
             )
 
+        # Hold out whole episodes rather than individual transitions, so no validation
+        # transition has its own next-state sitting in the training split.
         unique_eps = np.unique(episode_ids)
         n_val = int(round(self.cfg.val_fraction * len(unique_eps))) if len(unique_eps) > 1 else 0
         rng = np.random.default_rng(self.cfg.seed)
@@ -538,8 +550,12 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
                 train_mask[valid_idx] = True
                 train_mask[keep] = True
 
+        # Normalisation statistics come from the training split alone, to avoid leaking
+        # the validation distribution into the networks' input scaling.
         state_mean = states[train_mask].mean(axis=0)
         state_std = np.maximum(states[train_mask].std(axis=0), 1e-3)
+        # Rescale rewards to roughly unit variance so the value targets stay in a
+        # predictable range whatever the raw drift magnitudes happen to be.
         reward_scale = self.cfg.reward_scale or 1.0 / max(float(rewards[train_mask].std()), 1e-6)
 
         def to_tensor(arr: np.ndarray) -> torch.Tensor:
@@ -621,10 +637,15 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
         n = self.cfg.num_cql_samples
         batch = s.size(0)
         temp = self.cfg.cql_temperature
+        # Repeat each state n times so n candidate actions can be scored per state in a
+        # single forward pass.
         s_rep = s.unsqueeze(1).expand(batch, n, s.size(1)).reshape(batch * n, -1)
         ns_rep = ns.unsqueeze(1).expand(batch, n, ns.size(1)).reshape(batch * n, -1)
 
         with torch.no_grad():
+            # Three action sources feed the conservative term: uniform random actions and
+            # the policy's actions at the current and next states. Each carries its own
+            # log-probability so the later log-sum-exp can correct for how it was drawn.
             rand_a = torch.rand(batch * n, self.action_dim, device=s.device) * 2.0 - 1.0
             log_p_rand = -self.action_dim * math.log(2.0)
             cur_a, log_p_cur = self._sample_policy_actions(s_rep)
@@ -639,6 +660,9 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
         q1_n, q2_n = head_values(nxt_a)
         lp_c, lp_n = log_p_cur.view(batch, n), log_p_nxt.view(batch, n)
 
+        # log-sum-exp over the candidate actions approximates the soft-maximum value;
+        # subtracting the dataset action's value gives the gap the penalty minimises,
+        # which pushes value down on actions the dataset does not support.
         cat1 = torch.cat([q1_r - log_p_rand, q1_c - lp_c, q1_n - lp_n], dim=1)
         cat2 = torch.cat([q2_r - log_p_rand, q2_c - lp_c, q2_n - lp_n], dim=1)
         lse1 = temp * torch.logsumexp(cat1 / temp, dim=1)
@@ -674,6 +698,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
 
         def head_values(actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
             q1, q2 = self.cost_critic(s_rep, actions)
+            # Clamp to the same bound as the cost target so minimising the gap below
+            # cannot inflate the out-of-distribution cost estimate without limit.
             q1 = q1.clamp(0.0, self.target_q_clip)
             q2 = q2.clamp(0.0, self.target_q_clip)
             return q1.view(batch, n), q2.view(batch, n)
@@ -683,6 +709,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
         ood1 = torch.cat([q1_r, q1_c], dim=1).mean(dim=1)
         ood2 = torch.cat([q2_r, q2_c], dim=1).mean(dim=1)
 
+        # A positive gap means the unfamiliar-action cost sits below the data cost;
+        # minimising it raises the cost the critic assigns to unfamiliar actions.
         gap1 = (qc1_data.detach().squeeze(-1) - ood1).mean()
         gap2 = (qc2_data.detach().squeeze(-1) - ood2).mean()
         return gap1, gap2
@@ -704,9 +732,13 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
             A dictionary of reward-critic metrics.
         """
         with torch.no_grad():
+            # Target-policy smoothing: perturb the target action so the critic cannot
+            # latch onto a sharp, exploitable peak in the value surface.
             noise = (torch.randn_like(a) * self.cfg.target_noise).clamp(
                 -self.cfg.noise_clip, self.cfg.noise_clip
             )
+            # Clipped double-Q target: the smaller of the twin target heads curbs the
+            # value overestimation that bootstrapping otherwise accumulates.
             next_a = (self.actor_target(ns) + noise).clamp(-1.0, 1.0)
             tq1, tq2 = self.critic_target(ns, next_a)
             target_q = r + nd * self.cfg.gamma * torch.min(tq1, tq2)
@@ -718,6 +750,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
         td_loss = F.smooth_l1_loss(q1, target_q) + F.smooth_l1_loss(q2, target_q)
         gap1, gap2 = self._cql_gaps(self.critic, s, ns, q1, q2)
 
+        # With a target gap configured, the penalty weight alpha is tuned automatically
+        # by dual ascent below; otherwise it stays a fixed constant.
         if self.cfg.cql_target_gap is None:
             alpha = torch.tensor(self.cfg.cql_alpha, device=s.device)
             penalty = alpha * (gap1 + gap2)
@@ -788,6 +822,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
         qc1, qc2 = self.cost_critic(s, a)
         cost_td_loss = F.smooth_l1_loss(qc1, target_qc) + F.smooth_l1_loss(qc2, target_qc)
 
+        # The cost critic's own conservative penalty is optional and off by default; it
+        # adds pessimism on unfamiliar actions only when explicitly enabled.
         cost_cql_gap: torch.Tensor = torch.tensor(0.0, device=s.device)
         if self.cfg.cost_cql_alpha > 0.0:
             gap1, gap2 = self._cost_cql_penalty(s, qc1, qc2)
@@ -822,6 +858,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
         Returns:
             A dictionary of actor metrics.
         """
+        # Freeze the critics while the actor updates, so their parameters are untouched
+        # by the actor's backward pass and only the policy moves.
         self.critic.requires_grad_(False)
         pi = self.actor(s)
         q_pi = torch.min(*self.critic(s, pi))
@@ -830,6 +868,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
             self.cost_critic.requires_grad_(False)
             qc_pi = torch.max(*self.cost_critic(s, pi))
             beta = self.log_beta.exp().clamp(0.0, self.cfg.beta_max).detach()
+            # The actor maximises reward value while the multiplier beta discourages
+            # actions the cost critic predicts will break the admission constraint.
             objective = q_pi - beta * qc_pi
             self.cost_critic.requires_grad_(True)
         else:
@@ -837,6 +877,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
 
         actor_loss = -objective.mean()
 
+        # Behaviour cloning anchors the policy to actions seen in the data, keeping it
+        # inside the region the critics can score reliably.
         if self.cfg.bc_weight > 0.0:
             actor_loss = actor_loss + self.cfg.bc_weight * F.mse_loss(pi, a)
 
@@ -849,6 +891,9 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
         metrics = {"actor_loss": actor_loss.detach()}
 
         if self.cfg.use_cost_critic:
+            # Dual ascent on beta: raise it while the predicted cost exceeds its budget,
+            # so the admission constraint is enforced rather than traded off at a fixed
+            # weight the way a plain penalty would be.
             beta = self.log_beta.exp().clamp(0.0, self.cfg.beta_max)
             qc_pi_detached = torch.max(*self.cost_critic(s, pi.detach())).detach()
             beta_loss = -(beta * (qc_pi_detached - self.cfg.cost_budget)).mean()
@@ -866,6 +911,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
         Returns:
             None.
         """
+        # Polyak averaging: nudge each target a small step tau towards its online
+        # network, which gives the bootstrapped targets a slowly moving, stable anchor.
         tau = self.cfg.tau
         pairs = [(self.critic, self.critic_target), (self.actor, self.actor_target)]
         if self.cfg.use_cost_critic:
@@ -921,6 +968,8 @@ class CQLTrainer:  # pylint: disable=too-many-instance-attributes
             metrics = self._update_critic(s, a, r, ns, nd)
             if self.cfg.use_cost_critic:
                 metrics.update(self._update_cost_critic(s, a, c, ns, nd))
+            # Delayed updates: the actor and target networks update less often than the
+            # critics, letting the value estimates settle before the policy chases them.
             if step % self.cfg.policy_delay == 0:
                 metrics.update(self._update_actor(s, a))
                 self._soft_update()

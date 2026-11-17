@@ -8,10 +8,6 @@ during development:
 * the Conservative Q-Learning training run, read from a metrics CSV; and
 * the trained policy's live-evaluation trajectory produced by
   ``evaluate_cql_live.py``.
-
-All figures follow the Applied Space Technology Laboratory style: no plot title,
-axis labels carrying units, distinct line styles, a colourblind-safe (viridis)
-palette, and multi-part figures lettered below and to the left of each part.
 """
 
 from __future__ import annotations
@@ -78,6 +74,8 @@ def moving_average(x: np.ndarray, window: int) -> np.ndarray:
     """
     if window <= 1 or len(x) == 0:
         return x.astype(float)
+    # A prefix sum makes each window average an O(1) difference of two cumulative
+    # sums, rather than re-adding the whole window at every position.
     cumsum = np.cumsum(np.insert(x.astype(float), 0, 0.0))
     out = np.empty_like(x, dtype=float)
     half = window // 2
@@ -135,6 +133,8 @@ def _group_by_step(
         least one sample, the mean of ``values`` at each such step, and the
         corresponding standard deviation.
     """
+    # Collapse the per-episode transitions onto a common within-episode step axis by
+    # averaging every episode that has a sample at each step.
     step_idx = data["step_idx"]
     n_steps = int(step_idx.max()) + 1 if max_steps is None else max_steps
     means = np.full(n_steps, np.nan)
@@ -336,6 +336,8 @@ def plot_attack_profile(  # pylint: disable=too-many-locals
     drift = np.array([float(row["drift"]) for row in rows])
     attack_step = step - attack_start
 
+    # Average the per-transaction values at each attack step and then smooth them, so
+    # the trend stays legible despite many satellites reporting within each step.
     unique = np.unique(attack_step)
     reputation_mean = moving_average(
         np.array([reputation[attack_step == s].mean() for s in unique]), window
@@ -347,6 +349,8 @@ def plot_attack_profile(  # pylint: disable=too-many-locals
         np.array([drift[attack_step == s].mean() for s in unique]), window
     )
 
+    # Reputation and drift share the dark viridis tone; the consensus score takes a
+    # contrasting green. Line styles differ too, so the figure also reads in greyscale.
     viridis = plt.get_cmap("viridis")
     colour_reputation, colour_score, colour_drift = viridis(0.15), viridis(0.6), viridis(0.15)
 
