@@ -28,3 +28,4 @@ machine_learning/*.pkl
 machine_learning/figures/*
 machine_learning/*.csv
 paper_figures/
+*.csv

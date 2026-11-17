@@ -82,6 +82,12 @@ class CQLConfig:
                                      # the run that regressed. Re-enable only with the clamp below in
                                      # place, and start much smaller than 1.0 (e.g. 0.05-0.1) if you do.
 
+    stratify_by_drift: bool = True   # see module docstring: fixes the thin-middle coverage gap
+    num_drift_bins: int = 8
+    num_capped_top_bins: int = 1     # see module docstring: these top bins (pinned-near-ceiling
+                                      # drift) are sampled at their NATURAL frequency, not equalized
+                                      # with the rest — equalizing them caused the v3 regression
+
     reward_scale: Optional[float] = None
     val_fraction: float = 0.1
     max_invalid_fraction: Optional[float] = 0.2
@@ -148,6 +154,15 @@ class Transitions:
     costs: torch.Tensor
     next_states: torch.Tensor
     not_terminal: torch.Tensor
+    # Precomputed per-row drift-magnitude bin index, used by sample() to stratify
+    # minibatches. None disables stratification (e.g. for the validation split, which
+    # doesn't need it). Populated in CQLTrainer._load_dataset via bin_by_drift_magnitude().
+    drift_bin: Optional[torch.Tensor] = None
+    num_drift_bins: int = 0
+    # The top `num_capped_top_bins` bins (by bin index, i.e. highest drift magnitude) are
+    # sampled at their natural dataset frequency instead of being equalized with the rest
+    # — see module docstring for why equalizing them caused a regression.
+    num_capped_top_bins: int = 0
 
     def __len__(self) -> int:
         return int(self.states.shape[0])
@@ -155,12 +170,70 @@ class Transitions:
     def all(self) -> Batch:
         return self.states, self.actions, self.rewards, self.costs, self.next_states, self.not_terminal
 
-    def sample(self, batch_size: int) -> Batch:
-        idx = torch.randint(0, len(self), (batch_size,), device=self.states.device)
+    def _gather(self, idx: torch.Tensor) -> Batch:
         return (
             self.states[idx], self.actions[idx], self.rewards[idx], self.costs[idx],
             self.next_states[idx], self.not_terminal[idx],
         )
+
+    def sample(self, batch_size: int) -> Batch:
+        if self.drift_bin is None or self.num_drift_bins <= 1:
+            idx = torch.randint(0, len(self), (batch_size,), device=self.states.device)
+            return self._gather(idx)
+
+        capped = set(range(self.num_drift_bins - self.num_capped_top_bins, self.num_drift_bins))
+        boosted_bins = [b for b in range(self.num_drift_bins) if b not in capped]
+
+        # Capped (top/ceiling) bins: reserve a share of the batch equal to their actual
+        # combined share of the full dataset — i.e. don't boost them at all — then sample
+        # within that reserved share proportionally to each capped bin's own size.
+        capped_total_rows = sum(len(self._bin_row_cache.get(b, [])) for b in capped)
+        capped_budget = round(batch_size * capped_total_rows / max(1, len(self))) if capped else 0
+        idx_parts = []
+        if capped_budget > 0 and capped_total_rows > 0:
+            for b in capped:
+                bin_rows = self._bin_row_cache.get(b)
+                if bin_rows is None or len(bin_rows) == 0:
+                    continue
+                share = max(1, round(capped_budget * len(bin_rows) / capped_total_rows))
+                idx_parts.append(bin_rows[torch.randint(0, len(bin_rows), (share,), device=self.states.device)])
+
+        # Non-capped bins: equalized as before — this is what actually fixes the thin
+        # 6-16 coverage gap described in the module docstring.
+        remaining = batch_size - sum(len(p) for p in idx_parts)
+        if boosted_bins and remaining > 0:
+            per_bin = max(1, remaining // len(boosted_bins))
+            for b in boosted_bins:
+                bin_rows = self._bin_row_cache.get(b)
+                if bin_rows is None or len(bin_rows) == 0:
+                    continue
+                idx_parts.append(bin_rows[torch.randint(0, len(bin_rows), (per_bin,), device=self.states.device)])
+
+        idx = torch.cat(idx_parts)[:batch_size] if idx_parts else torch.randint(
+            0, len(self), (batch_size,), device=self.states.device)
+        if len(idx) < batch_size:
+            extra = torch.randint(0, len(self), (batch_size - len(idx),), device=self.states.device)
+            idx = torch.cat([idx, extra])
+        return self._gather(idx)
+
+    def __post_init__(self) -> None:
+        self._bin_row_cache: Dict[int, torch.Tensor] = {}
+        if self.drift_bin is not None:
+            for b in range(self.num_drift_bins):
+                rows = torch.nonzero(self.drift_bin == b, as_tuple=True)[0]
+                if len(rows) > 0:
+                    self._bin_row_cache[b] = rows
+
+
+def bin_by_drift_magnitude(states: np.ndarray, num_bins: int = 8) -> np.ndarray:
+    """Discretize cum_bias magnitude (first two state dims: cum_bias_x, cum_bias_y) into
+    `num_bins` equal-width bins over [0, max_observed]. Used to stratify training batches
+    — see the module docstring for why the raw dataset is too bimodal to sample uniformly."""
+    mag = np.linalg.norm(states[:, :2], axis=1)
+    max_mag = max(float(mag.max()), 1e-6)
+    edges = np.linspace(0.0, max_mag, num_bins + 1)
+    bin_idx = np.clip(np.digitize(mag, edges[1:-1]), 0, num_bins - 1)
+    return bin_idx.astype(np.int64)
 
 
 class CQLTrainer:
@@ -242,7 +315,14 @@ class CQLTrainer:
         def to_tensor(arr):
             return torch.as_tensor(arr, dtype=torch.float32, device=self.device)
 
-        def make(mask):
+        def make(mask, stratify: bool):
+            drift_bin = None
+            num_bins = 0
+            num_capped = 0
+            if stratify and self.cfg.stratify_by_drift and mask.sum() > 0:
+                num_bins = self.cfg.num_drift_bins
+                num_capped = self.cfg.num_capped_top_bins
+                drift_bin = to_tensor(bin_by_drift_magnitude(states[mask], num_bins)).long()
             return Transitions(
                 states=to_tensor(states[mask]),
                 actions=to_tensor(actions[mask]),
@@ -250,10 +330,22 @@ class CQLTrainer:
                 costs=to_tensor(costs[mask]).unsqueeze(-1),
                 next_states=to_tensor(next_states[mask]),
                 not_terminal=to_tensor(1.0 - terminals[mask]).unsqueeze(-1),
+                drift_bin=drift_bin,
+                num_drift_bins=num_bins,
+                num_capped_top_bins=num_capped,
             )
 
-        val = make(val_mask) if n_val > 0 else None
-        return make(train_mask), val, torch.as_tensor(state_mean), torch.as_tensor(state_std), reward_scale
+        # Stratify only the training split — validation should reflect the dataset's
+        # actual (bimodal) distribution so val metrics stay a faithful sanity check,
+        # not an artificially balanced one.
+        val = make(val_mask, stratify=False) if n_val > 0 else None
+        train = make(train_mask, stratify=True)
+        if self.cfg.stratify_by_drift:
+            bin_counts = [len(train._bin_row_cache.get(b, [])) for b in range(self.cfg.num_drift_bins)]
+            capped_from = self.cfg.num_drift_bins - self.cfg.num_capped_top_bins
+            logger.info("Drift-magnitude bin counts (natural): %s | bins >= %d sampled at natural "
+                        "frequency (capped, not boosted), bins < %d equalized", bin_counts, capped_from, capped_from)
+        return train, val, torch.as_tensor(state_mean), torch.as_tensor(state_std), reward_scale
 
     def _sample_policy_actions(self, states):
         sigma = self.cfg.cql_policy_noise
@@ -562,6 +654,13 @@ def parse_args() -> CQLConfig:
     parser.add_argument("--cost-cql-alpha", type=float, default=CQLConfig.cost_cql_alpha,
                          help="Pessimism weight for the cost critic's own OOD penalty; 0 disables it.")
     parser.add_argument("--no-cost-critic", action="store_true")
+    parser.add_argument("--no-stratify-by-drift", action="store_true",
+                         help="Disable drift-magnitude-stratified batch sampling (see module docstring); "
+                              "falls back to plain uniform sampling over rows.")
+    parser.add_argument("--num-drift-bins", type=int, default=CQLConfig.num_drift_bins)
+    parser.add_argument("--num-capped-top-bins", type=int, default=CQLConfig.num_capped_top_bins,
+                         help="Top N drift bins sampled at natural (unboosted) frequency instead of "
+                              "equalized; see module docstring for why bin #num_drift_bins-1 needs this.")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     return CQLConfig(
@@ -573,6 +672,9 @@ def parse_args() -> CQLConfig:
         bc_weight=args.bc_weight,
         cost_cql_alpha=args.cost_cql_alpha,
         use_cost_critic=not args.no_cost_critic,
+        stratify_by_drift=not args.no_stratify_by_drift,
+        num_drift_bins=args.num_drift_bins,
+        num_capped_top_bins=args.num_capped_top_bins,
         seed=args.seed,
     )
 
