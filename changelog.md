@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [5.4] - 2026-11
+
+### Summary
+Addition of more sophisticated ML training for AIAA ScTech 2027 paper.
+
+### Added
+- New script `evaluate_cql_live.py` for assessing CQL model performance.
+- New script `plot_cql_metrics.py` for plotting ML metrics.
+- New script `probe_connectivity.py` for looking at connectivity across random satellite networks of varying population sizes and ISl ranges.
+- Minor formatting updates to other scripts.
+
 ## [5.3.1] - 2026-10
 
 ### Summary

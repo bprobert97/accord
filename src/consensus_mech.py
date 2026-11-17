@@ -274,6 +274,7 @@ class ConsensusMechanism():
         if not self._is_dof_valid(obs_record, transaction, sat_node, dag):
             return False, new_ema_nis
 
+        # Note: comment out for IEEE TAES paper as per v5.3.1
         # if not self._is_physically_valid(obs_record, transaction, sat_node, dag):
         #     return False, new_ema_nis
 
