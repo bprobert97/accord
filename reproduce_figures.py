@@ -99,6 +99,21 @@ def publish(src_dir: str, src_name: str, dst_name: str) -> None:
 # --------------------------------------------------------------------------- #
 def make_figures_2_and_3(figs: set[int], keep_logging: bool,
                          start_a: int, start_b: int) -> None:
+    """Generate Figures 2 and 3, the inter-satellite-link range comparison.
+
+    Ensures the Monte Carlo data for the EKF at 1000 km and 2000 km exists,
+    checks both run counts, then renders the requested figures and copies them
+    into ./paper_figures/.
+
+    Args:
+        figs: Set of figure numbers to produce; only 2 and 3 are acted upon.
+        keep_logging: Whether to keep per-run logging in the Monte Carlo runs.
+        start_a: Start step passed to the 1000 km reputation comparison.
+        start_b: Start step passed to the 2000 km reputation comparison.
+
+    Returns:
+        None.
+    """
     ensure_mc_data("ekf", 1000, keep_logging)
     ensure_mc_data("ekf", 2000, keep_logging)
 
@@ -126,7 +141,19 @@ def make_figures_2_and_3(figs: set[int], keep_logging: bool,
 # Figure 4: Walker-Delta, 600 km ISL, single accord_demo run
 # --------------------------------------------------------------------------- #
 def make_figure_4() -> None:
+    """Generate Figure 4, Walker-delta reputation from a single accord_demo run.
 
+    Runs accord_demo.py for the configured filter and link range, loads the
+    cached reputation history, reproduces the aggregated-reputation plot from the
+    demo, and saves it into ./paper_figures/ as PNG and PDF.
+
+    Returns:
+        None.
+
+    Raises:
+        FileNotFoundError: If the expected simulation-results archive is absent,
+            which indicates the accord_demo.py results-path change is missing.
+    """
     run([PYTHON, "accord_demo.py",
          "--filter-type", FIG4_FILTER,
          "--walker-delta", "True",   # NB: argparse type=bool treats ANY non-empty string as True
@@ -164,6 +191,18 @@ def make_figure_4() -> None:
 # Figure 5: filter comparison (EKF vs CKF vs UKF, random topology, 1000 km)
 # --------------------------------------------------------------------------- #
 def make_figure_5(keep_logging: bool) -> None:
+    """Generate Figure 5, the filter comparison across EKF, CKF, and UKF.
+
+    Ensures the Monte Carlo data for each filter at 1000 km exists, checks the
+    run counts, renders the key-performance-indicator comparison, and copies it
+    into ./paper_figures/.
+
+    Args:
+        keep_logging: Whether to keep per-run logging in the Monte Carlo runs.
+
+    Returns:
+        None.
+    """
     for filter_type in ("ekf", "ckf", "ukf"):
         ensure_mc_data(filter_type, 1000, keep_logging)  # EKF 1000 km is shared with Fig 2
 
@@ -183,6 +222,11 @@ def make_figure_5(keep_logging: bool) -> None:
 
 
 def main() -> None:
+    """Parse command-line arguments and generate the requested figures.
+
+    Returns:
+        None.
+    """
     parser = argparse.ArgumentParser(description="Reproduce ACCORD paper Figures 2-5.")
     parser.add_argument("--figures", type=int, nargs="+", choices=[2, 3, 4, 5],
                         default=[2, 3, 4, 5], help="Which figures to generate (default: all).")

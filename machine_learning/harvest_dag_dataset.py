@@ -1,29 +1,46 @@
+"""Asynchronous harvester that scrapes an offline training dataset from the DAG.
+
+The harvester runs the Proof of Inter-Satellite Evaluation (PoISE) consensus
+simulation for a number of episodes. In each episode a small number of
+compromised satellites inject sensor bias according to a scripted behaviour
+policy while the remaining satellites report honestly. Every scored ledger
+transaction produced by a compromised satellite is recorded as one reinforcement
+-learning transition, together with the reputation and consensus score the
+network assigned to it. The resulting archive is the fixed dataset consumed by
+the offline Conservative Q-Learning trainer.
 """
-Dataset Harvester: Transparent DAG Data Scraping (Asynchronous)
-"""
+
+from __future__ import annotations
+
 import asyncio
 import dataclasses
 import logging
 import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+
 import numpy as np
-from src.consensus_mech import ConsensusMechanism
+
 from accord_demo import (
     CLUSTER_SIZE, FilterType,
     _cluster_by_orbital_physics, _create_cluster_filters,
     _create_z_map, _process_cluster_step,
 )
+from src.consensus_mech import ConsensusMechanism
 from src.filters.filter_interface import (
-    FilterConfig,
-    ObservationRecord,
-    simulate_truth_and_meas,
+    FilterConfig, ObservationRecord, simulate_truth_and_meas,
 )
 from src.satellite_node import SatelliteNode  # use satellite_node_patched.py here
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("DAGHarvester")
 
+# The simulation scaffold is shared verbatim with evaluate_cql_live so that the
+# evaluation environment matches the harvested data exactly.
+# pylint: disable=duplicate-code
+
+# The shared "ACCORD" logger emits one line per PoISE evaluation, which floods
+# the console at the scale of this simulation; silence it below the error level.
 logging.getLogger("ACCORD").setLevel(logging.ERROR)
 
 ACTION_DIM: int = 2
@@ -31,7 +48,44 @@ BEHAVIOUR_MODES: Tuple[str, ...] = ("mixed", "persistent", "ramp_hold", "backoff
 
 
 @dataclass
-class HarvestConfig:
+class HarvestConfig:  # pylint: disable=too-many-instance-attributes
+    """Configuration for a dataset harvest.
+
+    Attributes:
+        num_episodes: Number of independent episodes to simulate.
+        output_path: Destination path for the compressed ``.npz`` dataset.
+        seed: Base random seed; episode ``e`` uses ``seed + e``.
+        num_sats: Number of satellites in the constellation.
+        dt_s: Simulation time step, in seconds.
+        sig_r_m: Range measurement-noise standard deviation, in metres.
+        sig_rdot_mps: Range-rate measurement-noise standard deviation, in metres
+            per second.
+        q_acc_target: Target process-noise acceleration for the filter.
+        isl_range_m: Inter-satellite-link range, in metres.
+        num_compromised: Number of compromised satellites.
+        filter_burn_in_steps: Steps before any transactions are recorded.
+        honest_steps: Honest-reporting steps following the burn-in.
+        attack_steps: Steps during which the compromised satellites attack.
+        action_scale_sigma: Scale applied to each action increment, in units of
+            the measurement-noise standard deviation.
+        bias_limit_sigma: Per-channel clip on the cumulative injected bias, in
+            units of the measurement-noise standard deviation.
+        score_floor: Consensus-score admission threshold.
+        reputation_floor: Reputation admission threshold.
+        detection_rule: Name of the detection rule in use.
+        mode_probabilities: Sampling probabilities over ``BEHAVIOUR_MODES``.
+        include_context_features: Whether to include context features.
+        walker_delta: Whether the constellation is a Walker-delta pattern.
+        violation_penalty: Reward charged when an admission constraint is
+            violated.
+        drift_reward_scale: Multiplier applied to the achieved drift to form the
+            reward on compliant steps.
+        strict_score_check: When True, an excessive unscored fraction raises
+            rather than warns.
+        max_allowed_unscored_fraction: Unscored-fraction threshold above which
+            the dataset is flagged.
+    """
+
     num_episodes: int = 40
     output_path: str = "machine_learning/dag_harvested_dataset.npz"
     seed: int = 0
@@ -53,16 +107,31 @@ class HarvestConfig:
     mode_probabilities: Tuple[float, ...] = (0.4, 0.2, 0.15, 0.25)
     include_context_features: bool = True
     walker_delta: bool = False
-
     violation_penalty: float = 5.0
     drift_reward_scale: float = 1.0
-
-    strict_score_check: bool = False  # downgraded to warning — see module docstring
+    strict_score_check: bool = False
     max_allowed_unscored_fraction: float = 0.3
 
 
-class BehaviourPolicy:
-    def __init__(self, mode: str, rng: np.random.Generator, steps: int, score_floor: float) -> None:
+class BehaviourPolicy:  # pylint: disable=too-few-public-methods
+    """Scripted exploration policy for a compromised satellite.
+
+    The policy produces the action increments that drive bias injection during
+    the attack phase. Its behaviour depends on the configured mode, which lets a
+    harvest span a range of deception strategies rather than a single style.
+    """
+
+    def __init__(
+        self, mode: str, rng: np.random.Generator, steps: int, score_floor: float
+    ) -> None:
+        """Initialise the policy.
+
+        Args:
+            mode: One of ``BEHAVIOUR_MODES``.
+            rng: Random generator used for all stochastic choices.
+            steps: Number of attack steps, used to pace the ramp mode.
+            score_floor: Consensus-score floor, used by the reactive mode.
+        """
         self.mode = mode
         self.rng = rng
         self.steps = steps
@@ -73,10 +142,28 @@ class BehaviourPolicy:
         self._ramp_target = float(self.rng.uniform(0.3, 1.0))
 
     def _random_direction(self) -> np.ndarray:
+        """Draw a random unit direction in action space.
+
+        Returns:
+            A unit-norm action-dimensional direction vector.
+        """
         vec = self.rng.normal(size=ACTION_DIM)
         return (vec / max(float(np.linalg.norm(vec)), 1e-8)).astype(np.float32)
 
-    def act(self, t: int, last_score: float, cum_bias: np.ndarray) -> np.ndarray:
+    def act(  # pylint: disable=too-many-return-statements
+        self, t: int, last_score: float, cum_bias: np.ndarray
+    ) -> np.ndarray:
+        """Return the action increment for the current attack step.
+
+        Args:
+            t: Attack-step index, counted from the start of the attack phase.
+            last_score: Most recent consensus score, used by the reactive mode.
+            cum_bias: Current cumulative injected bias, used by the reactive
+                mode to retreat.
+
+        Returns:
+            An action-dimensional increment to the cumulative bias.
+        """
         if self.mode == "mixed":
             draw = self.rng.random()
             if draw < 0.5:
@@ -96,25 +183,50 @@ class BehaviourPolicy:
 
         if self.mode == "backoff":
             if last_score < self.retreat_threshold:
-                return (-cum_bias / max(float(np.linalg.norm(cum_bias)), 1e-6) * 0.5).astype(np.float32)
+                return (
+                    -cum_bias / max(float(np.linalg.norm(cum_bias)), 1e-6) * 0.5
+                ).astype(np.float32)
             return self.rng.uniform(-1.0, 1.0, ACTION_DIM)
 
         return self.rng.uniform(-1.0, 1.0, ACTION_DIM)
 
 
 def inject_bias_simple(record: ObservationRecord, bias_si: np.ndarray) -> ObservationRecord:
-    nis = max(0.1, record.nis + float(np.sum(bias_si**2) / 100.0))
+    """Return a copy of an observation record with injected bias applied.
+
+    Args:
+        record: The honest observation record.
+        bias_si: Bias to apply, in physical units (metres and metres per second).
+
+    Returns:
+        A new observation record with an inflated normalised innovation squared
+        and a biased range.
+    """
+    nis = max(0.1, record.nis + float(np.sum(bias_si ** 2) / 100.0))
     return dataclasses.replace(record, nis=nis, range_m=float(record.range_m + bias_si[0]))
 
 
-def _lookup_poise_scores(transaction, peers) -> Tuple[Optional[float], Optional[float]]:
-    """Read consensus_score / correctness_score off whichever of `peers` have
-    evaluated `transaction` (each peer stores its own result in
-    `peer.dag.local_consensus_states[transaction.hash]`). Returns (None, None)
-    if no peer has scored it yet."""
-    consensus_scores, correctness_scores = [], []
+def _lookup_poise_scores(
+    transaction: object, peers: List[SatelliteNode]
+) -> Tuple[Optional[float], Optional[float]]:
+    """Read the consensus and correctness scores a transaction received.
+
+    Each peer stores its own evaluation of a transaction in
+    ``peer.dag.local_consensus_states[transaction.hash]``. The scores are taken
+    as the median across all peers that evaluated the transaction.
+
+    Args:
+        transaction: The broadcast transaction to look up.
+        peers: Peers present at broadcast time.
+
+    Returns:
+        A tuple ``(consensus_score, correctness_score)``, or ``(None, None)`` if
+        no peer has scored the transaction yet.
+    """
+    consensus_scores: List[float] = []
+    correctness_scores: List[float] = []
     for peer in peers:
-        state = peer.dag.local_consensus_states.get(transaction.hash)
+        state = peer.dag.local_consensus_states.get(transaction.hash)  # type: ignore[attr-defined]
         if state is not None and "consensus_score" in state:
             consensus_scores.append(state["consensus_score"])
             correctness_scores.append(state.get("correctness_score", state["consensus_score"]))
@@ -123,14 +235,31 @@ def _lookup_poise_scores(transaction, peers) -> Tuple[Optional[float], Optional[
     return float(np.median(consensus_scores)), float(np.median(correctness_scores))
 
 
-async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Generator) -> Dict[str, np.ndarray]:
+# pylint: disable-next=too-many-locals,too-many-statements,too-many-branches
+async def _simulate_episode_async(
+    ep: int, cfg: HarvestConfig, rng: np.random.Generator
+) -> Tuple[Dict[str, np.ndarray], Dict[str, float]]:
+    """Simulate one episode and return its transitions and diagnostics.
+
+    Args:
+        ep: Episode index.
+        cfg: Harvest configuration.
+        rng: Random generator for episode-level choices.
+
+    Returns:
+        A tuple ``(data, diagnostics)``. ``data`` maps dataset field names to
+        arrays, or is empty if no transition was recorded. ``diagnostics`` holds
+        connectivity and ledger-size summaries for the episode.
+    """
     engine = ConsensusMechanism()
     fcfg = FilterConfig(
-        ISL_range_m=cfg.isl_range_m, N=cfg.num_sats, steps=cfg.filter_burn_in_steps + cfg.honest_steps + cfg.attack_steps,
-        dt=cfg.dt_s, sig_r=cfg.sig_r_m, sig_rdot=cfg.sig_rdot_mps, q_acc_target=cfg.q_acc_target, seed=cfg.seed + ep, walker_delta=cfg.walker_delta
+        ISL_range_m=cfg.isl_range_m, N=cfg.num_sats,
+        steps=cfg.filter_burn_in_steps + cfg.honest_steps + cfg.attack_steps,
+        dt=cfg.dt_s, sig_r=cfg.sig_r_m, sig_rdot=cfg.sig_rdot_mps,
+        q_acc_target=cfg.q_acc_target, seed=cfg.seed + ep, walker_delta=cfg.walker_delta,
     )
 
-    truth, z_hist = simulate_truth_and_meas(fcfg, fcfg.walker_delta)  # pass walker_delta explicitly, like the demo
+    truth, z_hist = simulate_truth_and_meas(fcfg, fcfg.walker_delta)
 
     clusters = _cluster_by_orbital_physics(truth[0], cfg.num_sats, CLUSTER_SIZE)
     cluster_filters = _create_cluster_filters(FilterType.EKF, fcfg, truth, clusters, logger)
@@ -140,29 +269,27 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
     satellites = {i: SatelliteNode(node_id=i, consensus_mech=engine) for i in range(cfg.num_sats)}
     comp_ids = set(range(cfg.num_compromised))
 
-    mode = rng.choice(BEHAVIOUR_MODES, p=np.asarray(cfg.mode_probabilities) / np.sum(cfg.mode_probabilities))
+    mode = rng.choice(
+        BEHAVIOUR_MODES, p=np.asarray(cfg.mode_probabilities) / np.sum(cfg.mode_probabilities)
+    )
     policy = BehaviourPolicy(str(mode), rng, cfg.attack_steps, cfg.score_floor)
     cum_bias = np.zeros(ACTION_DIM, dtype=np.float32)
 
-    keys = ("states", "actions", "rewards", "costs", "next_states", "scores",
-            "correctness_scores", "reps", "step_idx", "terminals", "score_unavailable")
-    rows: Dict[str, List] = {k: [] for k in keys}
-    peer_counts: List[int] = []  # connectivity diagnostic
+    keys = (
+        "states", "actions", "rewards", "costs", "next_states", "scores",
+        "correctness_scores", "reps", "step_idx", "terminals", "score_unavailable",
+    )
+    rows: Dict[str, List] = {key: [] for key in keys}
+    peer_counts: List[int] = []
 
     last_score = 0.5
     last_correctness = 0.5
 
-    # BUG FIX: _process_cluster_step returns one ObservationRecord per
-    # (observer, target) pair tracked within a cluster that step — so a compromised
-    # satellite with multiple targets in its cluster previously took one action and
-    # one cum_bias update PER TARGET, not once per timestep. At low connectivity this
-    # rarely mattered (few targets/step), but at realistic connectivity it lets
-    # cum_bias blow through bias_limit_sigma within the first 1-2 simulated steps of
-    # the attack phase every single episode. This is almost certainly the dominant
-    # cause of the climbing violation fraction across every harvest so far, not a
-    # genuine property of the environment. Fix: select one action per (satellite,
-    # step) and reuse the resulting bias for every record that satellite generates
-    # in that same step.
+    # A satellite can generate several observation records in one step (one per
+    # tracked target). One action is drawn per (satellite, step) and the
+    # resulting bias is reused across every record that satellite produces that
+    # step, so a single step injects a single bias update rather than one per
+    # record.
     step_action_cache: Dict[int, np.ndarray] = {}
 
     for k in range(fcfg.steps):
@@ -176,17 +303,27 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
             sat.update_position(truth[k, sid * 6:(sid + 1) * 6])
 
         for sid, sat in satellites.items():
-            sat.peers = [other_sat for other_sid, other_sat in satellites.items()
-                         if other_sid != sid and np.linalg.norm(truth[k, sid * 6:sid * 6 + 3] - truth[k, other_sid * 6:other_sid * 6 + 3]) <= cfg.isl_range_m]
+            sat.peers = [
+                other_sat for other_sid, other_sat in satellites.items()
+                if other_sid != sid
+                and np.linalg.norm(
+                    truth[k, sid * 6:sid * 6 + 3] - truth[k, other_sid * 6:other_sid * 6 + 3]
+                ) <= cfg.isl_range_m
+            ]
             peer_counts.append(len(sat.peers))
 
-        step_action_cache.clear()  # one action per satellite is valid only within this step
+        step_action_cache.clear()
 
         for rec in records:
             if rec.observer in comp_ids and k > cfg.filter_burn_in_steps + cfg.honest_steps:
                 if rec.observer not in step_action_cache:
-                    action = policy.act(k - (cfg.filter_burn_in_steps + cfg.honest_steps), last_score, cum_bias)
-                    cum_bias = np.clip(cum_bias + action * cfg.action_scale_sigma, -cfg.bias_limit_sigma, cfg.bias_limit_sigma)
+                    action = policy.act(
+                        k - (cfg.filter_burn_in_steps + cfg.honest_steps), last_score, cum_bias
+                    )
+                    cum_bias = np.clip(
+                        cum_bias + action * cfg.action_scale_sigma,
+                        -cfg.bias_limit_sigma, cfg.bias_limit_sigma,
+                    )
                     step_action_cache[rec.observer] = action
                 else:
                     action = step_action_cache[rec.observer]
@@ -199,10 +336,14 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
                 transaction = await observer.submit_transaction(rec.target)
 
                 reputation = float(observer.reputation)
-                consensus_score, correctness_score = _lookup_poise_scores(transaction, peers_at_broadcast)
-                unavailable = consensus_score is None
-                if unavailable:
+                consensus_opt, correctness_opt = _lookup_poise_scores(
+                    transaction, peers_at_broadcast
+                )
+                unavailable = consensus_opt is None
+                if consensus_opt is None or correctness_opt is None:
                     consensus_score, correctness_score = last_score, last_correctness
+                else:
+                    consensus_score, correctness_score = consensus_opt, correctness_opt
                 last_score, last_correctness = consensus_score, correctness_score
 
                 reputation_ok = reputation > cfg.reputation_floor
@@ -210,8 +351,14 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
                 constraint_ok = reputation_ok and score_ok
 
                 drift = float(np.linalg.norm(cum_bias))
-                cost = max(0.0, cfg.reputation_floor - reputation) + max(0.0, cfg.score_floor - consensus_score)
-                reward = (cfg.drift_reward_scale * drift) if constraint_ok else -cfg.violation_penalty
+                cost = (
+                    max(0.0, cfg.reputation_floor - reputation)
+                    + max(0.0, cfg.score_floor - consensus_score)
+                )
+                reward = (
+                    (cfg.drift_reward_scale * drift) if constraint_ok
+                    else -cfg.violation_penalty
+                )
 
                 rows["actions"].append(action)
                 rows["rewards"].append(reward)
@@ -220,21 +367,14 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
                 rows["correctness_scores"].append(correctness_score)
                 rows["reps"].append(reputation)
                 rows["step_idx"].append(k)
-                # FIX: include consensus_score as a 4th state dimension (see module
-                # docstring) — without it the policy cannot perceive that score is
-                # approaching its floor and has no way to learn a corrective action.
+                # The state includes the consensus score so that the policy can
+                # perceive its proximity to the score floor and learn a
+                # corrective action.
                 rows["states"].append(np.concatenate([cum_bias, [reputation, consensus_score]]))
-                # BUG FIX: previously `not constraint_ok` — i.e. every violating
-                # transition was marked terminal. That zeroes the Bellman bootstrap
-                # (`nd` in _update_cost_critic/_update_critic) on exactly the
-                # transitions where the *future* cost of lingering in violation is
-                # the whole point — the critic could only ever see one step's
-                # isolated cost, never "and then it stayed in violation for 100 more
-                # steps." That's almost certainly why val_qc_policy has been stuck in
-                # the same ~0.37-0.39 band across every run so far regardless of what
-                # else changed. `terminals` should mark genuine episode boundaries
-                # only; it's set True on the final row of the episode after the loop
-                # below, not here.
+                # Intermediate constraint violations are not episode boundaries;
+                # only the final transition of the episode is marked terminal,
+                # below, so the critic still bootstraps the future cost of
+                # remaining in violation.
                 rows["terminals"].append(False)
                 rows["score_unavailable"].append(unavailable)
             elif k > cfg.filter_burn_in_steps:
@@ -243,11 +383,9 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
 
     n = len(rows["actions"])
     if n > 0:
-        # Mark the true end of this episode's horizon — this is the only transition
-        # where it's actually correct to tell the critic "no future to bootstrap from."
         rows["terminals"][-1] = True
 
-    final_ledger_sizes = [len(sat.dag.ledger) - 2 for sat in satellites.values()]  # exclude genesis
+    final_ledger_sizes = [len(sat.dag.ledger) - 2 for sat in satellites.values()]
 
     diagnostics = {
         "mean_peers": float(np.mean(peer_counts)) if peer_counts else 0.0,
@@ -279,12 +417,30 @@ async def _simulate_episode_async(ep: int, cfg: HarvestConfig, rng: np.random.Ge
     return data, diagnostics
 
 
-def run_episode(ep: int, cfg: HarvestConfig):
+def run_episode(ep: int, cfg: HarvestConfig) -> Tuple[Dict[str, np.ndarray], Dict[str, float]]:
+    """Run one episode synchronously.
+
+    Args:
+        ep: Episode index.
+        cfg: Harvest configuration.
+
+    Returns:
+        The ``(data, diagnostics)`` tuple produced by the episode simulation.
+    """
     rng = np.random.default_rng(cfg.seed + ep)
     return asyncio.run(_simulate_episode_async(ep, cfg, rng))
 
 
-def harvest_ledger_dataset(cfg: HarvestConfig) -> None:
+def harvest_ledger_dataset(cfg: HarvestConfig) -> None:  # pylint: disable=too-many-locals
+    """Harvest a dataset across all episodes and write it to disk.
+
+    Args:
+        cfg: Harvest configuration.
+
+    Returns:
+        None. A compressed ``.npz`` archive is written to ``cfg.output_path``,
+        and connectivity, violation, and scoring diagnostics are logged.
+    """
     logger.info("Generating transparent DAG dataset across %d episodes...", cfg.num_episodes)
     episodes = []
     all_diag = []
@@ -301,10 +457,10 @@ def harvest_ledger_dataset(cfg: HarvestConfig) -> None:
 
     merged = {key: np.concatenate([e[key] for e in episodes]) for key in episodes[0]}
 
-    # `terminals` no longer encodes violation (see bug-fix note above) — violation
-    # fraction is now read from the reward/cost signal directly instead.
+    # The violation fraction is read from the reward sign; the terminal flag now
+    # marks only true episode ends, not violations.
     frac_violating = float((merged["rewards"] < 0).mean())
-    frac_episode_end = float(merged["terminals"].mean())  # sanity check: should be ~1/episode_length
+    frac_episode_end = float(merged["terminals"].mean())
     frac_unscored = float(merged["score_unavailable"].mean())
     frac_identical = float(np.isclose(merged["scores"], merged["correctness_scores"]).mean())
     modes, counts = np.unique(merged["behaviour_mode"], return_counts=True)
@@ -315,43 +471,60 @@ def harvest_ledger_dataset(cfg: HarvestConfig) -> None:
     mean_ledger = float(np.mean([d["mean_final_ledger_size"] for d in all_diag]))
     min_ledger = float(np.min([d["min_final_ledger_size"] for d in all_diag]))
 
-    logger.info("Behaviour-mode mix across episodes: %s", dict(zip(modes.tolist(), counts.tolist())))
-    logger.info("Fraction of transitions violating the constraint (rep<=%.2f or score<=%.2f): %.3f",
-                cfg.reputation_floor, cfg.score_floor, frac_violating)
-    logger.info("Fraction of rows flagged as true episode-end terminals: %.4f "
-                "(sanity check — should be roughly 1/(attack_steps) per episode, not large)",
-                frac_episode_end)
-    logger.info("Fraction of rows with no BFT quorum yet (score carried forward): %.3f", frac_unscored)
+    logger.info(
+        "Behaviour-mode mix across episodes: %s", dict(zip(modes.tolist(), counts.tolist()))
+    )
+    logger.info(
+        "Fraction of transitions violating the constraint (rep<=%.2f or score<=%.2f): %.3f",
+        cfg.reputation_floor, cfg.score_floor, frac_violating,
+    )
+    logger.info(
+        "Fraction of rows flagged as true episode-end terminals: %.4f "
+        "(sanity check: roughly 1/attack_steps per episode, not large)",
+        frac_episode_end,
+    )
+    logger.info(
+        "Fraction of rows with no BFT quorum yet (score carried forward): %.3f", frac_unscored
+    )
     logger.info("Fraction of rows where consensus_score == correctness_score: %.3f", frac_identical)
-    logger.info("[CONNECTIVITY] mean peers/sat/step: %.2f (min %.0f, max %.0f) at isl_range_m=%.0f",
-                mean_peers, min_peers, max_peers, cfg.isl_range_m)
-    logger.info("[CONNECTIVITY] final per-satellite ledger size (non-genesis), averaged over episodes: "
-                "mean %.1f, worst-episode-min %.1f (need >= 4 for quorum)", mean_ledger, min_ledger)
+    logger.info(
+        "[CONNECTIVITY] mean peers/sat/step: %.2f (min %.0f, max %.0f) at isl_range_m=%.0f",
+        mean_peers, min_peers, max_peers, cfg.isl_range_m,
+    )
+    logger.info(
+        "[CONNECTIVITY] final per-satellite ledger size (non-genesis), averaged over episodes: "
+        "mean %.1f, worst-episode-min %.1f (need >= 4 for quorum)",
+        mean_ledger, min_ledger,
+    )
 
     if mean_peers < 2.0:
-        logger.warning("Mean peer count per satellite per step is %.2f — at isl_range_m=%.0f this "
-                        "constellation is close to disconnected most of the time. This is almost "
-                        "certainly why %.1f%% of rows never reached BFT quorum. Try increasing "
-                        "isl_range_m substantially and re-running, or check whether this range is "
-                        "realistic for the configured orbit geometry.", mean_peers, cfg.isl_range_m,
-                        frac_unscored * 100)
+        logger.warning(
+            "Mean peer count per satellite per step is %.2f at isl_range_m=%.0f; this "
+            "constellation "
+            "is close to disconnected most of the time, which is the likely reason %.1f%% of rows "
+            "never reached BFT quorum. Increase isl_range_m or check the orbit geometry.",
+            mean_peers, cfg.isl_range_m, frac_unscored * 100,
+        )
     elif frac_unscored > cfg.max_allowed_unscored_fraction:
-        msg = (f"{frac_unscored:.1%} of rows never reached BFT quorum despite mean peer count of "
-               f"{mean_peers:.1f} — connectivity looks adequate, so this may be a different issue "
-               f"(e.g. transactions failing _is_transaction_valid/_is_dof_valid before ever reaching "
-               f"add_tx). Worth checking those validation paths next.")
+        msg = (
+            f"{frac_unscored:.1%} of rows never reached BFT quorum despite mean peer count of "
+            f"{mean_peers:.1f}; connectivity looks adequate, so another cause is likely (for "
+            f"example transactions failing validation before reaching add_tx)."
+        )
         if cfg.strict_score_check:
             raise RuntimeError(msg)
         logger.warning(msg)
 
     if frac_unscored > 0.3:
-        logger.warning("Dataset is NOT ready for training while %.1f%% of scores are carried-forward "
-                        "placeholders rather than real PoISE output — fix connectivity first.",
-                        frac_unscored * 100)
+        logger.warning(
+            "Dataset is not ready for training while %.1f%% of scores are carried-forward "
+            "placeholders rather than real PoISE output; resolve connectivity first.",
+            frac_unscored * 100,
+        )
 
     os.makedirs(os.path.dirname(cfg.output_path), exist_ok=True)
-    np.savez_compressed(cfg.output_path, **merged)
-    logger.info("Dataset harvesting complete! Saved to %s", cfg.output_path)
+    np.savez_compressed(cfg.output_path, **merged)  # type: ignore[arg-type]
+    logger.info("Dataset harvesting complete. Saved to %s", cfg.output_path)
 
 
 if __name__ == "__main__":
